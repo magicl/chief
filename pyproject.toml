@@ -1,0 +1,16 @@
+[project]
+name = "chief-dev-env"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[tool.uv]
+package = false
+index-strategy = "first-index"
+
+[tool.uv.workspace]
+members = [
+  "backend",
+  "infra",
+  "olib",
+]

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Chief{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0; line-height: 1.5; background: #0f1115; color: #e6e6e6;
+    }
+    header {
+      padding: 1rem 1.5rem; border-bottom: 1px solid #262a33;
+      display: flex; align-items: baseline; gap: .75rem;
+    }
+    header h1 { font-size: 1.1rem; margin: 0; }
+    header .tag { color: #8b93a7; font-size: .85rem; }
+    main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+    h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .05em; color: #8b93a7; }
+    .grid { display: grid; gap: 1.5rem; grid-template-columns: 1fr 1fr; }
+    .card { background: #161a21; border: 1px solid #262a33; border-radius: 10px; padding: 1rem 1.25rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #232732; }
+    th { color: #8b93a7; font-weight: 600; }
+    .pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; }
+    .pill.routine { background: #1d3a5f; color: #9ec5ff; }
+    .pill.monitor { background: #4a2f5e; color: #e0b6ff; }
+    .pill.succeeded { background: #1f4023; color: #9be7a8; }
+    .pill.failed { background: #4a2326; color: #ff9ea3; }
+    .pill.running, .pill.pending { background: #3d3a1f; color: #f0e29b; }
+    .muted { color: #8b93a7; }
+    .empty { color: #6b7282; font-style: italic; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Chief</h1>
+    <span class="tag">agent orchestrator</span>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

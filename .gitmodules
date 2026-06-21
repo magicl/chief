@@ -1,0 +1,3 @@
+[submodule "olib"]
+	path = olib
+	url = git@github.com:magicl/olib

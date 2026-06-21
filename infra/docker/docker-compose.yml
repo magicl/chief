@@ -1,0 +1,99 @@
+networks:
+  default:
+    name: ${DOCO_NETWORK:-chief-network}
+services:
+  # Primary PostgreSQL database.
+  chief-postgres:
+    image: postgres:17
+    ports:
+      - "${DOCO_PORT_POSTGRES:-5432}:5432"
+    environment:
+      POSTGRES_DB: chief
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: nimda
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d chief"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+  # Redis: celery broker + result backend + cache.
+  chief-redis:
+    image: redis:alpine
+    ports:
+      - "${DOCO_PORT_REDIS:-6379}:6379"
+  # Django dev server (runserver: auto-reload + serves static).
+  chief-backend:
+    image: chief-backend-dev:latest
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile.dev
+    develop:
+      watch:
+        - path: ../../pyproject.toml
+          action: rebuild
+        - path: ../../uv.lock
+          action: rebuild
+        - path: ../../backend/pyproject.toml
+          action: rebuild
+        - path: ../../backend/Dockerfile.dev
+          action: rebuild
+    ports:
+      - "${DOCO_PORT_BACKEND:-8000}:8000"
+    env_file:
+      - ../../.output/env.compose.backend
+    volumes:
+      - ../../backend:/app
+      - ../../olib:/app/olib
+    depends_on:
+      chief-postgres:
+        condition: service_healthy
+      chief-redis:
+        condition: service_started
+    tty: true
+    stdin_open: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/livez || exit 1"]
+      interval: 100h # Effectively off for dev; runs once during startup
+      timeout: 2s
+      retries: 10
+      start_period: 10s
+  # Celery worker: executes agent runs.
+  chief-worker:
+    image: chief-backend-dev:latest
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile.dev
+    environment:
+      - ENTRYPOINT=celery-worker
+    env_file:
+      - ../../.output/env.compose.backend
+    volumes:
+      - ../../backend:/app
+      - ../../olib:/app/olib
+    depends_on:
+      chief-backend:
+        condition: service_started
+      chief-redis:
+        condition: service_started
+  # Celery beat: schedules periodic dispatch + monitor sweeps.
+  chief-beat:
+    image: chief-backend-dev:latest
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile.dev
+    environment:
+      - ENTRYPOINT=celery-beat
+    env_file:
+      - ../../.output/env.compose.backend
+    volumes:
+      - ../../backend:/app
+      - ../../olib:/app/olib
+    depends_on:
+      chief-redis:
+        condition: service_started
+volumes:
+  postgres_data:
+    name: ${DOCO_PG_VOLUME:-chief_postgres_data}

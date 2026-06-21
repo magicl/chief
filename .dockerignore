@@ -1,0 +1,7 @@
+# Keep the build context (repo root) small.
+**/.*
+**/__pycache__
+**/*.pyc
+**/db.sqlite3
+.venv
+.output

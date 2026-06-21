@@ -1,0 +1,32 @@
+FROM python:3.13
+
+ENV LANG=C.UTF-8
+ENV TZ=UTC
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get -y install \
+    net-tools \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --disable-pip-version-check --root-user-action=ignore uv
+
+# Install locked dependencies from the workspace lock.
+# We export only the backend package's deps; olib is mounted at runtime and its
+# (CLI) deps are not needed inside the container. The build context is the repo
+# root, so we copy the workspace root lock + each member's pyproject.
+WORKDIR /deps
+COPY ./pyproject.toml ./uv.lock ./
+COPY ./backend/pyproject.toml ./backend/pyproject.toml
+COPY ./infra/pyproject.toml ./infra/pyproject.toml
+COPY ./olib/pyproject.toml ./olib/pyproject.toml
+RUN uv export --frozen --package chief-backend-env --no-hashes --output-file requirements.lock.txt \
+    && uv pip install -r requirements.lock.txt --system --no-cache
+
+WORKDIR /app
+
+EXPOSE 8000
+
+CMD ["./entrypoint.sh"]
