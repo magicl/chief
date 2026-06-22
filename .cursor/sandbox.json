@@ -1,0 +1,28 @@
+{
+  "type": "workspace_readwrite",
+  "terminalAllowlist": [
+    "./olib/scripts/orunr.sh",
+    "./olib/scripts/orunr.sh*"
+  ],
+  "additionalReadonlyPaths": [
+    "/mnt/infra-assets/chief"
+  ],
+  "enableSharedBuildCache": true,
+  "networkPolicy": {
+    "default": "deny",
+    "allow": [
+      "registry.npmjs.org",
+      "registry.yarnpkg.com",
+      "pypi.org",
+      "files.pythonhosted.org",
+      "*.githubusercontent.com",
+      "github.com",
+      "api.github.com",
+      "*.docker.io",
+      "ghcr.io",
+      "dl.polyhaven.org",
+      "api.anthropic.com",
+      "cdn.playwright.dev"
+    ]
+  }
+}

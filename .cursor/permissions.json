@@ -1,0 +1,6 @@
+{
+  "terminalAllowlist": [
+    "./olib/scripts/orunr.sh",
+    "olib/scripts/orunr.sh"
+  ]
+}
