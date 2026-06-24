@@ -6,10 +6,12 @@
 
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic.base import RedirectView
 
 from chief.views import check, livez, readyz
 
 urlpatterns = [
+    path('admin', RedirectView.as_view(url='/admin/', permanent=False)),
     path('admin/', admin.site.urls),
     path('health/livez', livez, name='health_livez'),
     path('health/readyz', readyz, name='health_readyz'),

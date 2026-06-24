@@ -41,6 +41,7 @@ class TargetInfo(VersionClusterInfo):
 
     release_name: str
     host: str
+    static_dir: str
     try_creds: list[str] | None = None
     basic_auth: bool = False
 
@@ -84,6 +85,7 @@ class Config:
         'compose': TargetInfo(
             release_name='compose',
             host=get_local_compose_entrypoint_url(),
+            static_dir='backend/.output/static',
             version_tag_prefix='chief',
             version_increments=['none'],
             version_push_tag=False,
@@ -112,8 +114,7 @@ def prep_dirs(context: pp.ProcContext) -> None:
         os.makedirs(d, exist_ok=True)
 
 
-@pp.Proto(name='docker.compose-deps', deps=['prep-dirs'])
+@pp.Proto(name='docker.compose-deps', deps=['prep-dirs', 'django.collectstatic::backend'])
 def docker_compose_deps(context: pp.ProcContext) -> None:
-    """Aggregate job that must exist for `orunr docker compose`. The backend
-    container runs migrations itself on startup, so there is nothing else to
-    pre-build for the dev stack yet."""
+    """Aggregate job run before `orunr docker compose`. Collects Django static
+    assets into backend/.output/static for chief-static nginx."""

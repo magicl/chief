@@ -54,18 +54,18 @@ Compose-only for now (no kubernetes restore target configured yet).
 
 When running multiple checkouts side-by-side, each uses a **slot** (0, 1, or 2) to avoid port conflicts. The slot is stored in `.doco-slot` (gitignored) or passed as `-s 1` / `-s 2`.
 
-| Slot | Main port (backend) | Postgres | Redis |
-|------|---------------------|----------|-------|
-| 0    | 8000                | 5432     | 6379  |
-| 1    | 8100                | 5532     | 6479  |
-| 2    | 8200                | 5632     | 6579  |
+| Slot | Main port (nginx) | Backend (direct) | Postgres | Redis |
+|------|-------------------|------------------|----------|-------|
+| 0    | 80                | 8000             | 5432     | 6379  |
+| 1    | 8081              | 8100             | 5532     | 6479  |
+| 2    | 8082              | 8200             | 5632     | 6579  |
 
 - **Slot overlay files**: `infra/docker/overlays/slot-0.env`, `slot-1.env`, `slot-2.env` define `DOCO_*` vars (ports, network, volumes, `DOCO_SITE_DOMAIN`, `DOCO_EMAIL_DIR`, etc.).
 - For **slot 1 or 2**, `./olib/scripts/orunr.sh docker compose -s N` runs compose with `--env-file overlays/slot-N.env` for YAML substitution (ports, network, volume names).
 - **Baked slot vars**: Before `env.split::compose`, the chosen overlay is written to `.output/compose-slot.env`. The compose env target uses it (or `infra/docker/overlays/slot-0.env` if absent) as **substitutions** when splitting `.env.development.compose`. Placeholders like `{DOCO_SITE_DOMAIN}` in that file are replaced and written into `.output/env.compose.*`. Ports and network/volume names in `docker-compose.yml` still use `${DOCO_*:-default}` and get values from `--env-file overlays/slot-N.env` when slot 1 or 2.
 - To add a slot-specific var: add it to each overlay file and use a placeholder in `.env.development.compose` (e.g. `SOME_URL=http://localhost:{DOCO_PORT_FOO}`). No need to duplicate it in `docker-compose.yml` `environment:`.
 
-The dashboard is at the slot's main port; Django admin is at `/admin/` (default superuser `admin` / `nimda`).
+The dashboard is at the slot's main port; Django admin is at `/admin` (default superuser `admin` / `nimda`).
 
 ## Test naming (parproc)
 
@@ -80,6 +80,7 @@ Use synonyms that keep the meaning, for example:
 
 ## For AI Agents
 
+- **Sandbox network**: `.cursor/sandbox.json` allows `curl` (and other HTTP clients) to reach the local dev server on `localhost` / `127.0.0.0/8` (slots 0–2: nginx ports 80, 8081, 8082; backend direct ports 8000, 8100, 8200).
 - Follow established patterns in the backend codebase
 - Always run tests before committing changes
 - Never include "Made with cursor" in commit messages

@@ -77,7 +77,7 @@ orunr docker compose -s 1       # explicit slot override
 ```
 
 The dashboard is then available at the slot's main port (see below). The Django
-admin lives at `/admin/` (default superuser `admin` / `nimda`).
+admin lives at `/admin` (default superuser `admin` / `nimda`).
 
 ### Checks
 
@@ -99,11 +99,11 @@ orunr django manage migrate
 When running multiple checkouts side-by-side, each needs its own **slot** to
 avoid port/volume conflicts. The slot is stored in `.doco-slot` (gitignored).
 
-| Slot | Main port (backend) | Postgres | Redis |
-|------|---------------------|----------|-------|
-| 0    | 8000                | 5432     | 6379  |
-| 1    | 8100                | 5532     | 6479  |
-| 2    | 8200                | 5632     | 6579  |
+| Slot | Main port (nginx) | Backend (direct) | Postgres | Redis |
+|------|-------------------|------------------|----------|-------|
+| 0    | 80                | 8000             | 5432     | 6379  |
+| 1    | 8081              | 8100             | 5532     | 6479  |
+| 2    | 8082              | 8200             | 5632     | 6579  |
 
 Set up once per checkout:
 
