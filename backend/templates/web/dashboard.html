@@ -2,10 +2,121 @@
 
 {% block content %}
 <section class="card">
-  <h2>Welcome</h2>
-  <p class="muted">
-    Chief is the agent orchestrator. The agents and queues domain is still being
-    designed — this dashboard will grow once those models exist.
-  </p>
+  <div class="section-header">
+    <h2>Agents</h2>
+    {% if user.is_authenticated and demo_models %}
+    <div class="create-agents">
+      {% for option in demo_models %}
+      <form method="post" action="{{ url('bootstrap_agent') }}">
+        <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+        <input type="hidden" name="provider" value="{{ option.provider }}">
+        <input type="hidden" name="model" value="{{ option.model }}">
+        <button type="submit" class="primary">{{ option.label }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% if agents %}
+  <table>
+    <thead>
+      <tr>
+        <th>Identifier</th>
+        <th>Model</th>
+        <th>Owner</th>
+        <th>Config</th>
+        {% if user.is_authenticated %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for agent in agents %}
+      <tr>
+        <td>
+          {% if user.is_authenticated %}
+          <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}">{{ agent.identifier }}</a>
+          {% else %}
+          {{ agent.identifier }}
+          {% endif %}
+        </td>
+        <td class="muted">
+          {% if agent.current_config %}
+            {{ agent.current_config.spec['llm']['provider'] }} / {{ agent.current_config.spec['llm']['model'] }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>{{ agent.user.username }}</td>
+        <td class="muted">{{ agent.current_config.source_rev if agent.current_config else '—' }}</td>
+        {% if user.is_authenticated %}
+        <td class="agent-actions">
+          <form method="post" action="{{ url('delete_agent', kwargs={'agent_id': agent.id}) }}">
+            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif user.is_authenticated %}
+  <p class="empty">No agents yet. Create one using a model button above.</p>
+  {% else %}
+  <p class="empty">No agents yet. <a href="/admin/login/?next=/">Log in</a> to create one.</p>
+  {% endif %}
 </section>
+
+<section class="card" style="margin-top: 1.5rem">
+  <h2>Recent sessions</h2>
+  {% if sessions %}
+  <table>
+    <thead>
+      <tr><th>Session</th><th>Agent</th><th>Status</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td>
+          {% if user.is_authenticated %}
+          <a href="{{ url('session_detail', kwargs={'session_id': s.id}) }}">{{ s.id.hex[:8] }}</a>
+          {% else %}
+          {{ s.id.hex[:8] }}
+          {% endif %}
+        </td>
+        <td>
+          {% if user.is_authenticated %}
+          <a href="{{ url('agent_detail', kwargs={'agent_id': s.agent.id}) }}">{{ s.agent.identifier }}</a>
+          {% else %}
+          {{ s.agent.identifier }}
+          {% endif %}
+        </td>
+        <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
+        <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No sessions yet.</p>
+  {% endif %}
+</section>
+
+<style>
+  .section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
+  .section-header h2 { margin: 0; }
+  .create-agents { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; max-width: 70%; }
+  .create-agents form { margin: 0; }
+  .agent-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .agent-actions form { margin: 0; }
+  button.primary {
+    padding: .35rem .75rem; border-radius: 8px; border: 1px solid #262a33;
+    background: #1d3a5f; color: #9ec5ff; cursor: pointer; font-size: .85rem;
+  }
+  button.primary:hover { background: #244a75; }
+  button.danger {
+    padding: .35rem .75rem; border-radius: 8px; border: 1px solid #262a33;
+    background: #4a2326; color: #ff9ea3; cursor: pointer; font-size: .85rem;
+  }
+  button.danger:hover { background: #5a2d31; }
+</style>
 {% endblock %}

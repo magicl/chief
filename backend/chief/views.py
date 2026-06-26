@@ -28,6 +28,6 @@ def readyz(request: HttpRequest) -> HttpResponse:
         with connection.cursor() as cursor:
             cursor.execute('SELECT 1')
             cursor.fetchone()
-    except Exception:  # noqa: BLE001 - any DB failure means not ready
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         return HttpResponse('db unavailable', status=503, content_type='text/plain')
     return HttpResponse('ok', content_type='text/plain')

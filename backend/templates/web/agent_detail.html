@@ -1,0 +1,49 @@
+{% extends "web/layout/agent_frame_page.html" %}
+
+{% block title %}{{ agent.identifier }} — Chief{% endblock %}
+
+{% block frame_x_data %}x-data="chatboxHelpers()" x-init="focusChatInput()"{% endblock %}
+
+{% block frame_header %}
+<div>
+  <h2>{{ agent.identifier }}</h2>
+  {% if agent.current_config %}
+  <p class="agent-meta">
+    {{ agent.current_config.spec['llm']['provider'] }} / {{ agent.current_config.spec['llm']['model'] }}
+  </p>
+  {% endif %}
+</div>
+<div class="frame-header-actions">
+  <a href="{{ url('dashboard') }}" class="frame-btn muted-btn" style="text-decoration: none;">All agents</a>
+  <form method="post" action="{{ url('delete_agent', kwargs={'agent_id': agent.id}) }}">
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+    <button type="submit" class="frame-btn danger">Delete</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block frame_main %}
+<section class="card">
+  <h2>Sessions</h2>
+  {% if sessions %}
+  <table>
+    <thead>
+      <tr><th>Session</th><th>Status</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td>
+          <a href="{{ url('session_detail', kwargs={'session_id': s.id}) }}">{{ s.id.hex[:8] }}</a>
+        </td>
+        <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
+        <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No sessions yet. Send a message below to start one.</p>
+  {% endif %}
+</section>
+{% endblock %}

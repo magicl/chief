@@ -2,15 +2,291 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Jinja-rendered dashboard.
+"""Dashboard, session detail, SSE, and control endpoints."""
 
-Placeholder for now: the agents/queues domain is still being designed, so this
-just renders a landing page. Build the real overview out once the models exist.
-"""
+from __future__ import annotations
 
-from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+from typing import Any, cast
+from uuid import UUID
+
+from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
+from apps.agents.hardcoded import bootstrap_agent as create_bootstrap_agent
+from apps.agents.models import Agent
+from apps.bus.client import async_client, key_prefix
+from apps.runner.dispatch import (
+    maybe_dispatch_session,
+    push_chat_and_dispatch,
+    push_control_and_maybe_dispatch,
+)
+from apps.runner.start import StartSessionError, start_manual_session
+from apps.sessions.events import events_for
+from apps.sessions.models import AgentSession
+from apps.web.demo_models import list_demo_models
+from asgiref.sync import sync_to_async
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import AbstractBaseUser
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    StreamingHttpResponse,
+)
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_GET, require_POST
+
+logger = logging.getLogger(__name__)
+
+
+def _owned_agent(request: HttpRequest, agent_id: UUID) -> Agent:
+    if not request.user.is_authenticated:
+        raise Http404('Agent not found')
+    return get_object_or_404(Agent, pk=agent_id, user_id=request.user.pk)
+
+
+def _owned_session(request: HttpRequest, session_id: UUID) -> AgentSession:
+    if not request.user.is_authenticated:
+        raise Http404('Session not found')
+    return get_object_or_404(
+        AgentSession.objects.select_related('agent', 'agent_config'),
+        pk=session_id,
+        agent__user_id=request.user.pk,
+    )
+
+
+def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str, Any]:
+    if session is None:
+        return {
+            'agent': agent,
+            'session': None,
+            'chat_mode': 'start',
+            'chat_post_url': reverse('agent_start_chat', kwargs={'agent_id': agent.id}),
+        }
+    return {
+        'agent': agent,
+        'session': session,
+        'chat_mode': 'continue',
+        'chat_post_url': reverse('session_chat', kwargs={'session_id': session.id}),
+    }
+
+
+def _session_llm_label(session: AgentSession) -> str:
+    spec = session.agent_config.spec if session.agent_config else {}
+    llm = spec.get('llm', {})
+    provider = llm.get('provider', '')
+    model = llm.get('model', '')
+    if provider and model:
+        return f'{provider} / {model}'
+    return model or '—'
 
 
 def dashboard(request: HttpRequest) -> HttpResponse:
-    return render(request, 'web/dashboard.html', {})
+    agents = Agent.objects.select_related('current_config', 'user').order_by('-id')
+    sessions = AgentSession.objects.select_related('agent').order_by('-created_at')
+    if request.user.is_authenticated:
+        agents = agents.filter(user=request.user)
+        sessions = sessions.filter(agent__user=request.user)
+    sessions = sessions[:20]
+    demo_models = list_demo_models() if request.user.is_authenticated else []
+    return render(
+        request,
+        'web/dashboard.html',
+        {'agents': agents, 'sessions': sessions, 'demo_models': demo_models},
+    )
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def bootstrap_agent(request: HttpRequest) -> HttpResponse:
+    provider = request.POST.get('provider', '').strip()
+    model = request.POST.get('model', '').strip()
+    if not provider or not model:
+        return HttpResponseBadRequest('provider and model required')
+    agent = create_bootstrap_agent(
+        cast(AbstractBaseUser, request.user),
+        provider=provider,
+        model=model,
+    )
+    return redirect('agent_detail', agent_id=agent.id)
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    agent = _owned_agent(request, agent_id)
+    sessions = AgentSession.objects.filter(agent=agent).order_by('-created_at')
+    context = {'agent': agent, 'sessions': sessions}
+    context.update(_chatbox_context(agent=agent, session=None))
+    return render(request, 'web/agent_detail.html', context)
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def agent_start_chat(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    agent = _owned_agent(request, agent_id)
+    content = request.POST.get('content', '').strip()
+    if not content:
+        return HttpResponseBadRequest('content required')
+    try:
+        session = start_manual_session(agent, initial_message=content)
+    except StartSessionError as exc:
+        return HttpResponseBadRequest(str(exc))
+    return redirect('session_detail', session_id=session.id)
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def delete_agent(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    try:
+        delete_agent_for_user(cast(AbstractBaseUser, request.user), agent_id)
+    except AgentNotFoundError as exc:
+        raise Http404('Agent not found') from exc
+    return redirect('dashboard')
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    agent = get_object_or_404(Agent, pk=agent_id, user_id=request.user.pk)
+    try:
+        session = start_manual_session(agent)
+    except StartSessionError as exc:
+        return HttpResponseBadRequest(str(exc))
+    return redirect('session_detail', session_id=session.id)
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
+    session = _owned_session(request, session_id)
+    context = {
+        'session': session,
+        'agent': session.agent,
+        'llm_label': _session_llm_label(session),
+    }
+    context.update(_chatbox_context(agent=session.agent, session=session))
+    return render(request, 'web/session_detail.html', context)
+
+
+def _sse_event(data: dict[str, Any], *, event: str = 'session-event') -> str:
+    return f'event: {event}\ndata: {json.dumps(data)}\n\n'
+
+
+@require_GET
+@login_required(login_url='/admin/login/')
+async def session_events_sse(request: HttpRequest, session_id: UUID) -> StreamingHttpResponse:
+    """Replay persisted events then tail pub/sub (dedupe by seq)."""
+    await sync_to_async(_owned_session)(request, session_id)
+
+    async def stream() -> AsyncIterator[str]:
+        last_seq = 0
+        events = await sync_to_async(events_for)(session_id)
+        for event in events:
+            payload = event.to_stream_dict()
+            last_seq = max(last_seq, payload['seq'])
+            yield _sse_event(payload)
+
+        try:
+            client = async_client()
+            pubsub = client.pubsub()
+            channel = f'{key_prefix()}session:{session_id}:events'
+            await pubsub.subscribe(channel)
+            try:
+                while True:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message is None:
+                        await asyncio.sleep(0.1)
+                        continue
+                    if message['type'] != 'message':
+                        continue
+                    data = json.loads(message['data'])
+                    if data.get('seq', 0) <= last_seq:
+                        continue
+                    last_seq = data['seq']
+                    yield _sse_event(data)
+            finally:
+                await pubsub.unsubscribe(channel)
+                await pubsub.close()
+                await client.close()
+        except RuntimeError:
+            # No Redis — replay-only; nothing to tail.
+            pass
+
+    response = StreamingHttpResponse(stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@require_GET
+async def sse_spike(request: HttpRequest) -> StreamingHttpResponse:
+    """M0 plumbing check: stream timestamped events through nginx."""
+
+    async def stream() -> AsyncIterator[str]:
+        for i in range(5):
+            yield _sse_event({'n': i, 'message': f'spike-{i}'}, event='spike')
+            await asyncio.sleep(1)
+
+    response = StreamingHttpResponse(stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@csrf_protect
+@require_POST
+@login_required(login_url='/admin/login/')
+def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
+    _owned_session(request, session_id)
+    content = request.POST.get('content', '').strip()
+    if not content:
+        return HttpResponseBadRequest('content required')
+    push_chat_and_dispatch(session_id, content)
+    return HttpResponse(status=204)
+
+
+@csrf_protect
+@require_POST
+@login_required(login_url='/admin/login/')
+def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
+    session = _owned_session(request, session_id)
+    push_control_and_maybe_dispatch(session_id, 'pause')
+    session.refresh_from_db()
+    return render(request, 'web/partials/session_status.html', {'session': session})
+
+
+@csrf_protect
+@require_POST
+@login_required(login_url='/admin/login/')
+def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
+    session = _owned_session(request, session_id)
+    maybe_dispatch_session(session_id)
+    session.refresh_from_db()
+    return render(request, 'web/partials/session_status.html', {'session': session})
+
+
+@csrf_protect
+@require_POST
+@login_required(login_url='/admin/login/')
+def session_abort(request: HttpRequest, session_id: UUID) -> HttpResponse:
+    session = _owned_session(request, session_id)
+    push_control_and_maybe_dispatch(session_id, 'abort')
+    maybe_dispatch_session(session_id)
+    session.refresh_from_db()
+    return render(request, 'web/partials/session_status.html', {'session': session})
+
+
+def render_event_partial(request: HttpRequest, session_id: UUID) -> HttpResponse:
+    """HTMX SSE swap target — individual event rows."""
+    # Events arrive via SSE client-side; this endpoint exists for future server push swaps.
+    return HttpResponse('')

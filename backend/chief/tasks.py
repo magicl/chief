@@ -8,5 +8,8 @@ olib's celery setup imports ``chief.tasks`` on worker startup (see
 ``app.conf.imports``). Re-import each app's task module here so their
 ``@shared_task`` definitions are registered with the worker.
 
-No app tasks yet — the agents/queues domain is still being designed.
+Import each app's task module here so their ``@shared_task`` definitions register
+with the worker.
 """
+
+import apps.runner.tasks  # noqa: F401  # pylint: disable=unused-import

@@ -1,0 +1,212 @@
+{% extends "web/layout/agent_frame_page.html" %}
+
+{% block title %}Session {{ session.id.hex[:8] }} — Chief{% endblock %}
+
+{% block frame_x_data %}x-data='sessionView("{{ session.id }}", {{ llm_label|tojson }})' x-init="init()"{% endblock %}
+
+{% block frame_header %}
+<div>
+  <h2>
+    <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" style="color: inherit; text-decoration: none;">
+      {{ agent.identifier }}
+    </a>
+    <span class="muted" style="font-weight: normal;">· {{ session.id.hex[:8] }}</span>
+  </h2>
+  <p class="session-header-meta muted">
+    <span x-text="displayModel"></span>
+    · <span x-text="formatTotalCost()"></span>
+  </p>
+</div>
+<div class="frame-header-actions">
+  <div id="session-status">
+    {% include "web/partials/session_status.html" %}
+  </div>
+  <div class="control-buttons">
+    <form
+      hx-post="{{ url('session_pause', kwargs={'session_id': session.id}) }}"
+      hx-target="#session-status"
+      hx-swap="innerHTML"
+    >
+      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <button type="submit" class="frame-btn">Pause</button>
+    </form>
+    <form
+      hx-post="{{ url('session_resume', kwargs={'session_id': session.id}) }}"
+      hx-target="#session-status"
+      hx-swap="innerHTML"
+    >
+      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <button type="submit" class="frame-btn">Resume</button>
+    </form>
+    <form
+      hx-post="{{ url('session_abort', kwargs={'session_id': session.id}) }}"
+      hx-target="#session-status"
+      hx-swap="innerHTML"
+    >
+      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <button type="submit" class="frame-btn danger">Abort</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block frame_main %}
+<section class="event-panel">
+  <div class="event-toolbar">
+    <h2>Events</h2>
+    <button
+      type="button"
+      class="frame-btn"
+      :class="{ 'active': follow }"
+      @click="toggleFollow()"
+      x-text="follow ? 'Following' : 'Follow'"
+    ></button>
+  </div>
+  <div
+    id="event-panel"
+    class="event-stream-wrap"
+    x-ref="eventPanel"
+    @scroll="onScroll()"
+  >
+    <div class="event-stream">
+      <template x-for="evt in events" :key="evt.seq">
+        <div class="event" :class="'kind-' + evt.kind.toLowerCase()">
+          <div class="event-meta">
+            <span class="seq" x-text="'#' + evt.seq"></span>
+            <span class="pill" x-text="evt.kind"></span>
+            <span class="muted" x-show="evt.model" x-text="evt.model"></span>
+            <span
+              class="event-stats muted"
+              x-show="formatEventStats(evt)"
+              x-text="formatEventStats(evt)"
+            ></span>
+          </div>
+          <pre class="event-body" x-text="formatPayload(evt)"></pre>
+        </div>
+      </template>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block frame_extra_scripts %}
+<script>
+function sessionView(sessionId, configModel) {
+  return {
+    ...chatboxHelpers(),
+    events: [],
+    seenSeq: new Set(),
+    source: null,
+    follow: true,
+    configModel,
+    init() {
+      this.connectStream();
+      this._onPageHide = () => this.closeStream();
+      this._onPageShow = (event) => {
+        if (event.persisted) {
+          this.reconnectStream();
+        }
+      };
+      window.addEventListener('pagehide', this._onPageHide);
+      window.addEventListener('pageshow', this._onPageShow);
+      this.$el.addEventListener('alpine:destroy', () => {
+        window.removeEventListener('pagehide', this._onPageHide);
+        window.removeEventListener('pageshow', this._onPageShow);
+        this.closeStream();
+      });
+      this.focusChatInput();
+    },
+    connectStream() {
+      this.closeStream();
+      this.source = new EventSource(`/sessions/${sessionId}/events/`);
+      this.source.addEventListener('session-event', (e) => {
+        const data = JSON.parse(e.data);
+        if (this.seenSeq.has(data.seq)) return;
+        this.seenSeq.add(data.seq);
+        this.events.push(data);
+        if (this.follow) {
+          this.$nextTick(() => this.scrollToBottom());
+        }
+      });
+    },
+    closeStream() {
+      if (this.source) {
+        this.source.close();
+        this.source = null;
+      }
+    },
+    reconnectStream() {
+      this.events = [];
+      this.seenSeq = new Set();
+      this.connectStream();
+    },
+    get displayModel() {
+      for (let i = this.events.length - 1; i >= 0; i -= 1) {
+        if (this.events[i].model) {
+          return this.events[i].model;
+        }
+      }
+      return this.configModel;
+    },
+    get totalCostUsd() {
+      return this.events.reduce((sum, evt) => {
+        if (evt.cost_usd == null || evt.cost_usd === '') {
+          return sum;
+        }
+        const cost = Number(evt.cost_usd);
+        return Number.isNaN(cost) ? sum : sum + cost;
+      }, 0);
+    },
+    formatUsd(amount) {
+      if (amount <= 0) {
+        return '$0';
+      }
+      return `$${amount.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}`;
+    },
+    formatTotalCost() {
+      return `Total: ${this.formatUsd(this.totalCostUsd)}`;
+    },
+    formatPayload(evt) {
+      const p = evt.payload || {};
+      if (evt.kind === 'OUTPUT' || evt.kind === 'INPUT') return p.content || '';
+      if (evt.kind === 'FAILURE') return p.message || JSON.stringify(p, null, 2);
+      return JSON.stringify(p, null, 2);
+    },
+    formatEventStats(evt) {
+      const parts = [];
+      if (evt.latency_ms != null && evt.latency_ms > 0) {
+        parts.push(evt.latency_ms >= 1000
+          ? `${(evt.latency_ms / 1000).toFixed(1)}s`
+          : `${evt.latency_ms}ms`);
+      }
+      if (evt.cost_usd != null && evt.cost_usd !== '') {
+        const cost = Number(evt.cost_usd);
+        if (!Number.isNaN(cost)) {
+          parts.push(this.formatUsd(cost));
+        }
+      }
+      return parts.join(' · ');
+    },
+    onScroll() {
+      const el = this.$refs.eventPanel;
+      if (!el) return;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      if (!atBottom) {
+        this.follow = false;
+      }
+    },
+    scrollToBottom() {
+      const el = this.$refs.eventPanel;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    },
+    toggleFollow() {
+      this.follow = !this.follow;
+      if (this.follow) {
+        this.scrollToBottom();
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

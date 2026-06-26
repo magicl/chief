@@ -1,0 +1,49 @@
+{% extends "web/base.html" %}
+
+{% block body_class %}chief-frame{% endblock %}
+{% block main_class %}main-frame{% endblock %}
+
+{% block content %}
+<div class="frame-page" {% block frame_x_data %}{% endblock %} {% block frame_x_init %}{% endblock %}>
+  <div class="frame-header">
+    {% block frame_header %}{% endblock %}
+  </div>
+  <div class="frame-main" id="frame-main">
+    {% block frame_main %}{% endblock %}
+  </div>
+  {% include "web/partials/chatbox.html" %}
+</div>
+{% endblock %}
+
+{% block extra_styles %}
+{% include "web/partials/agent_frame_styles.html" %}
+{% block frame_extra_styles %}{% endblock %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function chatboxHelpers() {
+  return {
+    onChatKeydown(event) {
+      if (event.shiftKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+      event.preventDefault();
+      event.target.form.requestSubmit();
+    },
+    clearChatInput(e) {
+      const form = e.target;
+      setTimeout(() => { if (form.content) form.content.value = ''; }, 0);
+    },
+    focusChatInput() {
+      this.$nextTick(() => {
+        if (this.$refs.chatInput) {
+          this.$refs.chatInput.focus();
+        }
+      });
+    },
+  };
+}
+</script>
+{% block frame_extra_scripts %}{% endblock %}
+{% endblock %}

@@ -74,6 +74,8 @@ services:
       - "${DOCO_PORT_BACKEND:-8000}:8000"
     env_file:
       - ../../.output/env.compose.backend
+      - path: ../../.env.local
+        required: false
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
@@ -96,10 +98,22 @@ services:
     build:
       context: ../..
       dockerfile: backend/Dockerfile.dev
+    develop:
+      watch:
+        - path: ../../pyproject.toml
+          action: rebuild
+        - path: ../../uv.lock
+          action: rebuild
+        - path: ../../backend/pyproject.toml
+          action: rebuild
+        - path: ../../backend/Dockerfile.dev
+          action: rebuild
     environment:
       - ENTRYPOINT=celery-worker
     env_file:
       - ../../.output/env.compose.backend
+      - path: ../../.env.local
+        required: false
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
@@ -114,10 +128,22 @@ services:
     build:
       context: ../..
       dockerfile: backend/Dockerfile.dev
+    develop:
+      watch:
+        - path: ../../pyproject.toml
+          action: rebuild
+        - path: ../../uv.lock
+          action: rebuild
+        - path: ../../backend/pyproject.toml
+          action: rebuild
+        - path: ../../backend/Dockerfile.dev
+          action: rebuild
     environment:
       - ENTRYPOINT=celery-beat
     env_file:
       - ../../.output/env.compose.backend
+      - path: ../../.env.local
+        required: false
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib

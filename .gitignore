@@ -48,3 +48,6 @@ dmypy.json
 #Typescript
 tsconfig.tsbuildinfo
 node_modules
+
+#oagent
+.oagent/instances/*

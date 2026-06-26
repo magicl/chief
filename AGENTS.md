@@ -25,6 +25,8 @@ chief/
 
 > **Missing Python environment**: If Python tooling seems missing (e.g. `./olib/scripts/orunr.sh` fails because there is no venv or Python deps), run `./olib/scripts/init.sh` from the repo root to initialize the environment.
 
+> **Cursor sandbox / terminal allowlist**: Agent shell commands should go through `./olib/scripts/orunr.sh` only — **not** `./olib/scripts/orun.sh` and not bare `orunr` on PATH. The allowlist lives in `.cursor/permissions.json` and `.cursor/sandbox.json` (`terminalAllowlist`); patterns must include a `*` suffix (e.g. `./olib/scripts/orunr.sh*`) so subcommands like `py test-all` match. Do **not** add `orun.sh` to the allowlist. Avoid requesting `required_permissions: ["all"]` for routine `orunr.sh` invocations — that bypasses the sandbox and triggers extra approval prompts even when the command is allowlisted.
+
 - **Dependency Init (all configured toolchains)**: `./olib/scripts/orunr.sh dev init`
 - **Dependency Sync (all configured toolchains)**: `./olib/scripts/orunr.sh dev sync`
 - **Dependency Upgrade (all configured toolchains)**: `./olib/scripts/orunr.sh dev upgrade`
@@ -33,7 +35,7 @@ chief/
 - **Backend Tests**: `./olib/scripts/orunr.sh py test`
 - **Backend Lint**: `./olib/scripts/orunr.sh py lint`
 - **Backend Mypy**: `./olib/scripts/orunr.sh py mypy`
-- **Development**: `./olib/scripts/orunr.sh docker compose` to run the full stack
+- **Development**: `./olib/scripts/orunr.sh docker compose` to run the full stack.
 - **Django management**: `./olib/scripts/orunr.sh django manage makemigrations`, `./olib/scripts/orunr.sh django manage migrate`, etc.
 
 ### Required checks after changes
@@ -64,8 +66,55 @@ When running multiple checkouts side-by-side, each uses a **slot** (0, 1, or 2) 
 - For **slot 1 or 2**, `./olib/scripts/orunr.sh docker compose -s N` runs compose with `--env-file overlays/slot-N.env` for YAML substitution (ports, network, volume names).
 - **Baked slot vars**: Before `env.split::compose`, the chosen overlay is written to `.output/compose-slot.env`. The compose env target uses it (or `infra/docker/overlays/slot-0.env` if absent) as **substitutions** when splitting `.env.development.compose`. Placeholders like `{DOCO_SITE_DOMAIN}` in that file are replaced and written into `.output/env.compose.*`. Ports and network/volume names in `docker-compose.yml` still use `${DOCO_*:-default}` and get values from `--env-file overlays/slot-N.env` when slot 1 or 2.
 - To add a slot-specific var: add it to each overlay file and use a placeholder in `.env.development.compose` (e.g. `SOME_URL=http://localhost:{DOCO_PORT_FOO}`). No need to duplicate it in `docker-compose.yml` `environment:`.
+- **Compose log file (default)**: `.output/compose.log`. `docker compose` tees the same colored terminal stream there (overwritten each run; `down` output is appended). Disable with `compose_log_path=None` on `@docker(...)` in `config.py`.
 
 The dashboard is at the slot's main port; Django admin is at `/admin` (default superuser `admin` / `nimda`).
+
+## Celery worker (agent sessions)
+
+Agent session tasks are long-lived and I/O-bound. The dev worker uses a thread pool
+so several concurrent sessions do not each occupy a prefork slot:
+
+```bash
+celery -A chief worker --loglevel=INFO --pool=threads --concurrency=16
+```
+
+(`backend/entrypoint.sh` passes these flags for the `celery-worker` container.)
+
+v0.1 runs sessions on the default Celery queue; a dedicated `agent-runs` queue is
+deferred.
+
+## Agent v0.1 quick start
+
+Open the dashboard at `/` (log in via the header link; default superuser `admin` / `nimda`).
+
+1. Click a **model button** (OpenAI / Anthropic / Local) to create a demo agent
+2. Click **Start** on the new agent row
+3. Chat on the session page; event log streams via SSE
+
+Set LLM API keys in `.env.local` under a `#[backend]` group (see `.env.local.example`).
+Docker Compose loads `.env.local` directly into backend/worker containers (optional file) and
+also bakes it into `.output/env.compose.backend` when you run `./olib/scripts/orunr.sh docker compose`.
+
+## Django app dependencies
+
+Backend apps have **one-directional** imports (see `docs/00-design.md`):
+
+| App | Role | May import from |
+|-----|------|-----------------|
+| `apps.agents` | Domain core: models, `AgentConfigSpec`, tool registry | Django/stdlib only (no other chief apps) |
+| `apps.sessions` | Session + event log | `agents` |
+| `apps.bus` | Redis pub/sub + mailbox primitives | Django/stdlib only |
+| `apps.runner` | Celery step loop, LLM providers, tool invocation | `agents`, `sessions`, `bus` |
+| `apps.web` | Dashboard, SSE, control endpoints | all of the above |
+
+Direction: `agents → sessions → runner → web`, with `bus` as a leaf used by `runner` and `web`.
+
+**Rules for agents working on the codebase:**
+
+- Do not import `runner` or `web` from `agents` or `sessions`.
+- Provider-specific UI (e.g. listing models for dashboard buttons) belongs in `web`, not `agents`.
+- Types referenced by `AgentConfigSpec` stay in `agents` even when `runner` invokes them at runtime.
 
 ## Test naming (parproc)
 
@@ -81,6 +130,8 @@ Use synonyms that keep the meaning, for example:
 ## For AI Agents
 
 - **Sandbox network**: `.cursor/sandbox.json` allows `curl` (and other HTTP clients) to reach the local dev server on `localhost` / `127.0.0.0/8` (slots 0–2: nginx ports 80, 8081, 8082; backend direct ports 8000, 8100, 8200).
+- **Web login for debugging**: The dashboard and session UI require a Django session. Log in at `http://localhost/admin/` (or the slot's nginx port) with `admin` / `nimda`, then return to `/` or a session URL. Agents debugging UI or API issues should do this first — unauthenticated requests won't see bootstrap/start controls or an owned agent list.
+- **Compose logs**: Default path `.output/compose.log` (see Docker Compose slots above). Read it when debugging stack issues without a live terminal attach.
 - Follow established patterns in the backend codebase
 - Always run tests before committing changes
 - Never include "Made with cursor" in commit messages

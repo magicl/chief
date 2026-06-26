@@ -18,7 +18,9 @@ if [[ $ENTRYPOINT == "web-server" ]]; then
 elif [[ $ENTRYPOINT == "celery-worker" ]]; then
 	# Dev container runs as root; celery refuses a pickle worker as root without this.
 	export C_FORCE_ROOT=true
-	exec celery -A chief worker --loglevel=INFO
+	# Agent sessions are long-lived and I/O-bound; use threads so concurrent
+	# sessions don't each occupy a prefork worker slot.
+	exec celery -A chief worker --loglevel=INFO --pool=threads --concurrency=16
 elif [[ $ENTRYPOINT == "celery-beat" ]]; then
 	exec celery -A chief beat --loglevel=INFO --pidfile /tmp/celery-beat.pid -s /tmp/celery-beat-schedule
 else

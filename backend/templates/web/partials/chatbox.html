@@ -1,0 +1,35 @@
+<div class="frame-chatbox">
+  {% if chat_mode == 'start' %}
+  <form
+    method="post"
+    action="{{ chat_post_url }}"
+    @submit="clearChatInput($event)"
+  >
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+    <textarea
+      name="content"
+      rows="3"
+      placeholder="Message the agent…"
+      x-ref="chatInput"
+      @keydown.enter="onChatKeydown($event)"
+    ></textarea>
+    <p class="input-hint">Enter to send · Shift+Enter or Ctrl+Enter for a new line</p>
+  </form>
+  {% else %}
+  <form
+    hx-post="{{ chat_post_url }}"
+    hx-swap="none"
+    @submit="clearChatInput($event)"
+  >
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+    <textarea
+      name="content"
+      rows="3"
+      placeholder="Message the agent…"
+      x-ref="chatInput"
+      @keydown.enter="onChatKeydown($event)"
+    ></textarea>
+    <p class="input-hint">Enter to send · Shift+Enter or Ctrl+Enter for a new line</p>
+  </form>
+  {% endif %}
+</div>

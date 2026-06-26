@@ -13,10 +13,13 @@ dependencies = [
   "cryptography==46.0.5",
   "jinja2==3.1.6",
   "django-cors-headers==4.9.0",
-  "django_middleware_global_request==0.3.6",
   "django-extensions==4.1",
   "pydantic==2.12.5",
+  "openai==1.109.1",
+  "anthropic==0.84.0",
+  "PyYAML==6.0.2",
   "uvicorn==0.42.0",
+  "uuid7==0.1.0",
 ]
 
 [tool.uv]
