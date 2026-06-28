@@ -34,11 +34,13 @@ def resolve_run_agent_spec(
         return load_agent_config_spec(spec)
     if not provider or not model:
         raise ValueError('Pass --provider and --model, or --spec / --spec-file')
+    if not system_prompt:
+        raise ValueError('Pass --system-prompt when using --provider/--model')
     return build_agent_config_spec(
         provider=provider,
         model=model,
         temperature=temperature,
-        system_prompt=system_prompt or 'You are a helpful assistant.',
+        system_prompt=system_prompt,
     )
 
 

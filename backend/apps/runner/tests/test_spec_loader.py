@@ -35,6 +35,10 @@ class TestSpecLoader(OTestCase):
         self.assertEqual(spec.system_prompt, 'yaml prompt')
 
     def test_build_minimal_spec(self) -> None:
-        spec = build_agent_config_spec(provider='openai', model='gpt-4o-mini')
+        spec = build_agent_config_spec(
+            provider='openai',
+            model='gpt-4o-mini',
+            system_prompt='hello',
+        )
         self.assertEqual(spec.llm.model, 'gpt-4o-mini')
         self.assertEqual(spec.tools[0].tool, 'clock')

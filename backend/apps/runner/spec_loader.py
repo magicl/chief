@@ -30,7 +30,7 @@ def build_agent_config_spec(
     provider: str,
     model: str,
     temperature: float | None = None,
-    system_prompt: str = 'You are a helpful assistant.',
+    system_prompt: str,
     tools: list[ToolPermission] | None = None,
 ) -> AgentConfigSpec:
     return AgentConfigSpec(

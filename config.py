@@ -143,7 +143,7 @@ def _implement_run_agent() -> click.Command:
     @click.option('--provider', help='LLM provider name (e.g. openai, anthropic, local_openai, repeat)')
     @click.option('--model', help='Model name for the provider')
     @click.option('--temperature', type=float, help='Sampling temperature')
-    @click.option('--system-prompt', help='Override system prompt when using --provider/--model')
+    @click.option('--system-prompt', help='System prompt when using --provider/--model')
     @click.option('--spec', help='Full AgentConfigSpec as JSON or YAML string')
     @click.option('--spec-file', help='Path to AgentConfigSpec JSON or YAML file')
     @click.pass_context

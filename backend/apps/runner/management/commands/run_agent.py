@@ -21,7 +21,7 @@ class Command(BaseCommand):
         parser.add_argument('--provider', help='LLM provider name (e.g. openai, anthropic, local_openai, repeat)')
         parser.add_argument('--model', help='Model name for the provider')
         parser.add_argument('--temperature', type=float, help='Sampling temperature')
-        parser.add_argument('--system-prompt', help='Override system prompt when using --provider/--model')
+        parser.add_argument('--system-prompt', help='System prompt when using --provider/--model')
         parser.add_argument('--spec', help='Full AgentConfigSpec as JSON or YAML string')
         parser.add_argument('--spec-file', help='Path to AgentConfigSpec JSON or YAML file')
 
