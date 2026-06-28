@@ -2,6 +2,8 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+import logging
+
 from apps.agents.hardcoded import bootstrap_agent
 from apps.sessions.models import AgentSession
 from django.contrib.auth import get_user_model
@@ -9,6 +11,7 @@ from django.test import Client
 from django.urls import reverse
 
 from olib.py.django.test.cases import OTransactionTestCase
+from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
 
 class TestStartAgentSessionView(OTransactionTestCase):
@@ -41,6 +44,7 @@ class TestStartAgentSessionView(OTransactionTestCase):
         page = self.client.get(response['Location'])
         self.assertEqual(page.status_code, 200)
 
+    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Not Found: /agents/[0-9a-f-]+/start/', count=1)])
     def test_cannot_start_other_users_agent(self) -> None:
         self.client.force_login(self.other)
         response = self.client.post(reverse('start_agent_session', kwargs={'agent_id': self.agent.id}))

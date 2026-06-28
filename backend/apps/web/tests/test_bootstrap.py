@@ -2,12 +2,15 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+import logging
+
 from apps.agents.models import Agent
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
 from olib.py.django.test.cases import OTransactionTestCase
+from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
 _BOOTSTRAP_POST = {'provider': 'openai', 'model': 'gpt-5.4-mini'}
 
@@ -24,6 +27,7 @@ class TestBootstrapAgentView(OTransactionTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn('/admin/login/', response['Location'])
 
+    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/bootstrap/', count=1)])
     def test_requires_provider_and_model(self) -> None:
         self.client.force_login(self.user)
         response = self.client.post(reverse('bootstrap_agent'))
@@ -129,6 +133,7 @@ class TestBootstrapAgentView(OTransactionTestCase):
         self.assertFalse(Agent.objects.filter(pk=agent.id).exists())
         self.assertFalse(AgentSession.objects.filter(agent_id=agent.id).exists())
 
+    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Not Found: /agents/[0-9a-f-]+/delete/', count=1)])
     def test_delete_agent_rejects_other_users_agent(self) -> None:
         from apps.agents.hardcoded import bootstrap_agent
 
