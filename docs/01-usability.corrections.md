@@ -15,3 +15,4 @@ BUGS:
 
 - [x] Events not showing on the session page — broken `x-data` attribute (double-quoted `tojson` inside double-quoted attribute broke Alpine init).
 - [x] View stuck spinning on back navigation — session SSE connections were not closed on leave, exhausting browser per-host connection slots; now closed on `pagehide` and reconnected after bfcache restore.
+no

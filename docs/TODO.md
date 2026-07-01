@@ -1,0 +1,2 @@
+- [ ] for both console mode and html mode, we want to render markdown output properly. We also want to support latex formulas if they are present. Make this a clean implementation.
+- [ ] let's give tools incremental discovery.. if that makes sense. right now all functions are given up front..
