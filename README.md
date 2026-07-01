@@ -59,11 +59,11 @@ are deferred; this is a placeholder for the intended design only.
 
 ## Development setup
 
-Bootstrap, dependency sync, lint/test commands, and Docker Compose slots are documented in:
+Bootstrap, dependency sync, lint/test commands, and Docker Compose (DOCO slots) are documented in:
 
 - [`olib/README.md`](olib/README.md) — adding olib, init, and CLI overview
-- [`AGENTS.md`](AGENTS.md) — shared agent instructions (symlinked from olib)
-- [`AGENTS.local.md`](AGENTS.local.md) — Chief-specific dev notes (slots, Celery, app layout)
+- [`AGENTS.md`](AGENTS.md) — shared agent instructions (symlinked from olib); includes the **docker-compose** skill
+- [`AGENTS.local.md`](AGENTS.local.md) — Chief-specific dev notes (Celery, app layout, local URLs)
 
 First-time setup from repo root:
 
@@ -72,7 +72,7 @@ First-time setup from repo root:
 ./olib/scripts/orunr docker compose
 ```
 
-The dashboard is at the slot's main port (see `AGENTS.local.md`). Django admin is at `/admin` (default superuser `admin` / `nimda`).
+The dashboard is at the slot's nginx port (`DOCO_PORT` in the active overlay). Django admin is at `/admin` (default superuser `admin` / `nimda`).
 
 ## Git commit messages
 

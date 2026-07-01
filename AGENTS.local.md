@@ -28,15 +28,9 @@ chief/
 
 Compose-only for now (no kubernetes restore target configured yet).
 
-## Docker Compose slots
+## Local URLs
 
-| Slot | Main port (nginx) | Backend (direct) | Postgres | Redis |
-|------|-------------------|------------------|----------|-------|
-| 0    | 80                | 8000             | 5432     | 6379  |
-| 1    | 8081              | 8100             | 5532     | 6479  |
-| 2    | 8082              | 8200             | 5632     | 6579  |
-
-The dashboard is at the slot's main port; Django admin is at `/admin` (default superuser `admin` / `nimda`).
+The dashboard is at the slot's nginx port (`DOCO_PORT` in `infra/docker/overlays/slot-*.env`); Django admin is at `/admin` (default superuser `admin` / `nimda`). DOCO slots and ports: olib **docker-compose** skill (`olib/ai/skills/docker-compose/SKILL.md`).
 
 ## Celery worker (agent sessions)
 
@@ -86,7 +80,7 @@ Direction: `agents → sessions → runner → web`, with `bus` as a leaf used b
 
 ## For AI agents (Chief-specific)
 
-- **Sandbox network**: `.cursor/sandbox.json` allows `curl` (and other HTTP clients) to reach the local dev server on `localhost` / `127.0.0.0/8` (slots 0–2: nginx ports 80, 8081, 8082; backend direct ports 8000, 8100, 8200).
+- **Sandbox network**: `.cursor/sandbox.json` allows `curl` (and other HTTP clients) to reach the local dev server on `localhost` / `127.0.0.0/8`. Port numbers per slot are in `infra/docker/overlays/slot-*.env` (see olib **docker-compose** skill).
 - **Terminal allowlist**: `.cursor/permissions.json` and `.cursor/sandbox.json` allow `./olib/scripts/orunr` only (patterns need a `*` suffix for subcommands). Do not add `orun` to the allowlist.
 - **Web login for debugging**: The dashboard and session UI require a Django session. Log in at `http://localhost/admin/` (or the slot's nginx port) with `admin` / `nimda`, then return to `/` or a session URL. Agents debugging UI or API issues should do this first — unauthenticated requests won't see bootstrap/start controls or an owned agent list.
 - Follow established patterns in the backend codebase.
