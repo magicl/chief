@@ -1,8 +1,8 @@
 {
   "terminalAllowlist": [
-    "./olib/scripts/orunr.sh",
-    "./olib/scripts/orunr.sh*",
-    "olib/scripts/orunr.sh",
-    "olib/scripts/orunr.sh*"
+    "./olib/scripts/orunr",
+    "./olib/scripts/orunr*",
+    "olib/scripts/orunr",
+    "olib/scripts/orunr*"
   ]
 }
