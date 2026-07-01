@@ -947,7 +947,7 @@ requires-dist = [
     { name = "oauth2client", specifier = "==4.1.3" },
     { name = "openpyxl" },
     { name = "pandas" },
-    { name = "parproc" },
+    { name = "parproc", specifier = ">=0.7.1" },
     { name = "pillow" },
     { name = "pip" },
     { name = "pre-commit" },
@@ -1803,16 +1803,16 @@ wheels = [
 
 [[package]]
 name = "parproc"
-version = "0.7.0"
+version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "rich" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/e0/61aed27b3dec4b2aadec004a97e915b96f4eabb9c6208162dded308fc546/parproc-0.7.0.tar.gz", hash = "sha256:47340938ae8dcbe141301c3d72a42db866956967197175494ee7a68e147c8d3f", size = 67746, upload-time = "2026-06-11T19:14:06.589Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/3d/58815233a29097537ec10f65cc2bec374cf2e9450007584dc660eec574af/parproc-0.7.1.tar.gz", hash = "sha256:c2e9a71cf403c00a77e80766396abbb2ee6101cadee8e88c5759d0bec7d127c6", size = 67847, upload-time = "2026-06-28T21:43:16.422Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/bb/16ee3f7987a1640cf5c8b06a8f6e92520612389e1178f74b72a09a82a0f8/parproc-0.7.0-py3-none-any.whl", hash = "sha256:41e302656d5f6b5ed43ccb4505acba99fcd3fa19298df1b2085b4a3ce27038a3", size = 64361, upload-time = "2026-06-11T19:14:05.458Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/2e/da86fa9f59346b39ddcc5523e1b54c573a919fc46730c63d9d047b4b8b1e/parproc-0.7.1-py3-none-any.whl", hash = "sha256:1d3f3334fd50903061c59a8acc02b97c7c07a96fb55d96ba1b5baabb0801e252", size = 64434, upload-time = "2026-06-28T21:43:15.236Z" },
 ]
 
 [[package]]
@@ -1838,7 +1838,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
