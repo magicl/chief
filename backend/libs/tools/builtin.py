@@ -6,7 +6,7 @@
 
 from datetime import UTC, datetime
 
-from apps.agents.tools.base import Tool, ToolFunction
+from libs.tools.base import Tool, ToolFunction
 
 
 class ClockTool(Tool):

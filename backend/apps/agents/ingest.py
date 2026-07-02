@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from apps.agents.models import Agent, AgentConfig, Trigger, TriggerStatus
 from apps.agents.spec import AgentConfigSpec, ToolPermission
-from apps.agents.tools.registry import get_tool
+from libs.tools.registry import get_tool
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 from django.utils import timezone

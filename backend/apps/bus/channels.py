@@ -30,10 +30,10 @@ def _session_key(session_id: UUID | str, suffix: str) -> str:
     return f'{key_prefix()}session:{session_id}:{suffix}'
 
 
-def publish_event(session_id: UUID | str, event_dict: dict[str, Any]) -> None:
+def publish_session_message(session_id: UUID | str, message: dict[str, Any]) -> None:
     client = sync_client()
     channel = _session_key(session_id, 'events')
-    client.publish(channel, json.dumps(event_dict))
+    client.publish(channel, json.dumps(message))
 
 
 def mailbox_push(session_id: UUID | str, message: dict[str, Any]) -> None:

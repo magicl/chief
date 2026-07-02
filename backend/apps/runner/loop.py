@@ -15,17 +15,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from apps.agents.spec import AgentConfigSpec, ToolPermission
-from apps.agents.tools import builtin  # noqa: F401  # pylint: disable=unused-import
-from apps.agents.tools.base import parse_qualified_tool_name
-from apps.agents.tools.registry import get_tool
-from apps.agents.tools.schema import build_tool_definitions
 from apps.runner.backends.base import SessionBackend
 from apps.runner.backends.django import DjangoSessionBackend
-from apps.runner.errors import SessionFailure
-from apps.runner.providers.base import LLMProvider, ProviderError, StreamResult
-from apps.runner.providers.registry import make_provider
+from apps.runner.errors import SessionFailure, session_failure_from_provider_error
+from apps.runner.llm_config import provider_config_from_spec
+from apps.runner.tool_definitions import build_tool_definitions
 from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
 from django.utils import timezone
+from libs.providers.base import LLMProvider, ProviderError, StreamResult
+from libs.providers.errors import ProviderConfigurationError
+from libs.providers.registry import make_provider
+from libs.tools.base import parse_qualified_tool_name
+from libs.tools.registry import get_tool
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +76,9 @@ class SessionRunner:
 
             if provider is None:
                 try:
-                    provider = make_provider(self.config_spec.llm)
-                except SessionFailure as exc:
-                    self._record_failure(exc)
+                    provider = make_provider(provider_config_from_spec(self.config_spec.llm))
+                except ProviderConfigurationError as exc:
+                    self._record_failure(session_failure_from_provider_error(exc))
                     return
 
             result = provider.collect(messages, tool_definitions)
@@ -122,11 +123,7 @@ class SessionRunner:
                 content = msg.get('content', '')
                 if content:
                     self.control.pending_inputs.append(content)
-                    event = self.backend.append_event(
-                        AgentSessionEventKind.INPUT,
-                        {'content': content},
-                    )
-                    self.backend.publish_event(event)
+                    self.backend.record_input(content)
             elif action == 'pause':
                 self.control.pause = True
             elif action == 'abort':

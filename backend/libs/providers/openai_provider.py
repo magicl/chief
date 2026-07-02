@@ -13,11 +13,11 @@ from collections.abc import Iterator
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from apps.agents.spec import LLMSpec
-from apps.agents.tools.base import qualified_tool_name_from_wire, wire_tool_name
-from apps.agents.tools.schema import ToolDefinition
-from apps.runner.errors import MissingOpenAICredentials
-from apps.runner.providers.base import (
+from libs.providers.errors import MissingOpenAICredentials
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
+from libs.tools.schema import ToolDefinition
+from libs.providers.base import (
     Delta,
     LLMProvider,
     ModelPricing,
@@ -25,7 +25,7 @@ from apps.runner.providers.base import (
     StreamResult,
     Usage,
 )
-from apps.runner.providers.spec import OpenAIProviderConfig
+from libs.providers.spec import OpenAIProviderConfig
 from openai import OpenAI
 from openai.types import CompletionUsage
 from pydantic import BaseModel
@@ -69,7 +69,7 @@ class OpenAIProvider(LLMProvider):
         self._last_usage: Usage | None = None
 
     @classmethod
-    def _from_spec(cls, provider_config: BaseModel, llm: LLMSpec) -> OpenAIProvider:
+    def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> OpenAIProvider:
         _ = OpenAIProviderConfig.model_validate(provider_config.model_dump())
         return cls(llm.model, temperature=llm.temperature)
 

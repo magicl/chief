@@ -100,6 +100,14 @@ class TestSessionEventView(OTransactionTestCase):
         self.assertIn('"openai / gpt-5.4-mini"', x_data)
         self.assertNotIn('x-data="sessionView', body)
 
+    def test_session_sse_listener_uses_session_event(self) -> None:
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, "addEventListener('session_event'")
+        self.assertContains(response, "addEventListener('session_update'")
+        self.assertNotContains(response, "addEventListener('session-event'")
+
     def test_session_closes_sse_on_navigation(self) -> None:
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),

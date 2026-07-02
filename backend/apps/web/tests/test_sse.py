@@ -45,8 +45,4 @@ class TestSessionEventsSse(OTransactionTestCase):
         self.assertIn('"kind": "OUTPUT"', body)
         self.assertIn('"seq": 1', body)
         self.assertIn('"seq": 2', body)
-
-        self.assertIn('"kind": "INPUT"', body)
-        self.assertIn('"kind": "OUTPUT"', body)
-        self.assertIn('"seq": 1', body)
-        self.assertIn('"seq": 2', body)
+        self.assertIn('event: session_event', body)

@@ -2,25 +2,16 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Provider-neutral tool definitions built from agent config permissions."""
+"""Build provider tool definitions from agent config permissions."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from apps.agents.spec import ToolPermission
-from apps.agents.tools.base import qualified_tool_name
-from apps.agents.tools.registry import get_tool
-
-
-@dataclass(frozen=True)
-class ToolDefinition:
-    """Chief tool schema — providers translate this to their wire format."""
-
-    name: str
-    description: str
-    parameters: dict[str, Any]
+from libs.tools.base import qualified_tool_name
+from libs.tools.registry import get_tool
+from libs.tools.schema import ToolDefinition
 
 
 def build_tool_definitions(

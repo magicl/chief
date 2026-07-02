@@ -8,9 +8,9 @@ from apps.agents.hardcoded import HARDCODED_SPEC
 from apps.agents.spec import LLMSpec
 from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.loop import SessionRunner
-from apps.runner.providers.base import ProviderError, StreamResult
-from apps.runner.providers.fake_provider import FakeProvider
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
+from libs.providers.base import ProviderError, StreamResult
+from libs.providers.fake_provider import FakeProvider
 
 from olib.py.django.test.cases import OTestCase
 

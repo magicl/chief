@@ -2,9 +2,9 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from apps.runner.providers.anthropic_provider import AnthropicProvider
-from apps.runner.providers.local_openai_provider import LocalOpenAIProvider
-from apps.runner.providers.openai_provider import OpenAIProvider
+from libs.providers.anthropic_provider import AnthropicProvider
+from libs.providers.local_openai_provider import LocalOpenAIProvider
+from libs.providers.openai_provider import OpenAIProvider
 from apps.web.demo_models import list_demo_models
 
 from olib.py.django.test.cases import OTestCase

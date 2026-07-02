@@ -10,10 +10,10 @@ import os
 from decimal import Decimal
 from typing import ClassVar
 
-from apps.agents.spec import LLMSpec
-from apps.runner.providers.base import ModelPricing, Usage
-from apps.runner.providers.openai_provider import OpenAIProvider
-from apps.runner.providers.spec import LocalOpenAIProviderConfig
+from libs.providers.types import ProviderLLMConfig
+from libs.providers.base import ModelPricing, Usage
+from libs.providers.openai_provider import OpenAIProvider
+from libs.providers.spec import LocalOpenAIProviderConfig
 from pydantic import BaseModel
 
 
@@ -37,7 +37,7 @@ class LocalOpenAIProvider(OpenAIProvider):
         )
 
     @classmethod
-    def _from_spec(cls, provider_config: BaseModel, llm: LLMSpec) -> LocalOpenAIProvider:
+    def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> LocalOpenAIProvider:
         config = LocalOpenAIProviderConfig.model_validate(provider_config.model_dump())
         return cls(
             llm.model,

@@ -9,8 +9,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from apps.agents.tools.schema import ToolDefinition
-from apps.runner.providers.base import LLMProvider, StreamResult, Usage
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.schema import ToolDefinition
+from libs.providers.base import LLMProvider, StreamResult, Usage
 from pydantic import BaseModel
 
 
@@ -23,7 +24,7 @@ class FakeProvider(LLMProvider):
         return cls(responses)
 
     @classmethod
-    def _from_spec(cls, provider_config: BaseModel, llm: Any) -> FakeProvider:
+    def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> FakeProvider:
         del provider_config, llm
         return cls([])
 

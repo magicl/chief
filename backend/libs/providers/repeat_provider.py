@@ -9,10 +9,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from apps.agents.spec import LLMSpec
-from apps.agents.tools.schema import ToolDefinition
-from apps.runner.providers.base import Delta, LLMProvider, StreamResult, Usage
-from apps.runner.providers.spec import RepeatProviderConfig
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.schema import ToolDefinition
+from libs.providers.base import Delta, LLMProvider, StreamResult, Usage
 from pydantic import BaseModel
 
 
@@ -21,7 +20,7 @@ class RepeatProvider(LLMProvider):
         self._model = model
 
     @classmethod
-    def _from_spec(cls, provider_config: BaseModel, llm: LLMSpec) -> RepeatProvider:
+    def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> RepeatProvider:
         del provider_config
         return cls(llm.model)
 

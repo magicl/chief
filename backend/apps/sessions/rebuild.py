@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from apps.agents.tools.base import qualified_tool_name
+from libs.tools.base import qualified_tool_name
 from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession, AgentSessionEventKind
 

@@ -26,7 +26,7 @@ class AgentSessionEventInline(admin.TabularInline):  # type: ignore[type-arg]
 
 @admin.register(AgentSession)
 class AgentSessionAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
-    list_display = ('id', 'agent', 'status', 'created_at', 'started_at', 'ended_at')
+    list_display = ('id', 'name', 'agent', 'status', 'created_at', 'started_at', 'ended_at')
     list_filter = ('status',)
     readonly_fields = ('created_at', 'started_at', 'ended_at')
     inlines = [AgentSessionEventInline]

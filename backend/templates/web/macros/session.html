@@ -1,0 +1,3 @@
+{% macro session_display_name(session) -%}
+{{ session.name or session.id.hex[:8] }}
+{%- endmacro %}

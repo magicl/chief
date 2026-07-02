@@ -14,10 +14,15 @@ When doing new things, especially tooling or infra related, look at
 ```
 chief/
 ├── backend/          # Django project (pkg: `chief`, apps under `apps/`)
+│   ├── apps/         # Django apps (domain + HTTP/Celery transport)
+│   ├── libs/         # Shared libraries (providers, tools, algorithms)
+│   └── chief/        # Project shell (settings, celery, task registry)
 ├── infra/            # Docker Compose stack + slot overlays
 ├── config.py         # olib `run` CLI config (compose-only)
 └── olib/             # Shared utilities (git submodule)
 ```
+
+See `docs/02-chat-names.md` for the libs/services/notifications design.
 
 ## Chief-specific commands
 
@@ -58,25 +63,91 @@ Set LLM API keys in `.env.local` under a `#[backend]` group (see `.env.local.exa
 Docker Compose loads `.env.local` directly into backend/worker containers (optional file) and
 also bakes it into `.output/env.compose.backend` when you run `./olib/scripts/orunr docker compose`.
 
+## Backend libs (`backend/libs/`)
+
+Shared, Django-free packages live under `backend/libs/` (plural container):
+
+| Package | Role |
+|---------|------|
+| `libs/providers` | LLM provider implementations |
+| `libs/tools` | Tool definitions + registry |
+| `libs/algorithms` | Reusable algorithms (may call providers) |
+
+**Lib rules:**
+
+- Libs do **not** import `apps.*`.
+- Minimize coupling between libs; use one-directional deps and public interfaces.
+- Apps orchestrate; libs compute.
+- When a lib needs app/domain access later, **inject at the app boundary** (see
+  `apps.agents` tool wiring) — do not import Django from libs.
+
+```
+libs/providers          (stdlib + vendor SDKs)
+libs/tools              (stdlib + pydantic)
+libs/algorithms    -->  libs/providers
+apps/*             -->  libs/* (as needed)
+```
+
 ## Django app dependencies
 
 Backend apps have **one-directional** imports (see `docs/00-design.md`):
 
 | App | Role | May import from |
 |-----|------|-----------------|
-| `apps.agents` | Domain core: models, `AgentConfigSpec`, tool registry | Django/stdlib only (no other chief apps) |
-| `apps.sessions` | Session + event log | `agents` |
+| `apps.agents` | Domain core: models, `AgentConfigSpec`, tool wiring | Django/stdlib, `libs.tools` |
+| `apps.sessions` | Session + event log + session services/tasks | `agents`, `bus`, `libs.algorithms` (tasks only) |
 | `apps.bus` | Redis pub/sub + mailbox primitives | Django/stdlib only |
-| `apps.runner` | Celery step loop, LLM providers, tool invocation | `agents`, `sessions`, `bus` |
+| `apps.runner` | Celery step loop, tool invocation | `agents`, `sessions`, `bus`, `libs.providers`, `libs.tools` |
 | `apps.web` | Dashboard, SSE, control endpoints | all of the above |
 
 Direction: `agents → sessions → runner → web`, with `bus` as a leaf used by `runner` and `web`.
+
+## App services (queries + commands)
+
+Each app exposes a **public API** for other apps and Celery tasks via
+`apps/<app>/services/`:
+
+| Module | Purpose |
+|--------|---------|
+| `services/queries.py` | Read-only domain access (no bus publish, no task scheduling) |
+| `services/commands.py` | Mutations: DB writes, notifications, downstream `.delay()` |
+
+**Rules:**
+
+- Celery tasks, runner, and web views call **services**, not raw ORM updates
+  (when a service exists).
+- Tasks are **thin orchestrators**: query → lib function → command.
+- Commands that mutate session/agent state emit UI notifications (see below).
+
+Example (sessions): `get_first_input_text` (query), `record_input` /
+`update_session_name` (commands).
+
+## Celery tasks
+
+- Each app that needs async work owns **`apps/<app>/tasks.py`**.
+- Register task modules in **`chief/tasks.py`** (imports only — see existing
+  `apps.runner.tasks` pattern).
+- **`apps.runner.tasks`**: long-lived session execution (`run_session`).
+- **`apps.sessions.tasks`**: short metadata side work (e.g. `generate_session_name`).
+- Tasks never call `publish_*` directly; commands own side effects.
+
+## Real-time UI notifications (SSE)
+
+Session-scoped Redis pub/sub carries an envelope:
+
+- `session_event` — `AgentSessionEvent` payload (dedupe by `seq` in SSE)
+- `session_update` — partial session patch, e.g. `{"name": "..."}`
+
+Commands call `publish_session_update` after DB writes. The session detail page
+listens on the existing SSE connection and patches Alpine state (no HTMX swap
+required for simple fields).
 
 **Rules for agents working on the codebase:**
 
 - Do not import `runner` or `web` from `agents` or `sessions`.
 - Provider-specific UI (e.g. listing models for dashboard buttons) belongs in `web`, not `agents`.
 - Types referenced by `AgentConfigSpec` stay in `agents` even when `runner` invokes them at runtime.
+- Algorithm config: pydantic struct per algorithm with defaults; override on call — avoid new env vars for tuning.
 
 ## For AI agents (Chief-specific)
 

@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
-from apps.agents.tools.base import Tool
-from apps.agents.tools.builtin import ClockTool
+from libs.tools.base import Tool
 
-TOOLS: dict[str, Tool] = {
-    'clock': ClockTool(),
-}
+TOOLS: dict[str, Tool] = {}
+
+
+def register_tool(name: str, tool: Tool) -> None:
+    TOOLS[name] = tool
 
 
 def get_tool(name: str) -> Tool | None:

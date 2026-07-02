@@ -4,7 +4,7 @@
 # ~
 from unittest.mock import patch
 
-from apps.runner.providers.openai_provider import OpenAIProvider
+from libs.providers.openai_provider import OpenAIProvider
 
 from olib.py.django.test.cases import OTestCase
 

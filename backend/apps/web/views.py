@@ -178,7 +178,7 @@ def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
     return render(request, 'web/session_detail.html', context)
 
 
-def _sse_event(data: dict[str, Any], *, event: str = 'session-event') -> str:
+def _sse_event(data: dict[str, Any], *, event: str = 'session_event') -> str:
     return f'event: {event}\ndata: {json.dumps(data)}\n\n'
 
 
@@ -194,7 +194,7 @@ async def session_events_sse(request: HttpRequest, session_id: UUID) -> Streamin
         for event in events:
             payload = event.to_stream_dict()
             last_seq = max(last_seq, payload['seq'])
-            yield _sse_event(payload)
+            yield _sse_event(payload, event='session_event')
 
         try:
             client = async_client()
@@ -209,11 +209,18 @@ async def session_events_sse(request: HttpRequest, session_id: UUID) -> Streamin
                         continue
                     if message['type'] != 'message':
                         continue
-                    data = json.loads(message['data'])
-                    if data.get('seq', 0) <= last_seq:
-                        continue
-                    last_seq = data['seq']
-                    yield _sse_event(data)
+                    raw = json.loads(message['data'])
+                    channel_name = raw.get('channel')
+                    payload = raw.get('payload', {})
+                    if channel_name == 'session_event':
+                        if payload.get('seq', 0) <= last_seq:
+                            continue
+                        last_seq = payload['seq']
+                        yield _sse_event(payload, event='session_event')
+                    elif channel_name == 'session_update':
+                        yield _sse_event(payload, event='session_update')
+                    else:
+                        logger.warning('Unknown session message channel %r', channel_name)
             finally:
                 await pubsub.unsubscribe(channel)
                 await pubsub.close()

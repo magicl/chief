@@ -19,19 +19,19 @@ from anthropic.types.input_json_delta import InputJSONDelta
 from anthropic.types.message_delta_usage import MessageDeltaUsage
 from anthropic.types.text_delta import TextDelta
 from anthropic.types.tool_use_block import ToolUseBlock
-from apps.agents.spec import LLMSpec
-from apps.agents.tools.base import qualified_tool_name_from_wire, wire_tool_name
-from apps.agents.tools.schema import ToolDefinition
-from apps.runner.errors import MissingAnthropicCredentials
-from apps.runner.providers.base import (
+from libs.providers.errors import MissingAnthropicCredentials
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
+from libs.tools.schema import ToolDefinition
+from libs.providers.base import (
     Delta,
     LLMProvider,
     ModelPricing,
     ProviderError,
     StreamResult,
 )
-from apps.runner.providers.base import Usage as ChiefUsage
-from apps.runner.providers.spec import AnthropicProviderConfig
+from libs.providers.base import Usage as ChiefUsage
+from libs.providers.spec import AnthropicProviderConfig
 from pydantic import BaseModel
 
 
@@ -71,7 +71,7 @@ class AnthropicProvider(LLMProvider):
         self._last_usage: ChiefUsage | None = None
 
     @classmethod
-    def _from_spec(cls, provider_config: BaseModel, llm: LLMSpec) -> AnthropicProvider:
+    def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> AnthropicProvider:
         _ = AnthropicProviderConfig.model_validate(provider_config.model_dump())
         return cls(llm.model, temperature=llm.temperature)
 

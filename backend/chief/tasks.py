@@ -13,3 +13,4 @@ with the worker.
 """
 
 import apps.runner.tasks  # noqa: F401  # pylint: disable=unused-import
+import apps.sessions.tasks  # noqa: F401  # pylint: disable=unused-import

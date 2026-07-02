@@ -6,18 +6,18 @@
 
 from __future__ import annotations
 
-from apps.agents.spec import LLMSpec
-from apps.runner.errors import UnsupportedLLMProvider
-from apps.runner.providers.anthropic_provider import AnthropicProvider
-from apps.runner.providers.base import LLMProvider, ProviderFactory
-from apps.runner.providers.local_openai_provider import LocalOpenAIProvider
-from apps.runner.providers.openai_provider import OpenAIProvider
-from apps.runner.providers.repeat_provider import RepeatProvider
-from apps.runner.providers.spec import (
+from libs.providers.anthropic_provider import AnthropicProvider
+from libs.providers.base import LLMProvider, ProviderFactory
+from libs.providers.errors import UnsupportedLLMProvider
+from libs.providers.local_openai_provider import LocalOpenAIProvider
+from libs.providers.openai_provider import OpenAIProvider
+from libs.providers.repeat_provider import RepeatProvider
+from libs.providers.spec import (
     AnthropicProviderConfig,
     OpenAIProviderConfig,
     RepeatProviderConfig,
 )
+from libs.providers.types import ProviderLLMConfig
 
 PROVIDERS: dict[str, ProviderFactory] = {
     'openai': OpenAIProvider.from_spec(OpenAIProviderConfig()),
@@ -27,7 +27,7 @@ PROVIDERS: dict[str, ProviderFactory] = {
 }
 
 
-def make_provider(llm: LLMSpec) -> LLMProvider:
+def make_provider(llm: ProviderLLMConfig) -> LLMProvider:
     factory = PROVIDERS.get(llm.provider)
     if factory is None:
         raise UnsupportedLLMProvider(llm.provider)

@@ -5,7 +5,7 @@
 from typing import Any
 from unittest.mock import patch
 
-from apps.runner.providers.base import StreamResult
+from libs.providers.base import StreamResult
 from apps.runner.tasks import run_session
 from apps.sessions.events import append_event, events_for
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
@@ -15,7 +15,7 @@ from olib.py.django.test.cases import OTransactionTestCase
 
 
 class TestRunSessionResumability(OTransactionTestCase):
-    @patch('apps.runner.backends.django.publish_event')
+    @patch('apps.runner.backends.django.publish_session_event')
     @patch('apps.runner.backends.django.mailbox_drain', return_value=[])
     @patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'})
     @patch('apps.runner.tasks.release_lock')
@@ -46,7 +46,7 @@ class TestRunSessionResumability(OTransactionTestCase):
         self.assertEqual(kinds.count(AgentSessionEventKind.OUTPUT), 2)
         self.assertEqual(session.status, AgentSessionStatus.WAITING)
 
-    @patch('apps.runner.backends.django.publish_event')
+    @patch('apps.runner.backends.django.publish_session_event')
     @patch('apps.runner.backends.django.mailbox_drain', return_value=[])
     @patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'})
     @patch('apps.runner.tasks.release_lock')

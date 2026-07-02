@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from apps.runner.providers.anthropic_provider import AnthropicProvider
-from apps.runner.providers.local_openai_provider import LocalOpenAIProvider
-from apps.runner.providers.openai_provider import OpenAIProvider
+from libs.providers.anthropic_provider import AnthropicProvider
+from libs.providers.local_openai_provider import LocalOpenAIProvider
+from libs.providers.openai_provider import OpenAIProvider
 
 
 @dataclass(frozen=True)

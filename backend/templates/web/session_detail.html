@@ -1,8 +1,9 @@
 {% extends "web/layout/agent_frame_page.html" %}
+{% from "web/macros/session.html" import session_display_name %}
 
-{% block title %}Session {{ session.id.hex[:8] }} — Chief{% endblock %}
+{% block title %}Session {{ session_display_name(session) }} — Chief{% endblock %}
 
-{% block frame_x_data %}x-data='sessionView("{{ session.id }}", {{ llm_label|tojson }})' x-init="init()"{% endblock %}
+{% block frame_x_data %}x-data='sessionView("{{ session.id }}", {{ (session.name or "")|tojson }}, {{ llm_label|tojson }})' x-init="init()"{% endblock %}
 
 {% block frame_header %}
 <div>
@@ -10,7 +11,7 @@
     <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" style="color: inherit; text-decoration: none;">
       {{ agent.identifier }}
     </a>
-    <span class="muted" style="font-weight: normal;">· {{ session.id.hex[:8] }}</span>
+    <span class="muted" style="font-weight: normal;">· <span x-text="displaySessionName">{{ session_display_name(session) }}</span></span>
   </h2>
   <p class="session-header-meta muted">
     <span x-text="displayModel"></span>
@@ -91,15 +92,22 @@
 
 {% block frame_extra_scripts %}
 <script>
-function sessionView(sessionId, configModel) {
+function sessionView(sessionId, initialName, configModel) {
+  const sessionIdPrefix = sessionId.replace(/-/g, '').slice(0, 8);
   return {
     ...chatboxHelpers(),
+    sessionName: initialName || '',
     events: [],
     seenSeq: new Set(),
     source: null,
     follow: true,
     configModel,
+    get displaySessionName() {
+      return this.sessionName || sessionIdPrefix;
+    },
     init() {
+      this.updateDocumentTitle();
+      this.$watch('displaySessionName', () => this.updateDocumentTitle());
       this.connectStream();
       this._onPageHide = () => this.closeStream();
       this._onPageShow = (event) => {
@@ -116,16 +124,25 @@ function sessionView(sessionId, configModel) {
       });
       this.focusChatInput();
     },
+    updateDocumentTitle() {
+      document.title = `${this.displaySessionName} — Chief`;
+    },
     connectStream() {
       this.closeStream();
       this.source = new EventSource(`/sessions/${sessionId}/events/`);
-      this.source.addEventListener('session-event', (e) => {
+      this.source.addEventListener('session_event', (e) => {
         const data = JSON.parse(e.data);
         if (this.seenSeq.has(data.seq)) return;
         this.seenSeq.add(data.seq);
         this.events.push(data);
         if (this.follow) {
           this.$nextTick(() => this.scrollToBottom());
+        }
+      });
+      this.source.addEventListener('session_update', (e) => {
+        const patch = JSON.parse(e.data);
+        if (patch.name != null) {
+          this.sessionName = patch.name;
         }
       });
     },

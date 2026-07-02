@@ -94,6 +94,10 @@ class SessionBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def record_input(self, content: str) -> RecordedEvent:
+        raise NotImplementedError
+
+    @abstractmethod
     def publish_event(self, event: RecordedEvent) -> None:
         raise NotImplementedError
 

@@ -36,6 +36,7 @@ class AgentSession(models.Model):
     )
     trigger_type = models.CharField(max_length=32, choices=TriggerType.choices)
     trigger_ref = models.UUIDField(null=True, blank=True)
+    name = models.CharField(max_length=80, null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)

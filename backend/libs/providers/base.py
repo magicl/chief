@@ -13,11 +13,11 @@ from decimal import Decimal
 from functools import partial
 from typing import Any, ClassVar
 
-from apps.agents.spec import LLMSpec
-from apps.agents.tools.schema import ToolDefinition
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.schema import ToolDefinition
 from pydantic import BaseModel
 
-ProviderFactory = Callable[[LLMSpec], 'LLMProvider']
+ProviderFactory = Callable[[ProviderLLMConfig], 'LLMProvider']
 
 
 class ModelPricing(BaseModel):
@@ -74,7 +74,7 @@ class LLMProvider(ABC):
 
     @classmethod
     @abstractmethod
-    def _from_spec(cls, provider_config: BaseModel, llm: LLMSpec) -> LLMProvider:
+    def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> LLMProvider:
         raise NotImplementedError
 
     @abstractmethod

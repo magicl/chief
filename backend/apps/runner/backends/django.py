@@ -12,11 +12,28 @@ from decimal import Decimal
 from typing import Any
 
 from apps.agents.spec import AgentConfigSpec
-from apps.bus.channels import mailbox_drain, publish_event
+from apps.bus.channels import mailbox_drain
 from apps.runner.backends.base import RecordedEvent, SessionBackend
 from apps.sessions.events import append_event, events_for
-from apps.sessions.models import AgentSession
+from apps.sessions.models import AgentSession, AgentSessionEvent
+from apps.sessions.notify import publish_session_event
 from apps.sessions.rebuild import rebuild_messages
+from apps.sessions.services.commands import record_input as record_input_command
+
+
+def _recorded_from_row(row: AgentSessionEvent) -> RecordedEvent:
+    return RecordedEvent(
+        seq=row.seq,
+        kind=row.kind,
+        payload=row.payload or {},
+        event_id=row.id,
+        model=row.model,
+        input_tokens=row.input_tokens,
+        output_tokens=row.output_tokens,
+        cost_usd=row.cost_usd,
+        latency_ms=row.latency_ms,
+        created_at=row.created_at,
+    )
 
 
 class DjangoSessionBackend(SessionBackend):
@@ -69,38 +86,17 @@ class DjangoSessionBackend(SessionBackend):
             cost_usd=cost_usd,
             latency_ms=latency_ms,
         )
-        return RecordedEvent(
-            seq=row.seq,
-            kind=row.kind,
-            payload=row.payload or {},
-            event_id=row.id,
-            model=row.model,
-            input_tokens=row.input_tokens,
-            output_tokens=row.output_tokens,
-            cost_usd=row.cost_usd,
-            latency_ms=row.latency_ms,
-            created_at=row.created_at,
-        )
+        return _recorded_from_row(row)
+
+    def record_input(self, content: str) -> RecordedEvent:
+        row = record_input_command(self._session, content)
+        return _recorded_from_row(row)
 
     def drain_mailbox(self) -> list[dict[str, Any]]:
         return mailbox_drain(self._session.id)
 
     def publish_event(self, event: RecordedEvent) -> None:
-        publish_event(self._session.id, event.to_stream_dict(session_id=self._session.id))
+        publish_session_event(self._session.id, event.to_stream_dict(session_id=self._session.id))
 
     def events(self) -> list[RecordedEvent]:
-        return [
-            RecordedEvent(
-                seq=row.seq,
-                kind=row.kind,
-                payload=row.payload or {},
-                event_id=row.id,
-                model=row.model,
-                input_tokens=row.input_tokens,
-                output_tokens=row.output_tokens,
-                cost_usd=row.cost_usd,
-                latency_ms=row.latency_ms,
-                created_at=row.created_at,
-            )
-            for row in events_for(self._session)
-        ]
+        return [_recorded_from_row(row) for row in events_for(self._session)]

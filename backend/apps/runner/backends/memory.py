@@ -86,6 +86,11 @@ class MemorySessionBackend(SessionBackend):
         """Test/CLI helper — enqueue a control or chat message."""
         self._mailbox.append(message)
 
+    def record_input(self, content: str) -> RecordedEvent:
+        event = self.append_event(AgentSessionEventKind.INPUT, {'content': content})
+        self.publish_event(event)
+        return event
+
     def publish_event(self, event: RecordedEvent) -> None:
         self._published.append(event.to_stream_dict(session_id=self._session_id))
 
