@@ -16,7 +16,7 @@ Design thoughts:
 ## What to build next (2026-06-28)
 
 v0.1 + usability pass is done. Remaining work is closing M6 hardening and moving from
-demo agents (hardcoded specs) toward the real product in docs/00-design.md.
+demo agents (hardcoded specs) toward the real product in docs/specs/2026-06-23-design/2026-06-23-design-design.md.
 
 ### 1. Close out v0.1 (small, high leverage)
 

@@ -1,4 +1,4 @@
-# This file contains things that need to be fixed for 00-design.md and 00-design-implementation.md
+# This file contains things that need to be fixed for 2026-06-23-design-design.md and 2026-06-23-design-plan.md
 
 
 NOW:
@@ -47,7 +47,7 @@ DEBUGGABILITY:
 
 
 LATER
-- [x] in hardcoded.py, we are defining the code to create the objects for the agent, and the sub-component. we should instead offload this to the code that would normally create an agent based on a spec.. which should be located in the agents app.. look at the 00-design.md and 00-design-implementation.md for hints on how this should be built.. — done: `apps/agents/ingest.py` (`create_agent_from_spec`, `validate_spec_tools`); `hardcoded.py` keeps demo spec only
+- [x] in hardcoded.py, we are defining the code to create the objects for the agent, and the sub-component. we should instead offload this to the code that would normally create an agent based on a spec.. which should be located in the agents app.. look at the 2026-06-23-design-design.md and 2026-06-23-design-plan.md for hints on how this should be built.. — done: `apps/agents/ingest.py` (`create_agent_from_spec`, `validate_spec_tools`); `hardcoded.py` keeps demo spec only
 - [x] would it be better to use uuid7 insteadof uuid4? look at how we do this in ~/yolo/floors/backend — done: model PK defaults use `olib.py.utils.uuid7`
 - [x] instead of a register_tool call in our tool implementations.. can't we just have the Tool baseclass have a subclass init function that does this automatically? [?] or have a table where all the tools are instantiated like the models.. [?] maybe this is better as we then can have multiple versions of tools if we need to..? — done: explicit `TOOLS` dict in `apps/agents/tools/registry.py` (no auto-register magic)
 - [x] loop._make_provider should probably be in the provider files? and there should probably be a map of providers instead of an if statement? — done: `make_provider()` + `PROVIDERS` dict in `runner/providers/registry.py`; loop calls `make_provider` directly

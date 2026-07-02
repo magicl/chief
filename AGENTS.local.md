@@ -22,7 +22,7 @@ chief/
 └── olib/             # Shared utilities (git submodule)
 ```
 
-See `docs/02-chat-names.md` for the libs/services/notifications design.
+See `docs/specs/2026-07-01-chat-names/2026-07-01-chat-names-design.md` for the libs/services/notifications design.
 
 ## Chief-specific commands
 
@@ -90,7 +90,7 @@ apps/*             -->  libs/* (as needed)
 
 ## Django app dependencies
 
-Backend apps have **one-directional** imports (see `docs/00-design.md`):
+Backend apps have **one-directional** imports (see `docs/specs/2026-06-23-design/2026-06-23-design-design.md`):
 
 | App | Role | May import from |
 |-----|------|-----------------|

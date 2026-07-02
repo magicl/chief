@@ -2,7 +2,7 @@
 
 Status: **spec only** (no implementation yet)
 
-Companion to `00-design.md`. When a user starts a new chat, the session
+Companion to `../2026-06-23-design/2026-06-23-design-design.md`. When a user starts a new chat, the session
 currently shows an opaque id prefix (`a1b2c3d4`). This spec adds automatic
 session naming from the first user message, plus the structural groundwork
 (libraries, services, notifications) that later features can reuse.

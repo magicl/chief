@@ -1,6 +1,6 @@
 # Chief — Usability corrections
 
-This file relates to [`01-usability.md`](01-usability.md) and [`01-usability.impl.md`](01-usability.impl.md).
+This file relates to [`2026-06-26-usability-design.md`](2026-06-26-usability-design.md) and [`2026-06-26-usability-plan.md`](2026-06-26-usability-plan.md).
 
 FIX:
 

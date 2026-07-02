@@ -1,8 +1,8 @@
 # Chief — v0.1 Implementation Plan
 
-Companion to `00-design.md`. This breaks v0.1 into milestones with concrete,
+Companion to `2026-06-23-design-design.md`. This breaks v0.1 into milestones with concrete,
 ordered tasks, exact file locations, and explicit callouts for the parts that
-are likely to be tricky. Read `00-design.md` first for the *why*; this doc is
+are likely to be tricky. Read `2026-06-23-design-design.md` first for the *why*; this doc is
 the *how*.
 
 v0.1 goal (from the design): **create an agent from a hardcoded spec, manually
@@ -377,7 +377,7 @@ Acceptance: resume-after-kill and cold-attach both work; tests green.
 - **Tool-name validation at ingest**: should spec validation fail if a
   `ToolPermission.tool` doesn't exist in the `agents/tools` registry? Cheap to
   add once the registry is real; currently deferred.
-- **Interrupt-now vs queued injection** (from `00-design.md` open questions):
+- **Interrupt-now vs queued injection** (from `2026-06-23-design-design.md` open questions):
   v0.1 ships queued injection at the next checkpoint only.
 - **Dedicated `agent-runs` queue**: deferred to a later version (requires
   overriding `app.conf.task_queues`); v0.1 uses `default` with a tuned pool.

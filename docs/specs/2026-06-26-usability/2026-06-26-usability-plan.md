@@ -1,6 +1,6 @@
 # Chief — Usability implementation plan
 
-Companion to [`01-usability.md`](01-usability.md). Each section maps to one SPEC item and lists concrete build steps plus tests.
+Companion to [`2026-06-26-usability-design.md`](2026-06-26-usability-design.md). Each section maps to one SPEC item and lists concrete build steps plus tests.
 
 **Current baseline** (what exists today):
 
@@ -369,7 +369,7 @@ Run after implementation:
 
 ## SPEC traceability
 
-| SPEC item (`01-usability.md`) | Primary sections |
+| SPEC item (`2026-06-26-usability-design.md`) | Primary sections |
 |-------------------------------|------------------|
 | New agent → agent screen | §1 |
 | Agent identifier is a link | §2 |

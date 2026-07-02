@@ -1,6 +1,6 @@
 # Chief — Chat names (02) Implementation Plan
 
-Companion to `02-chat-names.md`. Read the spec first for the *why*; this doc
+Companion to `2026-07-01-chat-names-design.md`. Read the spec first for the *why*; this doc
 is the *how* — exact files, signatures, ordering, and decisions locked before
 coding.
 
