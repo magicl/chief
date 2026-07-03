@@ -12,7 +12,7 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 
 ## Specs
 
-- [ ] 1. Key management
+- [ ] 1. Key management — [spec](../specs/2026-07-03-key-management/)
 - [ ] 2. Agent config schema extensions
 - [ ] 3. Sources and queues
 - [ ] 4. Agent configuration UI
@@ -33,7 +33,7 @@ and full U1 routing.
 
 | Step | Spec(s) | Delivers |
 |------|---------|----------|
-| 1 | 1 | Named encrypted credentials; LLM defaults + external keys |
+| 1 | 1 | Encrypted system + user credentials; typed defaults, named keys, env fallback |
 | 2 | 2 | Tool instances in YAML (id, type, key ref, allow/deny per instance) |
 | 3 | 3 | General sources + robust queues (`max_attempts`, `failed` vs `exhausted`) + queue tool |
 | 4 | 4 | YAML-first config UI (everything editable in YAML; UI stays in sync) |
@@ -49,8 +49,9 @@ and full U1 routing.
 
 ### 1. Key management
 
-Named, encrypted credentials per user. UI to set default LLM keys and create
-arbitrary named keys. Tool instances reference a key by name — no secrets in YAML.
+Encrypted credentials (system + user scopes) as primary store; env fallback for LLM
+when absent. Typed defaults per service, named user keys, optional credential ref per
+agent/tool instance. Tool instances reference a key by name — no secrets in YAML.
 
 ### 2. Agent config schema extensions
 

@@ -24,6 +24,9 @@ chief/
 
 See `docs/specs/2026-07-01-chat-names/2026-07-01-chat-names-design.md` for the libs/services/notifications design.
 
+See `docs/ARCHITECTURE.md` (credentials section) and
+`docs/specs/2026-07-03-key-management/` for **credentials & secrets**.
+
 ## Chief-specific commands
 
 - **Development**: `./olib/scripts/orunr docker compose` to run the full stack.
@@ -59,9 +62,12 @@ Open the dashboard at `/` (log in via the header link; default superuser `admin`
 2. Click **Start** on the new agent row
 3. Chat on the session page; event log streams via SSE
 
-Set LLM API keys in `.env.local` under a `#[backend]` group (see `.env.local.example`).
-Docker Compose loads `.env.local` directly into backend/worker containers (optional file) and
-also bakes it into `.output/env.compose.backend` when you run `./olib/scripts/orunr docker compose`.
+LLM API keys: prefer **Settings → Keys** (encrypted store) once `apps.keys` lands; until
+then, set them in `.env.local` under `#[backend]` (see `.env.local.example`) — env is
+fallback only when no encrypted credential exists. See `docs/ARCHITECTURE.md`.
+
+Docker Compose loads `.env.local` into backend/worker containers (optional file) and bakes
+it into `.output/env.compose.backend` when you run `./olib/scripts/orunr docker compose`.
 
 ## Backend libs (`backend/libs/`)
 
@@ -78,8 +84,9 @@ Shared, Django-free packages live under `backend/libs/` (plural container):
 - Libs do **not** import `apps.*`.
 - Minimize coupling between libs; use one-directional deps and public interfaces.
 - Apps orchestrate; libs compute.
-- When a lib needs app/domain access later, **inject at the app boundary** (see
-  `apps.agents` tool wiring) — do not import Django from libs.
+- When a lib needs credentials or app/domain access, **inject at the app boundary**
+  (see `apps.agents` tool wiring and `docs/ARCHITECTURE.md` for secrets) — do not import
+  Django or `apps.keys` from libs.
 
 ```
 libs/providers          (stdlib + vendor SDKs)
@@ -94,13 +101,34 @@ Backend apps have **one-directional** imports (see `docs/specs/2026-06-23-design
 
 | App | Role | May import from |
 |-----|------|-----------------|
-| `apps.agents` | Domain core: models, `AgentConfigSpec`, tool wiring | Django/stdlib, `libs.tools` |
-| `apps.sessions` | Session + event log + session services/tasks | `agents`, `bus`, `libs.algorithms` (tasks only) |
+| `apps.agents` | Domain core: models, `AgentConfigSpec`, tool wiring | Django/stdlib, `libs.tools`, `keys` (resolve, via wiring) |
+| `apps.sessions` | Session + event log + session services/tasks | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
 | `apps.bus` | Redis pub/sub + mailbox primitives | Django/stdlib only |
-| `apps.runner` | Celery step loop, tool invocation | `agents`, `sessions`, `bus`, `libs.providers`, `libs.tools` |
-| `apps.web` | Dashboard, SSE, control endpoints | all of the above |
+| `apps.runner` | Celery step loop, tool invocation | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
+| `apps.keys` | Encrypted credentials (system + user) | Django/stdlib, `cryptography` only |
+| `apps.web` | Dashboard, SSE, control endpoints | all of the above (keys: metadata + commands only) |
 
-Direction: `agents → sessions → runner → web`, with `bus` as a leaf used by `runner` and `web`.
+Direction: `agents → sessions → runner → web`, with `bus` and `keys` as leaves (`keys`
+has no app imports; `web` must not import `resolve_*` from keys).
+
+## Credentials & secrets
+
+Architectural rules: **`docs/ARCHITECTURE.md`** (credentials). Implementation spec:
+`docs/specs/2026-07-03-key-management/2026-07-03-key-management-design.md`.
+
+| Rule | Detail |
+|------|--------|
+| Primary store | Fernet-encrypted rows in `apps.keys` (`SystemCredential`, `UserCredential`) |
+| Env fallback | LLM env vars only when no encrypted default exists |
+| Config | YAML uses **`credential_ref` / `key_ref` by name** — never `api_key` or token values |
+| UI | Write-only: Set / Not set on reload; password fields never prefilled |
+| `apps.web` | Metadata queries + commands only — **no `resolve_*`** |
+| `libs/*` | **No `apps.keys` imports** — receive `token_supplier` callables from app wiring |
+| Consumers | Resolve **at operation time**; do not cache secrets on session, config, or client fields |
+| Types | Every credential has a `type`; wiring passes `expected_type` — mismatch is an error |
+
+**Wiring pattern:** `apps.agents` / `apps.runner` call `make_secret_supplier(user_id, name=..., type=...)`
+and inject into providers or tool libs. Providers resolve inside `stream()` / `collect()`.
 
 ## App services (queries + commands)
 
