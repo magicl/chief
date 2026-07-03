@@ -17,6 +17,10 @@ from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
 from apps.agents.hardcoded import bootstrap_agent as create_bootstrap_agent
 from apps.agents.models import Agent
 from apps.bus.client import async_client, key_prefix
+from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
+from apps.keys.services import commands
+from apps.keys.services.queries import list_user_credentials
+from apps.keys.types import SERVICE_TYPES
 from apps.runner.dispatch import (
     maybe_dispatch_session,
     push_chat_and_dispatch,
@@ -297,3 +301,63 @@ def render_event_partial(request: HttpRequest, session_id: UUID) -> HttpResponse
     """HTMX SSE swap target — individual event rows."""
     # Events arrive via SSE client-side; this endpoint exists for future server push swaps.
     return HttpResponse('')
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def settings_keys(request: HttpRequest) -> HttpResponse:
+    """Write-only settings page for user-named credentials (metadata only)."""
+    user = cast(AbstractBaseUser, request.user)
+    return render(
+        request,
+        'web/keys.html',
+        {
+            'named_keys': list_user_credentials(user.pk),
+            'service_types': sorted(SERVICE_TYPES),
+        },
+    )
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
+    name = request.POST.get('name', '').strip()
+    type_name = request.POST.get('type', '').strip()
+    secret = request.POST.get('secret', '')
+    user = cast(AbstractBaseUser, request.user)
+    try:
+        commands.upsert_user_named(user.pk, name, type_name, secret)
+    except KeyValidationError as exc:
+        return HttpResponseBadRequest(str(exc))
+    return redirect('settings_keys')
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def settings_keys_update_named(request: HttpRequest, name: str) -> HttpResponse:
+    secret = request.POST.get('secret', '')
+    user = cast(AbstractBaseUser, request.user)
+    meta = next((row for row in list_user_credentials(user.pk) if row.name == name), None)
+    if meta is None:
+        raise Http404('Key not found')
+    try:
+        commands.upsert_user_named(user.pk, name, meta.type, secret)
+    except KeyValidationError as exc:
+        return HttpResponseBadRequest(str(exc))
+    return redirect('settings_keys')
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def settings_keys_delete_named(request: HttpRequest, name: str) -> HttpResponse:
+    user = cast(AbstractBaseUser, request.user)
+    try:
+        commands.delete_user_credential(user.pk, name)
+    except KeyValidationError as exc:
+        return HttpResponseBadRequest(str(exc))
+    except KeyNotFoundError as exc:
+        raise Http404('Key not found') from exc
+    return redirect('settings_keys')

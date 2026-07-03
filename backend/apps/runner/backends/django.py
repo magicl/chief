@@ -48,6 +48,10 @@ class DjangoSessionBackend(SessionBackend):
     def session(self) -> AgentSession:
         return self._session
 
+    @property
+    def user_id(self) -> int:
+        return self._session.agent.user_id
+
     def get_spec(self) -> AgentConfigSpec:
         return self._session.agent_config.get_spec()
 

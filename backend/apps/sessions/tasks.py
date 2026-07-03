@@ -10,9 +10,16 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from apps.agents.spec import LLMSpec
+from apps.runner.llm_config import provider_config_from_spec
+from apps.sessions.models import AgentSession
 from apps.sessions.services.queries import get_first_input_text, get_session_name
 from celery import shared_task
-from libs.algorithms.chat_name import ChatNameConfig, DEFAULT_CHAT_NAME_CONFIG, generate_chat_name
+from libs.algorithms.chat_name import (
+    DEFAULT_CHAT_NAME_CONFIG,
+    ChatNameConfig,
+    generate_chat_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +33,17 @@ def generate_session_name(self: Any, session_id: str) -> None:
     if text is None:
         return
     try:
-        name = generate_chat_name(text, config=DEFAULT_CHAT_NAME_CONFIG)
+        session = AgentSession.objects.select_related('agent').get(pk=uid)
+        user_id = session.agent.user_id
+        llm_cfg = provider_config_from_spec(
+            LLMSpec(
+                provider=DEFAULT_CHAT_NAME_CONFIG.provider,
+                model=DEFAULT_CHAT_NAME_CONFIG.model,
+                temperature=DEFAULT_CHAT_NAME_CONFIG.temperature,
+            ),
+            user_id=user_id,
+        )
+        name = generate_chat_name(text, config=DEFAULT_CHAT_NAME_CONFIG, llm=llm_cfg)
     except Exception:  # pylint: disable=broad-except
         logger.exception('Chat name generation failed for session %s', session_id)
         name = generate_chat_name(text, config=ChatNameConfig(enabled=False))

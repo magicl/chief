@@ -62,9 +62,8 @@ Open the dashboard at `/` (log in via the header link; default superuser `admin`
 2. Click **Start** on the new agent row
 3. Chat on the session page; event log streams via SSE
 
-LLM API keys: prefer **Settings → Keys** (encrypted store) once `apps.keys` lands; until
-then, set them in `.env.local` under `#[backend]` (see `.env.local.example`) — env is
-fallback only when no encrypted credential exists. See `docs/ARCHITECTURE.md`.
+LLM API keys: **Settings → Keys** (encrypted store) or `.env.local` under `#[backend]`
+(env is fallback only when no encrypted credential exists). See `docs/ARCHITECTURE.md`.
 
 Docker Compose loads `.env.local` into backend/worker containers (optional file) and bakes
 it into `.output/env.compose.backend` when you run `./olib/scripts/orunr docker compose`.
@@ -113,22 +112,8 @@ has no app imports; `web` must not import `resolve_*` from keys).
 
 ## Credentials & secrets
 
-Architectural rules: **`docs/ARCHITECTURE.md`** (credentials). Implementation spec:
-`docs/specs/2026-07-03-key-management/2026-07-03-key-management-design.md`.
-
-| Rule | Detail |
-|------|--------|
-| Primary store | Fernet-encrypted rows in `apps.keys` (`SystemCredential`, `UserCredential`) |
-| Env fallback | LLM env vars only when no encrypted default exists |
-| Config | YAML uses **`credential_ref` / `key_ref` by name** — never `api_key` or token values |
-| UI | Write-only: Set / Not set on reload; password fields never prefilled |
-| `apps.web` | Metadata queries + commands only — **no `resolve_*`** |
-| `libs/*` | **No `apps.keys` imports** — receive `token_supplier` callables from app wiring |
-| Consumers | Resolve **at operation time**; do not cache secrets on session, config, or client fields |
-| Types | Every credential has a `type`; wiring passes `expected_type` — mismatch is an error |
-
-**Wiring pattern:** `apps.agents` / `apps.runner` call `make_secret_supplier(user_id, name=..., type=...)`
-and inject into providers or tool libs. Providers resolve inside `stream()` / `collect()`.
+Rules and wiring patterns: **`docs/ARCHITECTURE.md`** (credentials section).
+Implementation spec: `docs/specs/2026-07-03-key-management/`.
 
 ## App services (queries + commands)
 

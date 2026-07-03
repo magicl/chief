@@ -80,6 +80,20 @@ class TestSessionRunner(OTestCase):
         kinds = [event.kind for event in backend.events()]
         self.assertIn(AgentSessionEventKind.FAILURE, kinds)
 
+    def test_credential_storage_misconfigured_records_distinct_failure(self) -> None:
+        backend = self._backend()
+        backend.push_mailbox({'action': 'chat', 'content': 'ping'})
+        runner = SessionRunner(backend)
+        error_result = StreamResult(
+            error=ProviderError(message='credential storage misconfigured', code='credential_storage_misconfigured'),
+        )
+        with patch('apps.runner.loop.make_provider', return_value=FakeProvider.for_responses([error_result])):
+            runner.run()
+        failure = next(event for event in backend.events() if event.kind == AgentSessionEventKind.FAILURE)
+        self.assertEqual(failure.payload['code'], 'credential_storage_misconfigured')
+        self.assertEqual(failure.payload['message'], 'credential storage misconfigured')
+        self.assertNotIn('traceback', failure.payload)
+
     def test_unsupported_provider_records_failure_event(self) -> None:
         backend = self._backend(llm=LLMSpec(provider='unknown-provider', model='x'))
         backend.push_mailbox({'action': 'chat', 'content': 'ping'})
@@ -88,3 +102,13 @@ class TestSessionRunner(OTestCase):
         self.assertEqual(backend.get_status(), AgentSessionStatus.WAITING)
         failure = next(event for event in backend.events() if event.kind == AgentSessionEventKind.FAILURE)
         self.assertEqual(failure.payload['code'], 'unsupported_llm_provider')
+
+    def test_env_only_backend_passes_no_supplier_to_provider_config(self) -> None:
+        backend = MemorySessionBackend(HARDCODED_SPEC.model_copy(), user_id=None)
+        backend.push_mailbox({'action': 'chat', 'content': 'ping'})
+        with patch('apps.runner.loop.make_provider') as mock_make:
+            mock_make.return_value = FakeProvider.for_responses([StreamResult(content='pong')])
+            SessionRunner(backend).run()
+        cfg = mock_make.call_args[0][0]
+        self.assertIsNone(cfg.user_id)
+        self.assertIsNone(cfg.secret_supplier)

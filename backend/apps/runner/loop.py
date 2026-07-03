@@ -17,7 +17,11 @@ from typing import Any
 from apps.agents.spec import AgentConfigSpec, ToolPermission
 from apps.runner.backends.base import SessionBackend
 from apps.runner.backends.django import DjangoSessionBackend
-from apps.runner.errors import SessionFailure, session_failure_from_provider_error
+from apps.runner.errors import (
+    SessionFailure,
+    session_failure_from_provider_error,
+    session_failure_from_provider_runtime_error,
+)
 from apps.runner.llm_config import provider_config_from_spec
 from apps.runner.tool_definitions import build_tool_definitions
 from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
@@ -76,7 +80,10 @@ class SessionRunner:
 
             if provider is None:
                 try:
-                    provider = make_provider(provider_config_from_spec(self.config_spec.llm))
+                    user_id = self.backend.user_id
+                    provider = make_provider(
+                        provider_config_from_spec(self.config_spec.llm, user_id=user_id),
+                    )
                 except ProviderConfigurationError as exc:
                     self._record_failure(session_failure_from_provider_error(exc))
                     return
@@ -101,7 +108,7 @@ class SessionRunner:
         self.backend.set_ended_at(timezone.now())
 
     def _record_provider_error(self, error: ProviderError) -> None:
-        self._record_failure(SessionFailure(error.message, code=error.code))
+        self._record_failure(session_failure_from_provider_runtime_error(error))
 
     def _record_failure(self, exc: Exception) -> None:
         if isinstance(exc, SessionFailure):

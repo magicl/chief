@@ -6,10 +6,17 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from collections.abc import Callable
+
+from pydantic import BaseModel, ConfigDict
 
 
 class ProviderLLMConfig(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     provider: str
     model: str
     temperature: float | None = None
+    credential_ref: str | None = None
+    user_id: int | None = None
+    secret_supplier: Callable[[], str | None] | None = None

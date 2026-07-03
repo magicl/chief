@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -19,10 +19,6 @@ from anthropic.types.input_json_delta import InputJSONDelta
 from anthropic.types.message_delta_usage import MessageDeltaUsage
 from anthropic.types.text_delta import TextDelta
 from anthropic.types.tool_use_block import ToolUseBlock
-from libs.providers.errors import MissingAnthropicCredentials
-from libs.providers.types import ProviderLLMConfig
-from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
-from libs.tools.schema import ToolDefinition
 from libs.providers.base import (
     Delta,
     LLMProvider,
@@ -31,7 +27,14 @@ from libs.providers.base import (
     StreamResult,
 )
 from libs.providers.base import Usage as ChiefUsage
+from libs.providers.errors import (
+    MissingAnthropicCredentials,
+    ProviderConfigurationError,
+)
 from libs.providers.spec import AnthropicProviderConfig
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
+from libs.tools.schema import ToolDefinition
 from pydantic import BaseModel
 
 
@@ -64,24 +67,33 @@ class AnthropicProvider(LLMProvider):
         ),
     }
 
-    def __init__(self, model: str, *, temperature: float | None = None) -> None:
+    def __init__(
+        self,
+        model: str,
+        *,
+        temperature: float | None = None,
+        secret_supplier: Callable[[], str | None] | None = None,
+    ) -> None:
         self.model = model.replace('.', '-')
         self.temperature = temperature
-        self._client: Anthropic | None = None
+        self._secret_supplier = secret_supplier
         self._last_usage: ChiefUsage | None = None
 
     @classmethod
     def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> AnthropicProvider:
         _ = AnthropicProviderConfig.model_validate(provider_config.model_dump())
-        return cls(llm.model, temperature=llm.temperature)
+        return cls(llm.model, temperature=llm.temperature, secret_supplier=llm.secret_supplier)
+
+    def _resolve_api_key(self) -> str | None:
+        if self._secret_supplier is not None:
+            return self._secret_supplier()
+        return os.environ.get('ANTHROPIC_API_KEY')
 
     def get_client(self) -> Anthropic:
-        if self._client is None:
-            api_key = os.environ.get('ANTHROPIC_API_KEY')
-            if not api_key:
-                raise MissingAnthropicCredentials()
-            self._client = Anthropic(api_key=api_key)
-        return self._client
+        api_key = self._resolve_api_key()
+        if not api_key:
+            raise MissingAnthropicCredentials()
+        return Anthropic(api_key=api_key)
 
     def format_tools(self, definitions: list[ToolDefinition]) -> list[dict[str, Any]]:
         return [
@@ -204,7 +216,7 @@ class AnthropicProvider(LLMProvider):
                 usage=usage,
                 latency_ms=int((time.monotonic() - started) * 1000),
             )
-        except MissingAnthropicCredentials as exc:
+        except ProviderConfigurationError as exc:
             return StreamResult(
                 error=ProviderError(message=exc.message, code=exc.code),
                 latency_ms=int((time.monotonic() - started) * 1000),

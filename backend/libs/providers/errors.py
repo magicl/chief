@@ -28,3 +28,8 @@ class UnsupportedLLMProvider(ProviderConfigurationError):
     def __init__(self, provider: str) -> None:
         self.provider = provider
         super().__init__(f'Unsupported LLM provider: {provider}', code='unsupported_llm_provider')
+
+
+class CredentialStorageMisconfigured(ProviderConfigurationError):
+    def __init__(self) -> None:
+        super().__init__('credential storage misconfigured', code='credential_storage_misconfigured')

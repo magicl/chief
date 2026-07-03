@@ -21,6 +21,7 @@ INSTALLED_APPS += [  # noqa: F405
     'apps.bus',
     'apps.runner',
     'apps.web',
+    'apps.keys',
     'django_extensions',
 ]
 

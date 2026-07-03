@@ -37,6 +37,7 @@ def generate_chat_name(
     first_message: str,
     *,
     config: ChatNameConfig | None = None,
+    llm: ProviderLLMConfig | None = None,
 ) -> str:
     cfg = config or DEFAULT_CHAT_NAME_CONFIG
     message = first_message.strip()
@@ -45,13 +46,13 @@ def generate_chat_name(
     if not message:
         return _fallback_title(message, cfg)
 
-    llm = ProviderLLMConfig(
+    provider_config = llm or ProviderLLMConfig(
         provider=cfg.provider,
         model=cfg.model,
         temperature=cfg.temperature,
     )
     try:
-        provider = make_provider(llm)
+        provider = make_provider(provider_config)
         result = provider.collect(
             [
                 {'role': 'system', 'content': _SYSTEM_PROMPT},

@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from decimal import Decimal
 from typing import ClassVar
 
-from libs.providers.types import ProviderLLMConfig
 from libs.providers.base import ModelPricing, Usage
 from libs.providers.openai_provider import OpenAIProvider
 from libs.providers.spec import LocalOpenAIProviderConfig
+from libs.providers.types import ProviderLLMConfig
 from pydantic import BaseModel
 
 
@@ -45,6 +46,7 @@ class LocalOpenAIProvider(OpenAIProvider):
             temperature=llm.temperature,
             power_watts=config.power_watts,
             power_usd_per_kwh=config.power_usd_per_kwh,
+            secret_supplier=llm.secret_supplier,
         )
 
     def __init__(
@@ -55,16 +57,24 @@ class LocalOpenAIProvider(OpenAIProvider):
         temperature: float | None = None,
         power_watts: Decimal | None = None,
         power_usd_per_kwh: Decimal | None = None,
+        secret_supplier: Callable[[], str | None] | None = None,
     ) -> None:
         base_url = hostname if '://' in hostname else f'http://{hostname}/v1'
         super().__init__(
             model,
             temperature=temperature,
             base_url=base_url,
-            api_key=os.environ.get('LOCAL_OPENAI_API_KEY', 'local'),
+            secret_supplier=secret_supplier,
         )
         self._power_watts = power_watts or Decimal(os.environ.get('LOCAL_LLM_POWER_WATTS', '300'))
         self._power_usd_per_kwh = power_usd_per_kwh or Decimal(os.environ.get('LOCAL_LLM_POWER_USD_PER_KWH', '0.15'))
+
+    def _resolve_api_key(self) -> str | None:
+        if self._secret_supplier is not None:
+            key = self._secret_supplier()
+            if key:
+                return key
+        return os.environ.get('LOCAL_OPENAI_API_KEY', 'local')
 
     def compute_cost_usd(self, usage: Usage, *, latency_ms: int | None = None) -> Decimal | None:
         """Estimate USD cost from GPU/server power draw and wall-clock latency."""

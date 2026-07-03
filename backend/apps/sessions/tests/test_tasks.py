@@ -14,7 +14,7 @@ from olib.py.django.test.cases import OTransactionTestCase
 
 
 class TestGenerateSessionNameTask(OTransactionTestCase):
-    @patch('apps.sessions.notify.publish_session_update')
+    @patch('apps.sessions.services.commands.publish_session_update')
     @patch('apps.sessions.tasks.generate_chat_name', return_value='Password reset help')
     def test_task_sets_session_name(self, _mock_generate: Any, _mock_publish: Any) -> None:
         session = make_test_session('name-task-agent')

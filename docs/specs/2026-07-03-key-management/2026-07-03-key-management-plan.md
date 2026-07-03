@@ -2,7 +2,7 @@
 
 Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **1 of 9** · Item: **Key management**
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers/subagent-driven-development (recommended) or superpowers/executing-plans to implement this plan task-by-task. Before the first code change, create `docs/specs/2026-07-03-key-management/2026-07-03-key-management-revision.md` from the review template in `docs/specs/01-superpowers/01-superpowers.spec.md` — for the human reviewer to fill in **after** implementation; **do not read `-revision.md` during implementation** unless the user explicitly asks. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers/subagent-driven-development` (recommended) or `superpowers/executing-plans` to implement this plan task-by-task. **Complete Step 0 below before any code change** — checkout the feature branch, then create `-revision.md`. Do **not** read `-revision.md` during implementation unless the user explicitly asks. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Store LLM and service credentials in encrypted Postgres (`apps.keys`), resolve them at operation time, and expose a write-only Settings / Keys UI — env vars remain LLM fallback only.
 
@@ -14,6 +14,44 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **1 
 
 **Design spec:** [`2026-07-03-key-management-design.md`](./2026-07-03-key-management-design.md)
 **Arch rules (brief):** [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md)
+**Superpowers policy:** [`olib/docs/specs/01-superpowers/01-superpowers.spec.md`](../../olib/docs/specs/01-superpowers/01-superpowers.spec.md)
+
+---
+
+## Step 0 — Pre-implementation (mandatory)
+
+**Gate:** Do **not** start S0 Task 1 (or write any application code) until every checkbox here is done. This matches **Step 0** in `superpowers/executing-plans` and `superpowers/subagent-driven-development`.
+
+- [ ] **Step 0a: Checkout feature branch**
+
+Read **Branch:** from this plan header (must match `-design.md`). From the `chief/` repo root:
+
+```bash
+git checkout feat/2026-07-03-key-management || git checkout -b feat/2026-07-03-key-management
+git branch --show-current   # must print feat/2026-07-03-key-management
+```
+
+**Never** implement on `main`, `master`, or the repository default branch. If you are on the default branch, stop and switch before continuing.
+
+Optional isolation: use `superpowers/using-git-worktrees` to work in `.worktrees/` on the same branch name.
+
+- [ ] **Step 0b: Create review template**
+
+Create `docs/specs/2026-07-03-key-management/2026-07-03-key-management-revision.md` from the **Revision template** in [`olib/docs/specs/01-superpowers/01-superpowers.spec.md`](../../olib/docs/specs/01-superpowers/01-superpowers.spec.md). Leave it empty for the human reviewer — **do not read it during implementation**.
+
+- [ ] **Step 0c: Commit pre-implementation artifacts (if not already on branch)**
+
+If Step 0 files were created on the feature branch and are uncommitted, commit and sync:
+
+```bash
+git add docs/specs/2026-07-03-key-management/2026-07-03-key-management-revision.md
+git commit -m "docs(keys): add implementation review template"
+git fetch origin main
+git rebase origin/main
+git push -u origin HEAD
+```
+
+Skip 0c if `-revision.md` is already committed on the feature branch.
 
 ---
 
@@ -24,7 +62,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **1 
 - Migrations: `./olib/scripts/orunr django manage makemigrations keys` (never hand-write)
 - Test base: `olib.py.django.test.cases.OTransactionTestCase`
 - Avoid parproc keywords in test names (`error`, `exception`, …)
-- **Git:** checkout `feat/2026-07-03-key-management` before first change; after each stage commit: `git fetch origin main && git rebase origin/main && git push`
+- **Git (after each stage commit):** `git fetch origin main && git rebase origin/main && git push` — stop on rebase conflicts; never commit on `main`/`master`/default branch
 
 ---
 
@@ -91,6 +129,8 @@ chief/settings.py        # + apps.keys
 ---
 
 ## S0 — Scaffold `apps.keys`
+
+**Prerequisite:** Step 0 complete (feature branch checked out; `-revision.md` exists).
 
 ### Task 1: App package + models
 
@@ -882,6 +922,7 @@ Document: generate with `python -c "from cryptography.fernet import Fernet; prin
 
 | Spec section | Task |
 |--------------|------|
+| Feature branch + review template (Superpowers Step 0) | Step 0 (before S0) |
 | `apps.keys` models + encryption | S0 Tasks 1–3 |
 | Services API (metadata + resolve + commands) | S1 Tasks 4–5 |
 | System admin | S1 Task 6 |

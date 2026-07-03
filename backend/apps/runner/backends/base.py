@@ -104,3 +104,9 @@ class SessionBackend(ABC):
     @abstractmethod
     def events(self) -> list[RecordedEvent]:
         raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def user_id(self) -> int | None:
+        """Session owner for credential resolution; None means env-only (no DB lookup)."""
+        raise NotImplementedError

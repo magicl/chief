@@ -44,8 +44,13 @@ def resolve_run_agent_spec(
     )
 
 
-def run_agent_turn(*, input_text: str, spec: AgentConfigSpec) -> MemorySessionBackend:
-    backend = memory_backend_for_turn(spec, input_text=input_text)
+def run_agent_turn(
+    *,
+    input_text: str,
+    spec: AgentConfigSpec,
+    user_id: int | None = None,
+) -> MemorySessionBackend:
+    backend = memory_backend_for_turn(spec, input_text=input_text, user_id=user_id)
     SessionRunner(backend).run()
     return backend
 
@@ -69,5 +74,9 @@ def run_agent_from_options(options: dict[str, Any], *, stream: _TextStream) -> N
         spec=options.get('spec'),
         spec_file=options.get('spec_file'),
     )
-    backend = run_agent_turn(input_text=options['input'], spec=spec)
+    backend = run_agent_turn(
+        input_text=options['input'],
+        spec=spec,
+        user_id=options.get('user_id'),
+    )
     write_run_agent_events(backend, stream)

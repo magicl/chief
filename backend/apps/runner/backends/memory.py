@@ -20,9 +20,22 @@ from django.utils import timezone
 
 
 class MemorySessionBackend(SessionBackend):
-    def __init__(self, spec: AgentConfigSpec, *, session_id: uuid.UUID | None = None) -> None:
+    def __init__(
+        self,
+        spec: AgentConfigSpec,
+        *,
+        session_id: uuid.UUID | None = None,
+        user_id: int | None = None,
+    ) -> None:
+        """In-memory backend for CLI runs and tests.
+
+        ``user_id`` selects encrypted credential resolution. ``None`` (default) uses
+        env vars only — no ``apps.keys`` DB lookup. Pass an explicit pk or use
+        ``run_agent --user-id`` to exercise stored credentials.
+        """
         self._session_id = session_id or uuid.uuid4()
         self._spec = spec
+        self._user_id = user_id
         self._status: str = AgentSessionStatus.QUEUED
         self._events: list[RecordedEvent] = []
         self._mailbox: list[dict[str, Any]] = []
@@ -32,6 +45,11 @@ class MemorySessionBackend(SessionBackend):
     @property
     def session_id(self) -> uuid.UUID:
         return self._session_id
+
+    @property
+    def user_id(self) -> int | None:
+        """Session owner for credential resolution; None means env-only."""
+        return self._user_id
 
     @property
     def published_events(self) -> list[dict[str, Any]]:
@@ -98,9 +116,14 @@ class MemorySessionBackend(SessionBackend):
         return list(self._events)
 
 
-def memory_backend_for_turn(spec: AgentConfigSpec, *, input_text: str) -> MemorySessionBackend:
+def memory_backend_for_turn(
+    spec: AgentConfigSpec,
+    *,
+    input_text: str,
+    user_id: int | None = None,
+) -> MemorySessionBackend:
     """Single-turn in-memory session preloaded with one user message."""
-    backend = MemorySessionBackend(spec)
+    backend = MemorySessionBackend(spec, user_id=user_id)
     backend.append_event(AgentSessionEventKind.INPUT, {'content': input_text})
     backend.set_status(AgentSessionStatus.QUEUED)
     return backend

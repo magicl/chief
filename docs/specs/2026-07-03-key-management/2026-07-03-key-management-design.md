@@ -646,6 +646,14 @@ Follow parproc naming rules (avoid “error”/“exception” in test names).
 
 ## Implementation stages
 
+**Pre-implementation (Step 0 — mandatory before any code):**
+
+1. Checkout or create **`feat/2026-07-03-key-management`** (see **Branch** above). Never commit application code on `main`/`master`/default branch.
+2. Create `2026-07-03-key-management-revision.md` from the review template in [`olib/docs/specs/01-superpowers/01-superpowers.spec.md`](../../olib/docs/specs/01-superpowers/01-superpowers.spec.md). Implementers follow `-plan.md` only; do not read `-revision.md` unless the user asks.
+3. Executors use `superpowers/executing-plans` or `superpowers/subagent-driven-development` — both require **Step 0: checkout feature branch** before the first code change.
+
+**Stages** (each leaves `orunr py test-all` green; commit → fetch → rebase `origin/main` → push after each PR-ready chunk):
+
 0. **Scaffold `apps.keys`** — models, migration, crypto, type registry, register in
    `INSTALLED_APPS`.
 1. **Services** — queries + commands + unit tests (system + user, resolution order,
@@ -656,8 +664,6 @@ Follow parproc naming rules (avoid “error”/“exception” in test names).
 4. **Docs** — [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) (credentials section),
    `.env.local.example` (`CHIEF_CREDENTIALS_KEY`), trim duplicate detail from
    `AGENTS.local.md` (point at ARCHITECTURE + this spec).
-
-Each stage leaves `orunr py test-all` green.
 
 ---
 

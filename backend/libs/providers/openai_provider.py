@@ -9,14 +9,10 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from libs.providers.errors import MissingOpenAICredentials
-from libs.providers.types import ProviderLLMConfig
-from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
-from libs.tools.schema import ToolDefinition
 from libs.providers.base import (
     Delta,
     LLMProvider,
@@ -25,7 +21,11 @@ from libs.providers.base import (
     StreamResult,
     Usage,
 )
+from libs.providers.errors import MissingOpenAICredentials, ProviderConfigurationError
 from libs.providers.spec import OpenAIProviderConfig
+from libs.providers.types import ProviderLLMConfig
+from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
+from libs.tools.schema import ToolDefinition
 from openai import OpenAI
 from openai.types import CompletionUsage
 from pydantic import BaseModel
@@ -60,31 +60,39 @@ class OpenAIProvider(LLMProvider):
         temperature: float | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        secret_supplier: Callable[[], str | None] | None = None,
     ) -> None:
         self.model = model
         self.temperature = temperature
         self._base_url = base_url
         self._api_key_override = api_key
-        self._client: OpenAI | None = None
+        self._secret_supplier = secret_supplier
         self._last_usage: Usage | None = None
 
     @classmethod
     def _from_spec(cls, provider_config: BaseModel, llm: ProviderLLMConfig) -> OpenAIProvider:
         _ = OpenAIProviderConfig.model_validate(provider_config.model_dump())
-        return cls(llm.model, temperature=llm.temperature)
+        return cls(
+            llm.model,
+            temperature=llm.temperature,
+            secret_supplier=llm.secret_supplier,
+        )
+
+    def _resolve_api_key(self) -> str | None:
+        if self._api_key_override is not None:
+            return self._api_key_override
+        if self._secret_supplier is not None:
+            return self._secret_supplier()
+        return os.environ.get('OPENAI_API_KEY')
 
     def get_client(self) -> OpenAI:
-        if self._client is None:
-            resolved_key = (
-                self._api_key_override if self._api_key_override is not None else os.environ.get('OPENAI_API_KEY')
-            )
-            if not resolved_key:
-                raise MissingOpenAICredentials()
-            client_kwargs: dict[str, Any] = {'api_key': resolved_key}
-            if self._base_url is not None:
-                client_kwargs['base_url'] = self._base_url
-            self._client = OpenAI(**client_kwargs)
-        return self._client
+        resolved_key = self._resolve_api_key()
+        if not resolved_key:
+            raise MissingOpenAICredentials()
+        client_kwargs: dict[str, Any] = {'api_key': resolved_key}
+        if self._base_url is not None:
+            client_kwargs['base_url'] = self._base_url
+        return OpenAI(**client_kwargs)
 
     def format_tools(self, definitions: list[ToolDefinition]) -> list[dict[str, Any]]:
         return [
@@ -188,7 +196,7 @@ class OpenAIProvider(LLMProvider):
                 usage=usage,
                 latency_ms=int((time.monotonic() - started) * 1000),
             )
-        except MissingOpenAICredentials as exc:
+        except ProviderConfigurationError as exc:
             return StreamResult(
                 error=ProviderError(message=exc.message, code=exc.code),
                 latency_ms=int((time.monotonic() - started) * 1000),

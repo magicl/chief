@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from libs.providers.base import ProviderError
 from libs.providers.errors import ProviderConfigurationError
 
 
@@ -33,5 +34,20 @@ class UnsupportedLLMProvider(SessionFailure):
         super().__init__(f'Unsupported LLM provider: {provider}', code='unsupported_llm_provider')
 
 
+class CredentialStorageMisconfigured(SessionFailure):
+    def __init__(self) -> None:
+        super().__init__('credential storage misconfigured', code='credential_storage_misconfigured')
+
+
 def session_failure_from_provider_error(exc: ProviderConfigurationError) -> SessionFailure:
+    """Map provider setup errors raised before the first LLM call."""
+    if exc.code == 'credential_storage_misconfigured':
+        return CredentialStorageMisconfigured()
     return SessionFailure(exc.message, code=exc.code)
+
+
+def session_failure_from_provider_runtime_error(error: ProviderError) -> SessionFailure:
+    """Map a provider runtime error to the session failure shown in the dashboard."""
+    if error.code == 'credential_storage_misconfigured':
+        return CredentialStorageMisconfigured()
+    return SessionFailure(error.message, code=error.code)

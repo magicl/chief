@@ -1,0 +1,53 @@
+{% extends "web/base.html" %}
+
+{% block title %}Keys — Chief{% endblock %}
+
+{% block content %}
+<h2>Named keys</h2>
+<p class="muted">Credentials you own, referenced by name in agent config. System-wide defaults are managed by staff in Django admin.</p>
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>Status</th><th>Updated</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for key in named_keys %}
+      <tr>
+        <td><code>{{ key.name }}</code></td>
+        <td>{{ key.type }}</td>
+        <td>{% if key.is_set %}<span class="pill succeeded">Set</span>{% else %}<span class="pill waiting">Not set</span>{% endif %}</td>
+        <td class="muted">{% if key.updated_at %}{{ key.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+        <td style="display:flex; gap:.5rem; flex-wrap:wrap;">
+          <form method="post" action="{{ url('settings_keys_update_named', kwargs={'name': key.name}) }}" style="display:flex; gap:.35rem; align-items:center;">
+            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+            <input type="password" name="secret" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" placeholder="Replace secret" style="padding:.3rem .5rem;">
+            <button type="submit" style="padding:.3rem .6rem;">Replace</button>
+          </form>
+          <form method="post" action="{{ url('settings_keys_delete_named', kwargs={'name': key.name}) }}">
+            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+            <button type="submit" style="padding:.3rem .6rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">No named keys yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h3 style="font-size:.85rem; margin-top:1.25rem; color:#8b93a7;">Add key</h3>
+  <form method="post" action="{{ url('settings_keys_add_named') }}" style="display:grid; gap:.5rem; max-width:480px; margin-top:.5rem;">
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+    <label>Name <input type="text" name="name" pattern="[a-z][a-z0-9_-]{0,63}" required autocomplete="off" style="width:100%; padding:.35rem .5rem;"></label>
+    <label>Type
+      <select name="type" required style="width:100%; padding:.35rem .5rem;">
+        {% for t in service_types %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Secret <input type="password" name="secret" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" required style="width:100%; padding:.35rem .5rem;"></label>
+    <button type="submit" style="padding:.4rem .75rem; width:fit-content;">Save</button>
+  </form>
+</div>
+{% endblock %}

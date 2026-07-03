@@ -24,6 +24,12 @@ class Command(BaseCommand):
         parser.add_argument('--system-prompt', help='System prompt when using --provider/--model')
         parser.add_argument('--spec', help='Full AgentConfigSpec as JSON or YAML string')
         parser.add_argument('--spec-file', help='Path to AgentConfigSpec JSON or YAML file')
+        parser.add_argument(
+            '--user-id',
+            type=int,
+            default=None,
+            help='Resolve encrypted credentials for this user (default: env-only, no DB lookup)',
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         try:
