@@ -18,6 +18,8 @@
 .actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; }
 .actions button, .actions a.btn { padding:.4rem .75rem; border-radius:8px; border:1px solid #262a33; background:#1d3a5f; color:#9ec5ff; cursor:pointer; text-decoration:none; font-size:.85rem; }
 .history table { font-size:.85rem; }
+.cred-option-set { color:#9be7a8; }
+.cred-option-unset { color:#b8c0d4; }
 {% endblock %}
 
 {% block content %}
@@ -34,7 +36,7 @@
     <span>Revision: <code>{{ source_rev[:48] }}{% if source_rev|length > 48 %}…{% endif %}</code></span>
     <span>Schema v{{ spec_version }}</span>
     {% if pinned_sessions %}<span>{{ pinned_sessions }} active session(s) on older config</span>{% endif %}
-    {% if file_path %}<span>File: <code>{{ file_path }}</code></span>{% endif %}
+    {% if file_path %}<span>Path: <code>{{ file_path }}</code></span>{% endif %}
   </div>
 
   <div class="actions">
@@ -66,7 +68,28 @@
         </label>
         <label>Model <input name="model" id="helper-model" required></label>
         <label>Temperature <input name="temperature" type="number" step="0.1" min="0" max="2"></label>
-        <label>Credential ref <input name="credential_ref" placeholder="default or named key"></label>
+        <label>Credential ref
+          <select name="credential_ref">
+            <option value="">(default)</option>
+            {% for cred_type, creds in catalog.credentials.items() %}
+            {% for cred in creds %}
+            <option value="{{ cred.name }}" class="{% if cred.is_set %}cred-option-set{% else %}cred-option-unset{% endif %}">
+              {{ cred.name }} — {% if cred.is_set %}Set{% else %}Not set{% endif %} ({{ cred_type }})
+            </option>
+            {% endfor %}
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Apply to YAML</button>
+      </form>
+    </details>
+
+    <details>
+      <summary>System prompt helper</summary>
+      <form class="helper-form" data-mutation="set_system_prompt">
+        <label>System prompt
+          <textarea name="system_prompt" rows="8" required placeholder="You are a helpful assistant."></textarea>
+        </label>
         <button type="submit">Apply to YAML</button>
       </form>
     </details>
@@ -76,17 +99,37 @@
       <form class="helper-form" data-mutation="add_tool">
         <label>Id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required placeholder="my-gmail"></label>
         <label>Type
-          <select name="type" required>
+          <select name="type" id="helper-tool-type" required>
             {% for t in catalog.tool_types %}
-            <option value="{{ t.type }}">{{ t.type }}</option>
+            <option value="{{ t.type }}" data-credential-type="{{ t.credential_type or '' }}">{{ t.type }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>Credential ref <input name="credential_ref"></label>
+        <label>Credential ref
+          <select name="credential_ref" id="helper-tool-credential">
+            <option value="">(default)</option>
+          </select>
+        </label>
         <label>Allow (comma-separated) <input name="allow" value="*"></label>
         <button type="submit">Add tool</button>
       </form>
     </details>
+
+    {% if spec_summary.tools %}
+    <details>
+      <summary>Remove tool instance</summary>
+      <form class="helper-form" data-mutation="remove_tool">
+        <label>Tool id
+          <select name="id" required>
+            {% for t in spec_summary.tools %}
+            <option value="{{ t.id }}">{{ t.id }} ({{ t.type }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Remove tool</button>
+      </form>
+    </details>
+    {% endif %}
 
     <details>
       <summary>Add trigger</summary>
@@ -104,6 +147,22 @@
       </form>
     </details>
 
+    {% if spec_summary.triggers %}
+    <details>
+      <summary>Remove trigger</summary>
+      <form class="helper-form" data-mutation="remove_trigger">
+        <label>Trigger name
+          <select name="name" required>
+            {% for t in spec_summary.triggers %}
+            <option value="{{ t.name }}">{{ t.name }} ({{ t.kind }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Remove trigger</button>
+      </form>
+    </details>
+    {% endif %}
+
     <details>
       <summary>Add queue</summary>
       <form class="helper-form" data-mutation="add_queue">
@@ -112,6 +171,54 @@
         <button type="submit">Add queue</button>
       </form>
     </details>
+
+    {% if spec_summary.queues %}
+    <details>
+      <summary>Remove queue</summary>
+      <form class="helper-form" data-mutation="remove_queue">
+        <label>Queue id
+          <select name="id" required>
+            {% for q in spec_summary.queues %}
+            <option value="{{ q.id }}">{{ q.id }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Remove queue</button>
+      </form>
+    </details>
+    {% endif %}
+
+    {% if spec_summary.queues %}
+    <details>
+      <summary>Add queue source</summary>
+      <form class="helper-form" data-mutation="add_source">
+        <label>Queue
+          <select name="queue_id" required>
+            {% for q in spec_summary.queues %}
+            <option value="{{ q.id }}">{{ q.id }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Source id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required></label>
+        <label>Adapter type
+          <select name="type" id="helper-adapter-type" required>
+            {% for a in catalog.adapter_types %}
+            <option value="{{ a.type }}" data-credential-type="{{ a.credential_type or '' }}">{{ a.type }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Credential ref
+          <select name="credential_ref" id="helper-source-credential">
+            <option value="">(default)</option>
+          </select>
+        </label>
+        <label>Adapter config (JSON)
+          <textarea name="config_json" rows="4" placeholder="{}">{}</textarea>
+        </label>
+        <button type="submit">Add source</button>
+      </form>
+    </details>
+    {% endif %}
   </section>
 
   <section class="card history">
@@ -136,13 +243,15 @@
   </section>
 
   <section class="card">
-    <h2>File source</h2>
+    <h2>Bind to config file</h2>
+    <p class="muted" style="margin-top:0;">Optional: load this agent's spec from a YAML file on disk. Leave path empty and save to edit only in the UI.</p>
     <form method="post" action="{{ url('agent_config_source', kwargs={'agent_id': agent.id}) }}" style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:end;">
       <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
       <label style="flex:1; min-width:280px;">Absolute path
         <input type="text" name="file_path" value="{{ file_path }}" placeholder="/workspace/agents/foo.yaml" style="width:100%; padding:.35rem .5rem;">
       </label>
-      <button type="submit">Set file source</button>
+      <button type="submit">{% if file_path %}Update path{% else %}Bind file{% endif %}</button>
+      {% if file_path %}<button type="submit" name="file_path" value="">Unbind</button>{% endif %}
     </form>
   </section>
 </div>
@@ -153,7 +262,8 @@
     save: "{{ save_url }}",
     mutate: "{{ mutate_url }}",
     csrf: "{{ csrf_token }}",
+    credentials: {{ catalog_json }},
   };
 </script>
-<script type="module" src="{{ static('web/agent_config_editor.js') }}"></script>
+<script type="module" src="{{ static('web/codemirror/agent_config_editor.bundle.mjs') }}"></script>
 {% endblock %}

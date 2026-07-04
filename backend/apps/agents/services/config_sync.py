@@ -12,6 +12,10 @@ from datetime import UTC, datetime
 from apps.agents.models import Agent
 
 
+class ConfigSyncError(ValueError):
+    """File-backed config sync or save metadata failure."""
+
+
 def normalize_spec_bytes(raw: str) -> bytes:
     """Normalize YAML text for stable content hashing."""
     return raw.replace('\r\n', '\n').encode('utf-8')
@@ -39,20 +43,27 @@ def file_path_from_source(config_source: str) -> str | None:
 
 def compute_save_metadata(agent: Agent, raw_yaml: str) -> tuple[str, bool]:
     """Compute ``source_rev`` and ``dirty`` for a UI save."""
+    save_hash = spec_content_hash(raw_yaml)
     file_path = file_path_from_source(agent.config_source)
     if file_path is None:
         ts = datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')
         return f'ui:{ts}', False
-    file_hash = spec_content_hash(read_file_spec_text(file_path))
-    save_hash = spec_content_hash(raw_yaml)
+    try:
+        file_text = read_file_spec_text(file_path)
+    except OSError as exc:
+        raise ConfigSyncError(
+            f'Cannot read bound config file ({file_path}): {exc}',
+        ) from exc
+    file_hash = spec_content_hash(file_text)
     dirty = file_hash != save_hash
-    return f'ui-save:{save_hash}', dirty
+    digest = save_hash.removeprefix('sha256:')
+    return f'ui-sha256:{digest}', dirty
 
 
 def config_source_label(config_source: str) -> str:
     """Human-readable label for the config source badge."""
     if config_source.startswith('file:'):
-        return 'File'
+        return 'Config file'
     if config_source == 'ui':
         return 'UI'
     return 'Legacy'

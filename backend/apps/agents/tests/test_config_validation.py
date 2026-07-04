@@ -25,6 +25,31 @@ class ValidateAgentConfigYamlTests(OTestCase):
         with self.assertRaises(ConfigValidationError) as ctx:
             validate_agent_config_yaml('not: [valid')
         self.assertTrue(ctx.exception.errors)
+        self.assertIsNotNone(ctx.exception.errors[0].line)
+
+    def test_unknown_adapter_returns_structured_error(self) -> None:
+        spec = load_example('queue-echo')
+        spec = spec.model_copy(
+            update={
+                'queues': [
+                    spec.queues[0].model_copy(
+                        update={
+                            'sources': [
+                                spec.queues[0]
+                                .sources[0]
+                                .model_copy(
+                                    update={'adapter_type': 'nonexistent-adapter'},
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+            },
+        )
+        raw = dump_agent_config_spec(spec)
+        with self.assertRaises(ConfigValidationError) as ctx:
+            validate_agent_config_yaml(raw)
+        self.assertTrue(any('adapter' in e.message.lower() for e in ctx.exception.errors))
 
     def test_unknown_tool_returns_structured_error(self) -> None:
         spec = load_example('clock-assistant')

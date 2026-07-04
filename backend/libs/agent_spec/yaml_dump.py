@@ -29,7 +29,7 @@ def dump_agent_config_spec(spec: AgentConfigSpec) -> str:
     return yaml.dump(
         data,
         Dumper=_AgentSpecDumper,
-        sort_keys=False,
+        sort_keys=True,
         default_flow_style=False,
         allow_unicode=True,
         width=120,

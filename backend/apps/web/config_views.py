@@ -15,6 +15,7 @@ from apps.agents.ingest import persist_agent_config
 from apps.agents.models import AgentConfig
 from apps.agents.services.config_commands import (
     ConfigCommandError,
+    clear_file_source,
     create_from_example,
     create_from_yaml,
     set_file_source,
@@ -24,13 +25,14 @@ from apps.agents.services.config_mutations import (
     ConfigMutationError,
     apply_config_mutation,
 )
-from apps.agents.services.config_sync import compute_save_metadata
+from apps.agents.services.config_sync import ConfigSyncError, compute_save_metadata
 from apps.agents.services.config_validation import (
     ConfigValidationError,
     validate_agent_config_yaml,
 )
 from apps.agents.services.queries import build_config_catalog, get_config_editor_context
 from apps.web.views import _owned_agent
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
 from django.http import (
@@ -42,7 +44,7 @@ from django.http import (
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
 from libs.agent_specs import list_examples
 
@@ -54,6 +56,13 @@ def _validation_json_response(exc: ConfigValidationError) -> JsonResponse:
     )
 
 
+def _command_error_response(request: HttpRequest, message: str) -> HttpResponse:
+    if 'application/json' in request.headers.get('Accept', ''):
+        return JsonResponse({'errors': [{'path': '', 'message': message}]}, status=400)
+    messages.error(request, message)
+    return HttpResponseBadRequest(message)
+
+
 def _parse_mutation(request: HttpRequest) -> dict[str, Any]:
     raw = request.POST.get('mutation', '').strip()
     if raw:
@@ -63,19 +72,15 @@ def _parse_mutation(request: HttpRequest) -> dict[str, Any]:
 
 
 @login_required(login_url='/admin/login/')
-@require_GET
-def agent_create(request: HttpRequest) -> HttpResponse:
-    return render(
-        request,
-        'web/agent_create.html',
-        {'examples': list_examples()},
-    )
-
-
-@login_required(login_url='/admin/login/')
 @csrf_protect
-@require_POST
-def agent_create_submit(request: HttpRequest) -> HttpResponse:
+@require_http_methods(['GET', 'POST'])
+def agent_create(request: HttpRequest) -> HttpResponse:
+    if request.method == 'GET':
+        return render(
+            request,
+            'web/agent_create.html',
+            {'examples': list_examples()},
+        )
     user = cast(AbstractBaseUser, request.user)
     example_slug = request.POST.get('example_slug', '').strip()
     spec_yaml = request.POST.get('spec_yaml', '').strip()
@@ -128,9 +133,11 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
         return JsonResponse({'errors': [{'path': '', 'message': 'spec_yaml required'}]}, status=400)
     try:
         spec = validate_agent_config_yaml(spec_yaml)
+        source_rev, dirty = compute_save_metadata(agent, spec_yaml)
     except ConfigValidationError as exc:
         return _validation_json_response(exc)
-    source_rev, dirty = compute_save_metadata(agent, spec_yaml)
+    except ConfigSyncError as exc:
+        return _command_error_response(request, str(exc))
     persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty)
     if request.headers.get('Accept', '').find('application/json') >= 0:
         return JsonResponse({'ok': True, 'source_rev': source_rev, 'dirty': dirty})
@@ -141,7 +148,7 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @csrf_protect
 @require_POST
 def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
-    del agent_id
+    _owned_agent(request, agent_id)
     spec_yaml = request.POST.get('spec_yaml', '')
     if not spec_yaml.strip():
         return JsonResponse({'errors': [{'path': '', 'message': 'spec_yaml required'}]}, status=400)
@@ -165,9 +172,11 @@ def agent_config_sync(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     except ConfigValidationError as exc:
         return _validation_json_response(exc)
     except ConfigCommandError as exc:
-        return JsonResponse({'errors': [{'path': '', 'message': str(exc)}]}, status=400)
+        return _command_error_response(request, str(exc))
     if result is None:
-        return redirect('agent_config', agent_id=agent.id)
+        messages.info(request, 'Config file is up to date.')
+    else:
+        messages.success(request, 'Reloaded configuration from file.')
     return redirect('agent_config', agent_id=agent.id)
 
 
@@ -178,15 +187,16 @@ def agent_config_source(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     agent = _owned_agent(request, agent_id)
     path = request.POST.get('file_path', '').strip()
     if not path:
-        agent.config_source = 'ui'
-        agent.save(update_fields=['config_source'])
+        clear_file_source(agent)
+        messages.info(request, 'Stopped syncing from config file.')
         return redirect('agent_config', agent_id=agent.id)
     try:
         set_file_source(agent, path, sync_now=True)
     except ConfigValidationError as exc:
         return _validation_json_response(exc)
     except ConfigCommandError as exc:
-        return JsonResponse({'errors': [{'path': '', 'message': str(exc)}]}, status=400)
+        return _command_error_response(request, str(exc))
+    messages.success(request, 'Bound agent to config file.')
     return redirect('agent_config', agent_id=agent.id)
 
 
@@ -195,12 +205,14 @@ def agent_config_source(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 def agent_config_history(request: HttpRequest, agent_id: UUID, config_id: UUID) -> HttpResponse:
     agent = _owned_agent(request, agent_id)
     config = get_object_or_404(AgentConfig, pk=config_id, agent=agent)
+    spec_yaml = dump_agent_config_spec(config.get_spec())
     return render(
         request,
         'web/agent_config_history.html',
         {
             'agent': agent,
             'config': config,
-            'spec_yaml': dump_agent_config_spec(config.get_spec()),
+            'spec_yaml': spec_yaml,
+            'spec_yaml_json': json.dumps(spec_yaml),
         },
     )

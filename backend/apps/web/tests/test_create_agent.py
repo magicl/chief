@@ -24,20 +24,20 @@ class TestCreateAgentView(OTransactionTestCase):
         self.other = User.objects.create_user(username='other-user', password='test')
 
     def test_requires_login(self) -> None:
-        response = self.client.post(reverse('agent_create_submit'), _CREATE_POST)
+        response = self.client.post(reverse('agent_create'), _CREATE_POST)
         self.assertEqual(response.status_code, 302)
         self.assertIn('/admin/login/', response['Location'])
 
-    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/create/submit/', count=1)])
+    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/create/', count=1)])
     def test_requires_example_or_yaml(self) -> None:
         self.client.force_login(self.user)
-        response = self.client.post(reverse('agent_create_submit'))
+        response = self.client.post(reverse('agent_create'))
         self.assertEqual(response.status_code, 400)
 
     def test_creates_agent_from_example(self) -> None:
         self.client.force_login(self.user)
         before = Agent.objects.filter(user=self.user).count()
-        response = self.client.post(reverse('agent_create_submit'), _CREATE_POST)
+        response = self.client.post(reverse('agent_create'), _CREATE_POST)
         self.assertEqual(response.status_code, 302)
         agent = Agent.objects.filter(user=self.user).order_by('-id').first()
         assert agent is not None
@@ -60,15 +60,15 @@ class TestCreateAgentView(OTransactionTestCase):
 
     def test_each_click_creates_new_agent(self) -> None:
         self.client.force_login(self.user)
-        self.client.post(reverse('agent_create_submit'), _CREATE_POST)
-        self.client.post(reverse('agent_create_submit'), _CREATE_POST)
+        self.client.post(reverse('agent_create'), _CREATE_POST)
+        self.client.post(reverse('agent_create'), _CREATE_POST)
         agents = Agent.objects.filter(user=self.user)
         self.assertEqual(agents.count(), 2)
 
     def test_dashboard_shows_only_own_agents(self) -> None:
         create_from_example(self.other, 'clock-assistant', identifier='other-agent')
         self.client.force_login(self.user)
-        self.client.post(reverse('agent_create_submit'), _CREATE_POST)
+        self.client.post(reverse('agent_create'), _CREATE_POST)
         response = self.client.get(reverse('dashboard'))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'other-agent')
@@ -76,7 +76,7 @@ class TestCreateAgentView(OTransactionTestCase):
 
     def test_delete_agent_removes_own_agent(self) -> None:
         self.client.force_login(self.user)
-        self.client.post(reverse('agent_create_submit'), _CREATE_POST)
+        self.client.post(reverse('agent_create'), _CREATE_POST)
         agent = Agent.objects.filter(user=self.user).first()
         assert agent is not None
         response = self.client.post(reverse('delete_agent', kwargs={'agent_id': agent.id}))

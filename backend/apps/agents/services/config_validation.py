@@ -32,6 +32,13 @@ class ConfigValidationError(Exception):
         super().__init__(errors[0].message if errors else 'validation failed')
 
 
+def _yaml_error_line(exc: yaml.YAMLError) -> int | None:
+    mark = getattr(exc, 'problem_mark', None)
+    if mark is None:
+        return None
+    return int(mark.line) + 1
+
+
 def _pydantic_errors(exc: ValidationError) -> list[ValidationErrorItem]:
     items: list[ValidationErrorItem] = []
     for err in exc.errors():
@@ -61,9 +68,20 @@ def _validate_queue_sources(spec: AgentConfigSpec) -> list[ValidationErrorItem]:
     return items
 
 
+def validate_agent_config_spec(spec: AgentConfigSpec) -> AgentConfigSpec:
+    """Validate an in-memory spec (tools + queue adapters)."""
+    try:
+        validate_spec_tools(spec)
+    except IngestError as exc:
+        raise ConfigValidationError([ValidationErrorItem(path='tools', message=str(exc))]) from exc
+    errors = _validate_queue_sources(spec)
+    if errors:
+        raise ConfigValidationError(errors)
+    return spec
+
+
 def validate_agent_config_yaml(raw: str) -> AgentConfigSpec:
     """Parse and fully validate *raw* YAML; raise ``ConfigValidationError`` on failure."""
-    errors: list[ValidationErrorItem] = []
     try:
         spec = load_agent_config_spec(raw)
     except UnsupportedSpecVersionError as exc:
@@ -72,21 +90,10 @@ def validate_agent_config_yaml(raw: str) -> AgentConfigSpec:
         ) from exc
     except ValidationError as exc:
         raise ConfigValidationError(_pydantic_errors(exc)) from exc
-    except ValueError as exc:
-        msg = str(exc)
-        line = None
-        if 'line' in msg.lower():
-            pass
-        raise ConfigValidationError([ValidationErrorItem(path='', message=msg, line=line)]) from exc
     except yaml.YAMLError as exc:
+        raise ConfigValidationError(
+            [ValidationErrorItem(path='', message=str(exc), line=_yaml_error_line(exc))],
+        ) from exc
+    except ValueError as exc:
         raise ConfigValidationError([ValidationErrorItem(path='', message=str(exc))]) from exc
-
-    try:
-        validate_spec_tools(spec)
-    except IngestError as exc:
-        raise ConfigValidationError([ValidationErrorItem(path='tools', message=str(exc))]) from exc
-
-    errors.extend(_validate_queue_sources(spec))
-    if errors:
-        raise ConfigValidationError(errors)
-    return spec
+    return validate_agent_config_spec(spec)

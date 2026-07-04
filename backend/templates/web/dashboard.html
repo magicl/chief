@@ -11,7 +11,7 @@
     <div class="create-agents">
       <a href="{{ url('agent_create') }}" class="primary" style="text-decoration:none;">Create agent</a>
       {% for ex in examples %}
-      <form method="post" action="{{ url('agent_create_submit') }}">
+      <form method="post" action="{{ url('agent_create') }}">
         <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
         <input type="hidden" name="example_slug" value="{{ ex.slug }}">
         <button type="submit" class="primary">{{ ex.title }}</button>

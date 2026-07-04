@@ -8,7 +8,6 @@ from django.urls import path
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('agents/create/', config_views.agent_create, name='agent_create'),
-    path('agents/create/submit/', config_views.agent_create_submit, name='agent_create_submit'),
     path('agents/<uuid:agent_id>/', views.agent_detail, name='agent_detail'),
     path('agents/<uuid:agent_id>/config/', config_views.agent_config, name='agent_config'),
     path('agents/<uuid:agent_id>/config/save/', config_views.agent_config_save, name='agent_config_save'),

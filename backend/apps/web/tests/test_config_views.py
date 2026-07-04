@@ -55,3 +55,47 @@ class AgentConfigWebTests(OTestCase):
         self.assertEqual(response.status_code, 200)
         self.agent.refresh_from_db()
         self.assertNotEqual(self.agent.current_config_id, before)
+
+    def test_mutate_add_tool_returns_yaml(self) -> None:
+        url = reverse('agent_config_mutate', kwargs={'agent_id': self.agent.id})
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+        mutation = json.dumps({'action': 'add_tool', 'id': 'queue', 'type': 'queue', 'allow': ['take']})
+        response = self.client.post(url, {'spec_yaml': spec_yaml, 'mutation': mutation})
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertIn('yaml', payload)
+        self.assertIn('id: queue', payload['yaml'])
+
+    def test_config_page_404_for_other_user(self) -> None:
+        other = get_user_model().objects.create_user(username='other', password='secret')
+        other_agent = create_from_example(other, 'clock-assistant', identifier='other-agent')
+        url = reverse('agent_config', kwargs={'agent_id': other_agent.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_save_with_missing_bound_file_returns_400(self) -> None:
+        self.agent.config_source = 'file:/tmp/missing-chief-agent-config.yaml'
+        self.agent.save(update_fields=['config_source'])
+        url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+        response = self.client.post(url, {'spec_yaml': spec_yaml}, HTTP_ACCEPT='application/json')
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.content)
+        self.assertIn('errors', payload)
+
+    def test_create_from_yaml_via_web(self) -> None:
+        spec_yaml = dump_agent_config_spec(load_example('queue-echo'))
+        response = self.client.post(
+            reverse('agent_create'),
+            {'spec_yaml': spec_yaml, 'identifier': 'queue-web'},
+        )
+        self.assertEqual(response.status_code, 302)
+        agent = Agent.objects.get(identifier='queue-web')
+        config = agent.current_config
+        assert config is not None
+        self.assertEqual(len(config.get_spec().queues), 1)
+
+    def test_import_errors_rendered_on_create_page(self) -> None:
+        response = self.client.post(reverse('agent_create'), {'spec_yaml': 'not: [valid'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Could not import YAML')

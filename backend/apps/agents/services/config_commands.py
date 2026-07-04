@@ -16,7 +16,7 @@ from apps.agents.services.config_sync import (
 from apps.agents.services.config_validation import validate_agent_config_yaml
 from django.contrib.auth.models import AbstractBaseUser
 from libs.agent_spec import AgentConfigSpec
-from libs.agent_specs import load_example
+from libs.agent_specs import load_example_text
 
 from olib.py.utils.uuid7 import uuid7
 
@@ -33,9 +33,10 @@ def create_from_example(
 ) -> Agent:
     """Instantiate an agent from a shipped example spec."""
     try:
-        spec = load_example(slug)
+        raw = load_example_text(slug)
     except FileNotFoundError as exc:
         raise ConfigCommandError(str(exc)) from exc
+    spec = validate_agent_config_yaml(raw)
     return create_agent_from_spec(
         user,
         spec,
@@ -94,3 +95,14 @@ def sync_from_file(agent: Agent) -> AgentConfigSpec | None:
     spec = validate_agent_config_yaml(raw)
     persist_agent_config(agent, spec, source_rev=file_hash, dirty=False)
     return spec
+
+
+def clear_file_source(agent: Agent) -> Agent:
+    """Unbind a file-backed agent and clear stale dirty on the current revision."""
+    agent.config_source = 'ui'
+    agent.save(update_fields=['config_source'])
+    config = agent.current_config
+    if config is not None and config.dirty:
+        config.dirty = False
+        config.save(update_fields=['dirty'])
+    return agent

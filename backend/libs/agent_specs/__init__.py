@@ -17,7 +17,19 @@ from libs.agent_spec import AgentConfigSpec, load_spec
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent / 'examples'
 
-_EXAMPLES_DIR = Path(__file__).resolve().parent / 'examples'
+
+def _example_path(slug: str) -> Path:
+    """Resolve a safe path under ``examples/`` for *slug*."""
+    if '/' in slug or '\\' in slug or slug in ('.', '..') or '..' in slug:
+        raise FileNotFoundError(f'Unknown example spec {slug!r}')
+    path = (_EXAMPLES_DIR / f'{slug}.yaml').resolve()
+    if not path.is_relative_to(_EXAMPLES_DIR.resolve()):
+        raise FileNotFoundError(f'Unknown example spec {slug!r}')
+    if not path.is_file():
+        raise FileNotFoundError(f'Unknown example spec {slug!r}')
+    return path
+
+
 _META_TITLE = re.compile(r'^#\s*title:\s*(.+)$', re.MULTILINE)
 _META_DESC = re.compile(r'^#\s*description:\s*(.+)$', re.MULTILINE)
 
@@ -66,10 +78,7 @@ def _parse_structured_text(raw: str) -> Any:
 
 def load_example_text(slug: str) -> str:
     """Return raw YAML text for an example spec."""
-    path = _EXAMPLES_DIR / f'{slug}.yaml'
-    if not path.is_file():
-        raise FileNotFoundError(f'Unknown example spec {slug!r}')
-    return path.read_text(encoding='utf-8')
+    return _example_path(slug).read_text(encoding='utf-8')
 
 
 def load_example(slug: str) -> AgentConfigSpec:

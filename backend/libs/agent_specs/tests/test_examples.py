@@ -25,3 +25,11 @@ class AgentSpecsTests(OTestCase):
         spec = load_example('queue-echo')
         self.assertEqual(len(spec.queues), 1)
         self.assertEqual(spec.queues[0].id, 'inbox')
+
+    def test_load_example_rejects_path_traversal(self) -> None:
+        from libs.agent_specs import load_example_text
+
+        with self.assertRaises(FileNotFoundError):
+            load_example_text('../../../config')
+        with self.assertRaises(FileNotFoundError):
+            load_example_text('..')

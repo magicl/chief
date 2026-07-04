@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.agents.services.config_validation import validate_agent_config_yaml
+from apps.agents.services.config_validation import (
+    validate_agent_config_spec,
+    validate_agent_config_yaml,
+)
 from libs.agent_spec import (
     LLMSpec,
     QueueSpec,
@@ -126,5 +129,5 @@ def apply_config_mutation(raw: str, mutation: dict[str, Any]) -> str:
     else:
         raise ConfigMutationError(f'Unknown action {action!r}')
 
-    validate_agent_config_yaml(dump_agent_config_spec(spec))
+    validate_agent_config_spec(spec)
     return dump_agent_config_spec(spec)

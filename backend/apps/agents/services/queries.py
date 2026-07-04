@@ -34,8 +34,27 @@ SCHEMA_KEYS = [
     'llm.credential_ref',
     'system_prompt',
     'triggers',
+    'triggers[]',
+    'triggers[].name',
+    'triggers[].kind',
+    'triggers[].cron',
     'tools',
+    'tools[]',
+    'tools[].id',
+    'tools[].type',
+    'tools[].credential_ref',
+    'tools[].allow',
+    'tools[].deny',
     'queues',
+    'queues[]',
+    'queues[].id',
+    'queues[].max_attempts',
+    'queues[].sources',
+    'queues[].sources[]',
+    'queues[].sources[].id',
+    'queues[].sources[].adapter_type',
+    'queues[].sources[].credential_ref',
+    'queues[].sources[].config',
 ]
 
 
@@ -122,6 +141,20 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     ).count()
 
     catalog = build_config_catalog(user_id)
+    spec_summary: dict[str, Any] = {'tools': [], 'triggers': [], 'queues': []}
+    if config is not None:
+        spec = config.get_spec()
+        spec_summary = {
+            'tools': [{'id': t.id, 'type': t.type} for t in spec.tools],
+            'triggers': [{'name': t.name, 'kind': t.kind} for t in spec.triggers],
+            'queues': [
+                {
+                    'id': q.id,
+                    'sources': [{'id': s.id, 'type': s.adapter_type} for s in q.sources],
+                }
+                for q in spec.queues
+            ],
+        }
     return {
         'agent': agent,
         'config': config,
@@ -135,6 +168,7 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'pinned_sessions': pinned_sessions,
         'catalog': catalog,
         'catalog_json': json.dumps(catalog),
+        'spec_summary': spec_summary,
         'page_data_json': json.dumps(
             {
                 'initialYaml': spec_yaml,

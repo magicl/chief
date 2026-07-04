@@ -45,6 +45,11 @@
     .pill.queued, .pill.waiting { background: #2a3040; color: #b8c0d4; }
     .pill.paused { background: #3d3a1f; color: #f0e29b; }
     .pill.done { background: #1f4023; color: #9be7a8; }
+    .flash-messages { margin-bottom: 1rem; display: grid; gap: .5rem; }
+    .flash { padding: .6rem .9rem; border-radius: 8px; font-size: .9rem; }
+    .flash.success { background: #1f4023; color: #9be7a8; }
+    .flash.info { background: #1d3a5f; color: #9ec5ff; }
+    .flash.error { background: #4a2326; color: #ff9ea3; }
     .muted { color: #8b93a7; }
     .empty { color: #6b7282; font-style: italic; }
     {% block extra_styles %}{% endblock %}
@@ -64,6 +69,13 @@
     </span>
   </header>
   <main class="{% block main_class %}{% endblock %}">
+    {% if messages %}
+    <div class="flash-messages">
+      {% for message in messages %}
+      <div class="flash {{ message.tags }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   {% block extra_scripts %}{% endblock %}

@@ -6,11 +6,22 @@
 <h2>Create agent</h2>
 <p class="muted">Start from an example spec or paste your own YAML.</p>
 
+{% if import_errors %}
+<div class="errors" style="background:#4a2326; color:#ff9ea3; border-radius:8px; padding:.75rem 1rem; margin-bottom:1rem;">
+  <strong>Could not import YAML:</strong>
+  <ul style="margin:.25rem 0 0; padding-left:1.25rem;">
+    {% for err in import_errors %}
+    <li>{% if err.path %}{{ err.path }}: {% endif %}{{ err.message }}{% if err.line %} (line {{ err.line }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <section class="card" style="margin-bottom:1.5rem;">
   <h2>Examples</h2>
   <div class="example-grid">
     {% for ex in examples %}
-    <form method="post" action="{{ url('agent_create_submit') }}" class="example-card">
+    <form method="post" action="{{ url('agent_create') }}" class="example-card">
       <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
       <input type="hidden" name="example_slug" value="{{ ex.slug }}">
       <h3>{{ ex.title }}</h3>
@@ -26,11 +37,11 @@
 
 <section class="card">
   <h2>Import YAML</h2>
-  <form method="post" action="{{ url('agent_create_submit') }}" id="import-form">
+  <form method="post" action="{{ url('agent_create') }}" id="import-form">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
     <label>Identifier (optional) <input type="text" name="identifier" style="width:100%; padding:.35rem .5rem;"></label>
     <label style="display:block; margin-top:.75rem;">YAML
-      <textarea name="spec_yaml" rows="16" style="width:100%; font-family:monospace; padding:.5rem;" placeholder="schema_version: 1&#10;..."></textarea>
+      <textarea name="spec_yaml" rows="16" style="width:100%; font-family:monospace; padding:.5rem;" placeholder="schema_version: 1&#10;...">{{ spec_yaml or '' }}</textarea>
     </label>
     <button type="submit" class="primary" style="margin-top:.75rem;">Create from YAML</button>
   </form>
