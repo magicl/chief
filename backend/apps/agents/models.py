@@ -4,7 +4,7 @@
 # ~
 """Agent domain models."""
 
-from apps.agents.spec import AgentConfigSpec
+from apps.agents.spec import AgentConfigSpec, load_spec
 from django.conf import settings
 from django.db import models
 
@@ -40,9 +40,10 @@ class AgentConfig(models.Model):
     dirty = models.BooleanField(default=False)
     fetched_at = models.DateTimeField(auto_now_add=True)
     spec = models.JSONField()
+    spec_version = models.PositiveSmallIntegerField(default=0)
 
     def get_spec(self) -> AgentConfigSpec:
-        return AgentConfigSpec.model_validate(self.spec)
+        return load_spec(self.spec, stored_version=self.spec_version)
 
     def __str__(self) -> str:
         return f'{self.agent.identifier}@{self.source_rev}'

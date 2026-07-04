@@ -5,7 +5,7 @@
 from anthropic.types import RawMessageStreamEvent
 from anthropic.types.raw_content_block_start_event import RawContentBlockStartEvent
 from anthropic.types.text_block import TextBlock
-from apps.agents.spec import ToolPermission
+from apps.agents.spec import ToolInstance
 from apps.runner.tool_definitions import build_tool_definitions
 from libs.providers.anthropic_provider import AnthropicProvider
 from pydantic import TypeAdapter
@@ -19,7 +19,7 @@ class TestToolsAnthropicProvider(OTestCase):
     def test_format_tools_uses_wire_safe_names(self) -> None:
         provider = AnthropicProvider('claude-haiku-4-5')
         definitions = build_tool_definitions(
-            [ToolPermission(tool='clock', allow=['now'])],
+            [ToolInstance(id='clock', type='clock', allow=['now'])],
             is_allowed=lambda *_args, **_kwargs: True,
         )
         tools = provider.format_tools(definitions)

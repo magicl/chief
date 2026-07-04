@@ -112,3 +112,26 @@ class TestSessionRunner(OTestCase):
         cfg = mock_make.call_args[0][0]
         self.assertIsNone(cfg.user_id)
         self.assertIsNone(cfg.secret_supplier)
+
+    def test_tool_call_invokes_bound_instance(self) -> None:
+        backend = self._backend()
+        backend.push_mailbox({'action': 'chat', 'content': 'time?'})
+        tool_call = StreamResult(content='', tool_calls=[{'name': 'clock__now', 'arguments': {}, 'id': '1'}])
+        follow_up = StreamResult(content='done')
+        with patch(
+            'apps.runner.loop.make_provider',
+            return_value=FakeProvider.for_responses([tool_call, follow_up]),
+        ):
+            SessionRunner(backend).run()
+        tool_results = [e for e in backend.events() if e.kind == AgentSessionEventKind.TOOL_RESULT]
+        self.assertTrue(any('T' in e.payload.get('content', '') for e in tool_results))
+
+    def test_loop_passes_llm_credential_ref_to_provider_config(self) -> None:
+        llm = LLMSpec(provider='openai', model='gpt-5.4-mini', credential_ref='my-openai')
+        backend = self._backend(llm=llm)
+        backend.push_mailbox({'action': 'chat', 'content': 'ping'})
+        with patch('apps.runner.loop.make_provider') as mock_make:
+            mock_make.return_value = FakeProvider.for_responses([StreamResult(content='pong')])
+            SessionRunner(backend).run()
+        cfg = mock_make.call_args[0][0]
+        self.assertEqual(cfg.credential_ref, 'my-openai')

@@ -14,7 +14,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from apps.agents.spec import AgentConfigSpec, ToolPermission
+from apps.agents.spec import AgentConfigSpec, ToolInstance
+from apps.agents.tool_wiring import build_bound_tools
 from apps.runner.backends.base import SessionBackend
 from apps.runner.backends.django import DjangoSessionBackend
 from apps.runner.errors import (
@@ -30,7 +31,6 @@ from libs.providers.base import LLMProvider, ProviderError, StreamResult
 from libs.providers.errors import ProviderConfigurationError
 from libs.providers.registry import make_provider
 from libs.tools.base import parse_qualified_tool_name
-from libs.tools.registry import get_tool
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,10 @@ class SessionRunner:
     def __init__(self, backend: SessionBackend, *, emit_restart: bool = False) -> None:
         self.backend = backend
         self.config_spec: AgentConfigSpec = backend.get_spec()
+        self.bound_tools = build_bound_tools(
+            self.config_spec.tools,
+            user_id=self.backend.user_id,
+        )
         self.control = LoopControl()
         self.emit_restart = emit_restart
 
@@ -82,7 +86,11 @@ class SessionRunner:
                 try:
                     user_id = self.backend.user_id
                     provider = make_provider(
-                        provider_config_from_spec(self.config_spec.llm, user_id=user_id),
+                        provider_config_from_spec(
+                            self.config_spec.llm,
+                            user_id=user_id,
+                            credential_ref=self.config_spec.llm.credential_ref,
+                        ),
                     )
                 except ProviderConfigurationError as exc:
                     self._record_failure(session_failure_from_provider_error(exc))
@@ -153,33 +161,35 @@ class SessionRunner:
         self.backend.publish_event(event)
 
     def _handle_tool_call(self, call: dict[str, Any]) -> None:
-        qualified_name = call['name']
-        tool_name, function_name = self._parse_tool_name(qualified_name)
+        wire_name = call['name']
+        instance_id, function_name = self._parse_tool_name(wire_name)
         arguments = call.get('arguments', {})
         call_id = call.get('id') or str(uuid.uuid4())
 
-        if not self._is_allowed(tool_name, function_name):
-            result_content = json.dumps({'failure': f'Permission denied for {tool_name}.{function_name}'})
+        bound = self.bound_tools.get(instance_id)
+        tool_type = bound.tool_type if bound is not None else None
+
+        if not self._is_allowed(instance_id, function_name):
+            result_content = json.dumps({'failure': f'Permission denied for {instance_id}.{function_name}'})
+            tool_latency_ms = 0
+        elif bound is None:
+            result_content = json.dumps({'failure': f'Unknown tool instance {instance_id!r}'})
             tool_latency_ms = 0
         else:
-            tool = get_tool(tool_name)
-            if tool is None:
-                result_content = json.dumps({'failure': f'Unknown tool {tool_name!r}'})
-                tool_latency_ms = 0
-            else:
-                started = time.monotonic()
-                try:
-                    raw = tool.invoke(function_name, arguments)
-                    result_content = raw if isinstance(raw, str) else json.dumps(raw)
-                except Exception as exc:  # pylint: disable=broad-except
-                    result_content = json.dumps({'failure': str(exc)})
-                tool_latency_ms = int((time.monotonic() - started) * 1000)
+            started = time.monotonic()
+            try:
+                raw = bound.invoke(function_name, arguments)
+                result_content = raw if isinstance(raw, str) else json.dumps(raw)
+            except Exception as exc:  # pylint: disable=broad-except
+                result_content = json.dumps({'failure': str(exc)})
+            tool_latency_ms = int((time.monotonic() - started) * 1000)
 
         tc_event = self.backend.append_event(
             AgentSessionEventKind.TOOL_CALL,
             {
                 'call_id': call_id,
-                'tool': tool_name,
+                'instance_id': instance_id,
+                'type': tool_type,
                 'function': function_name,
                 'arguments': arguments,
             },
@@ -195,23 +205,23 @@ class SessionRunner:
 
     def _is_allowed(
         self,
-        tool_name: str,
+        instance_id: str,
         function_name: str,
         *,
-        permission: ToolPermission | None = None,
+        instance: ToolInstance | None = None,
     ) -> bool:
-        if permission is None:
-            for perm in self.config_spec.tools:
-                if perm.tool == tool_name:
-                    permission = perm
+        if instance is None:
+            for inst in self.config_spec.tools:
+                if inst.id == instance_id:
+                    instance = inst
                     break
-        if permission is None:
+        if instance is None:
             return False
-        if function_name in permission.deny:
+        if function_name in instance.deny:
             return False
-        if '*' in permission.allow:
+        if '*' in instance.allow:
             return True
-        return function_name in permission.allow
+        return function_name in instance.allow
 
     @staticmethod
     def _needs_user_input(messages: list[dict[str, Any]]) -> bool:

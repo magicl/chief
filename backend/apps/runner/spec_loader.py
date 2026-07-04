@@ -11,13 +11,19 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolPermission, TriggerSpec
+from apps.agents.spec import (
+    AgentConfigSpec,
+    LLMSpec,
+    ToolInstance,
+    TriggerSpec,
+    load_spec,
+)
 
 
 def load_agent_config_spec(raw: str) -> AgentConfigSpec:
     """Parse *raw* as JSON or YAML into an ``AgentConfigSpec``."""
     data = _parse_structured_text(raw)
-    return AgentConfigSpec.model_validate(data)
+    return load_spec(data)
 
 
 def load_agent_config_spec_file(path: str | Path) -> AgentConfigSpec:
@@ -31,13 +37,14 @@ def build_agent_config_spec(
     model: str,
     temperature: float | None = None,
     system_prompt: str,
-    tools: list[ToolPermission] | None = None,
+    tools: list[ToolInstance] | None = None,
 ) -> AgentConfigSpec:
     return AgentConfigSpec(
+        schema_version=1,
         llm=LLMSpec(provider=provider, model=model, temperature=temperature),
         system_prompt=system_prompt,
         triggers=[TriggerSpec(name='manual', kind='manual')],
-        tools=tools or [ToolPermission(tool='clock', allow=['now'])],
+        tools=tools or [ToolInstance(id='clock', type='clock', allow=['now'])],
     )
 
 

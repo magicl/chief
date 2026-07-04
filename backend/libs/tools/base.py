@@ -26,9 +26,15 @@ def qualified_tool_name(tool_name: str, function_name: str) -> str:
     return f'{tool_name}.{function_name}'
 
 
-def wire_tool_name(qualified_name: str) -> str:
-    """Provider-safe tool name (``^[a-zA-Z0-9_-]+$``) — maps ``clock.now`` to ``clock__now``."""
-    tool, fn = parse_qualified_tool_name(qualified_name)
+def wire_tool_name(tool_name: str, function_name: str | None = None) -> str:
+    """Provider-safe tool name (``^[a-zA-Z0-9_-]+$``).
+
+    With two args: ``wire_tool_name('clock-a', 'now')`` → ``clock-a__now``.
+    With one arg: maps ``clock.now`` or ``clock__now`` to the wire form.
+    """
+    if function_name is not None:
+        return f'{tool_name}__{function_name}'
+    tool, fn = parse_qualified_tool_name(tool_name)
     return f'{tool}__{fn}'
 
 
@@ -51,6 +57,7 @@ class Tool(ABC):
     """A tool namespace (e.g. ``clock``) with one or more sub-functions."""
 
     name: str
+    credential_type: str | None = None
 
     @abstractmethod
     def functions(self) -> list[ToolFunction]:

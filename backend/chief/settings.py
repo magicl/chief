@@ -31,6 +31,13 @@ WSGI_APPLICATION = 'chief.wsgi.application'
 
 SITE_NAME = env.str('SITE_NAME', default='Chief')  # noqa: F405
 
+# Fernet master key for credential encryption at rest (see apps.keys.crypto).
+# Required when DEBUG is False; dev default when DEBUG is True.
+CREDENTIALS_KEY = env_secret(  # noqa: F405
+    'CREDENTIALS_KEY',
+    debug_default='9aVIpUljhBqM8r_SWsV6t9fn3Y4oGFRMBuM7-BKCxkk=',
+)
+
 # Server-rendered app: keep CSRF/session cookies usable over plain http in dev.
 SESSION_COOKIE_SAMESITE = 'Lax'
 

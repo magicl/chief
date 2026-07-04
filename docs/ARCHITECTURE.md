@@ -52,13 +52,18 @@ Architectural rules (all features must follow):
 
 1. **Encrypted store is primary.** Postgres (`apps.keys`); env vars are dev/ops
    fallback for LLM types only when no stored credential exists.
-2. **Refs in config, secrets at runtime.** YAML names credentials (`credential_ref`,
-   `key_ref`) — never embed values.
-3. **Write-only for humans.** UI and admin accept secrets; surfaces show **Set / Not
+2. **Refs in config, secrets at runtime.** YAML names credentials with
+   **`credential_ref`** (LLM block and tool instances) — never embed values.
+3. **Versioned agent config.** `AgentConfigSpec` carries **`schema_version`**;
+   **`AgentConfig.spec_version`** mirrors it on the row. **Load:** apply the upgrade
+   chain in code so any stored version becomes the current in-memory shape. **Save:**
+   always persist at the latest version as a **new** config row. Never rewrite spec JSON
+   in Django data migrations; no bulk background upgrade.
+4. **Write-only for humans.** UI and admin accept secrets; surfaces show **Set / Not
    set** only — no read-back, hints, or prefilled password fields.
-4. **Just-in-time for machines.** Resolve immediately before use; do not retain
+5. **Just-in-time for machines.** Resolve immediately before use; do not retain
    plaintext on session state, config objects, or library client fields.
-5. **Type-safe wiring.** Every credential has a `type`; consumers declare
+6. **Type-safe wiring.** Every credential has a `type`; consumers declare
    `expected_type` and reject mismatches.
 
 **Import boundary:** `apps.web` uses metadata queries + commands only (no `resolve_*`).

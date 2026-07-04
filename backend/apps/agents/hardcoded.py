@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from apps.agents.ingest import create_agent_from_spec
 from apps.agents.models import Agent
-from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolPermission, TriggerSpec
+from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolInstance, TriggerSpec
 from django.contrib.auth.models import AbstractBaseUser
 
 HARDCODED_SPEC = AgentConfigSpec(
+    schema_version=1,
     description='v0.1 demo agent',
     llm=LLMSpec(provider='openai', model='gpt-5.4-mini', temperature=0.7),
     system_prompt=(
@@ -20,7 +21,7 @@ HARDCODED_SPEC = AgentConfigSpec(
         'Keep responses concise.'
     ),
     triggers=[TriggerSpec(name='manual', kind='manual')],
-    tools=[ToolPermission(tool='clock', allow=['now'])],
+    tools=[ToolInstance(id='clock', type='clock', allow=['now'])],
 )
 
 

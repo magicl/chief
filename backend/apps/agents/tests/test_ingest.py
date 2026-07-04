@@ -7,7 +7,7 @@
 from apps.agents.hardcoded import HARDCODED_SPEC, bootstrap_agent
 from apps.agents.ingest import IngestError, create_agent_from_spec, validate_spec_tools
 from apps.agents.models import Agent, AgentConfig, Trigger
-from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolPermission, TriggerSpec
+from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolInstance, TriggerSpec
 from django.contrib.auth import get_user_model
 
 from olib.py.django.test.cases import OTestCase
@@ -19,7 +19,7 @@ class ValidateSpecToolsTests(OTestCase):
 
     def test_unknown_tool_raises(self) -> None:
         spec = HARDCODED_SPEC.model_copy(
-            update={'tools': [ToolPermission(tool='missing', allow=['*'])]},
+            update={'tools': [ToolInstance(id='missing', type='missing', allow=['*'])]},
         )
         with self.assertRaises(IngestError) as ctx:
             validate_spec_tools(spec)
@@ -27,11 +27,18 @@ class ValidateSpecToolsTests(OTestCase):
 
     def test_unknown_allow_function_raises(self) -> None:
         spec = HARDCODED_SPEC.model_copy(
-            update={'tools': [ToolPermission(tool='clock', allow=['nope'])]},
+            update={'tools': [ToolInstance(id='clock', type='clock', allow=['nope'])]},
         )
         with self.assertRaises(IngestError) as ctx:
             validate_spec_tools(spec)
         self.assertIn('nope', str(ctx.exception))
+
+    def test_credential_ref_on_clock_rejected(self) -> None:
+        spec = HARDCODED_SPEC.model_copy(
+            update={'tools': [ToolInstance(id='clock', type='clock', credential_ref='x', allow=['now'])]},
+        )
+        with self.assertRaises(IngestError):
+            validate_spec_tools(spec)
 
 
 class CreateAgentFromSpecTests(OTestCase):
@@ -41,7 +48,7 @@ class CreateAgentFromSpecTests(OTestCase):
             llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
             system_prompt='hello',
             triggers=[TriggerSpec(name='manual', kind='manual')],
-            tools=[ToolPermission(tool='clock', allow=['now'])],
+            tools=[ToolInstance(id='clock', type='clock', allow=['now'])],
         )
         agent = create_agent_from_spec(user, spec, identifier='test-agent')
 
@@ -49,6 +56,16 @@ class CreateAgentFromSpecTests(OTestCase):
         self.assertIsNotNone(agent.current_config_id)
         self.assertEqual(AgentConfig.objects.filter(agent=agent).count(), 1)
         self.assertEqual(Trigger.objects.filter(agent=agent).count(), 1)
+
+    def test_create_writes_spec_version_one(self) -> None:
+        user = get_user_model().objects.create_user(username='sv', password='x')
+        spec = HARDCODED_SPEC.model_copy()
+        agent = create_agent_from_spec(user, spec, identifier='sv-agent')
+        config = agent.current_config
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.spec_version, 1)
+        self.assertEqual(config.spec['schema_version'], 1)
 
     def test_bootstrap_agent_delegates_to_ingest(self) -> None:
         user = get_user_model().objects.create_user(username='boot', password='x')

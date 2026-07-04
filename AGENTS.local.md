@@ -115,6 +115,56 @@ has no app imports; `web` must not import `resolve_*` from keys).
 Rules and wiring patterns: **`docs/ARCHITECTURE.md`** (credentials section).
 Implementation spec: `docs/specs/2026-07-03-key-management/`.
 
+## Agent config schema migrations
+
+Design: `docs/specs/2026-07-03-agent-config-schema/`.
+
+**Every breaking change to `AgentConfigSpec` must include a spec migration** — not a
+Django data migration on `AgentConfig.spec` JSON.
+
+**When to bump `schema_version`:** only when older stored specs cannot be read correctly
+without transformation (renamed/removed fields, type changes, semantic changes). **Do not
+bump** for backward-compatible additions (new optional fields with defaults, new optional
+list entries) — pydantic and YAML loaders accept those on the current version as-is.
+
+### How it works
+
+- **`apps/agents/spec_migrations/migrations/`** — one file per upgrade step, named
+  **`NNN_{short_descriptive_name}.py`** (e.g. `001_tool_instances.py`). Version **0** is
+  the initial shape; **`001_…` upgrades 0 → 1**, `002_…` upgrades 1 → 2, etc. Each module
+  exports `FROM_VERSION`, `TO_VERSION`, and `upgrade(raw) -> dict`.
+- **`spec_migrations/registry.py`** discovers files under `migrations/`, sorts by `NNN`,
+  and verifies a contiguous chain. Discovery is **`@functools.cache`d** — one scan per
+  process. Bump **`AGENT_CONFIG_SPEC_VERSION`** in `spec.py` to match the latest
+  `TO_VERSION` when you add a breaking migration.
+- **Load** — always call **`load_spec_dict()`** (via `AgentConfig.get_spec()` or
+  `spec_loader`). Applies the upgrade chain; returns the **current** pydantic shape in
+  memory. Old stored rows keep working without being rewritten.
+- **Save** — always write **`spec_version`** + JSON at the latest version as a **new**
+  `AgentConfig` row (never update an existing row’s spec in place).
+- **Django migrations** — may add/alter columns (e.g. `AgentConfig.spec_version`); **never**
+  RunPython that transforms spec JSON.
+
+No bulk upgrade management command — persisting an upgraded spec is the user’s explicit
+save (avoids clobbering in-progress edits).
+
+### Checklist when changing the schema (breaking bump only)
+
+Skip this checklist for optional-only additions — update `AgentConfigSpec` and tests only.
+
+1. Update **`AgentConfigSpec`** (current version only) in `apps/agents/spec.py`.
+2. Add **`apps/agents/spec_migrations/migrations/NNN_{short_name}.py`** where `NNN` is the
+   new target version zero-padded to three digits (e.g. `002_add_queue_bindings.py` for 1→2).
+   Export `FROM_VERSION`, `TO_VERSION`, and `upgrade()`.
+3. Registry auto-discovers the new file; confirm the chain is contiguous at startup/tests.
+4. Bump **`AGENT_CONFIG_SPEC_VERSION`** to the new `TO_VERSION`.
+5. **Tests** in `apps/agents/tests/test_spec_migrations.py`:
+   - unit test the new step with fixture dicts (before → after);
+   - chain test from version 0 (and each intermediate) to current;
+   - `get_spec()` on a model row at the previous `spec_version`.
+6. Update **`HARDCODED_SPEC`**, YAML fixtures, and docs/examples to the new version.
+7. Django migration **only** if new columns/indexes are needed — not for JSON rewrites.
+
 ## App services (queries + commands)
 
 Each app exposes a **public API** for other apps and Celery tasks via
@@ -160,6 +210,8 @@ required for simple fields).
 - Do not import `runner` or `web` from `agents` or `sessions`.
 - Provider-specific UI (e.g. listing models for dashboard buttons) belongs in `web`, not `agents`.
 - Types referenced by `AgentConfigSpec` stay in `agents` even when `runner` invokes them at runtime.
+- **`AgentConfigSpec` schema changes:** follow **Agent config schema migrations** above —
+  add a spec migration step and tests; do not transform spec JSON in Django data migrations.
 - Algorithm config: pydantic struct per algorithm with defaults; override on call — avoid new env vars for tuning.
 
 ## For AI agents (Chief-specific)

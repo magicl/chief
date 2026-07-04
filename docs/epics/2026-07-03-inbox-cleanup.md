@@ -1,6 +1,6 @@
 # Epic: Inbox cleanup (U1)
 
-Status: **planning** · Roadmap: [U1](../ROADMAP.md)
+Status: **in progress** · Roadmap: [U1](../ROADMAP.md)
 
 Minimize time spent shuffling email: untagged messages are triaged automatically
 (tag, route, or dismiss) with **one agent session per message** so context never
@@ -12,8 +12,8 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 
 ## Specs
 
-- [ ] 1. Key management — [spec](../specs/2026-07-03-key-management/)
-- [ ] 2. Agent config schema extensions
+- [x] 1. Key management — [spec](../specs/2026-07-03-key-management/)
+- [ ] 2. Agent config schema extensions — [spec](../specs/2026-07-03-agent-config-schema/) · [plan](../specs/2026-07-03-agent-config-schema/2026-07-03-agent-config-schema-plan.md)
 - [ ] 3. Sources and queues
 - [ ] 4. Agent configuration UI
 - [ ] 5. Agent scheduling
@@ -59,9 +59,11 @@ agent/tool instance. Tool instances reference a key by name — no secrets in YA
 tool instances, triggers, source/queue bindings) must be expressible in YAML.
 
 Today: `ToolPermission` is tool name + allow/deny only. Add **tool instances**:
-stable id, tool type, named key ref, and **allow/deny on the instance** (not a
-separate top-level permissions list). Enables multiple Gmail accounts on one agent.
-The UI reads/writes the same YAML shape.
+stable id, tool type, optional **`credential_ref`**, and **allow/deny on the instance**
+(not a separate top-level permissions list). Same field name on the LLM block.
+`schema_version` on the spec; v1 configs load via the upgrade chain (in memory) and
+persist at the latest version only on explicit save (new config row). Enables multiple
+Gmail accounts on one agent. The UI reads/writes the same YAML shape.
 
 ### 3. Sources and queues
 

@@ -9,9 +9,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from libs.tools.base import qualified_tool_name
 from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession, AgentSessionEventKind
+from libs.tools.base import qualified_tool_name
 
 
 def rebuild_messages_from_events(
@@ -35,7 +35,10 @@ def rebuild_messages_from_events(
 
         elif kind == AgentSessionEventKind.TOOL_CALL:
             call_id = payload['call_id']
-            tool_name = qualified_tool_name(payload['tool'], payload['function'])
+            instance_id = payload.get('instance_id') or payload.get('tool')
+            if not isinstance(instance_id, str):
+                continue
+            tool_name = qualified_tool_name(instance_id, payload['function'])
             call_entry = {
                 'id': call_id,
                 'type': 'function',
@@ -73,7 +76,8 @@ def rebuild_messages(session: AgentSession | UUID, *, system_prompt: str) -> lis
     Payload shapes (canonical):
     - OUTPUT: ``{"content": str}``
     - INPUT: ``{"content": str}``
-    - TOOL_CALL: ``{"call_id": str, "tool": str, "function": str, "arguments": dict}``
+    - TOOL_CALL: ``{"call_id": str, "instance_id": str, "type": str, "function": str, "arguments": dict}``
+      (legacy events may use ``tool`` instead of ``instance_id``)
     - TOOL_RESULT: ``{"call_id": str, "content": str}``
     - FAILURE / RESTART: metadata only; omitted from the message list
     """

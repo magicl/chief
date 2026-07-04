@@ -36,6 +36,11 @@ class TestProviderConfigFromSpec(OTransactionTestCase):
         self.assertIsNone(cfg.user_id)
         self.assertIsNone(cfg.secret_supplier)
 
+    def test_credential_ref_from_llm_spec(self) -> None:
+        llm = LLMSpec(provider='openai', model='m', credential_ref='my-openai')
+        cfg = provider_config_from_spec(llm, user_id=1, credential_ref=llm.credential_ref)
+        self.assertEqual(cfg.credential_ref, 'my-openai')
+
     @expectLogItems([ExpectLogItem('apps.keys.crypto', logging.WARNING, r'credential decrypt failed', count=1)])
     def test_supplier_wraps_decrypt_failure(self) -> None:
         key_one = Fernet.generate_key().decode()
@@ -53,16 +58,18 @@ class TestProviderConfigFromSpec(OTransactionTestCase):
 
 class TestEnvOnlyCredentialPath(OTransactionTestCase):
     def test_memory_backend_with_no_user_id_skips_stored_credentials(self) -> None:
+        key = Fernet.generate_key().decode()
         user = get_user_model().objects.create_user(username='env-only-user', password='x')
-        commands.set_system_default('openai', 'sk-from-db')
-        backend = MemorySessionBackend(HARDCODED_SPEC.model_copy(), user_id=None)
-        cfg = provider_config_from_spec(backend.get_spec().llm, user_id=backend.user_id)
-        self.assertIsNone(cfg.secret_supplier)
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-env'}, clear=False):
-            provider_cfg_with_user = provider_config_from_spec(
-                LLMSpec(provider='openai', model='gpt-5.4-mini'),
-                user_id=user.pk,
-            )
-            supplier = provider_cfg_with_user.secret_supplier
-            assert supplier is not None
-            self.assertEqual(supplier(), 'sk-from-db')
+        with override_settings(CREDENTIALS_KEY=key):
+            commands.set_system_default('openai', 'sk-from-db')
+            backend = MemorySessionBackend(HARDCODED_SPEC.model_copy(), user_id=None)
+            cfg = provider_config_from_spec(backend.get_spec().llm, user_id=backend.user_id)
+            self.assertIsNone(cfg.secret_supplier)
+            with patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-env'}, clear=False):
+                provider_cfg_with_user = provider_config_from_spec(
+                    LLMSpec(provider='openai', model='gpt-5.4-mini'),
+                    user_id=user.pk,
+                )
+                supplier = provider_cfg_with_user.secret_supplier
+                assert supplier is not None
+                self.assertEqual(supplier(), 'sk-from-db')

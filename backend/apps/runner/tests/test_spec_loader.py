@@ -41,4 +41,5 @@ class TestSpecLoader(OTestCase):
             system_prompt='hello',
         )
         self.assertEqual(spec.llm.model, 'gpt-4o-mini')
-        self.assertEqual(spec.tools[0].tool, 'clock')
+        self.assertEqual(spec.tools[0].id, 'clock')
+        self.assertEqual(spec.tools[0].type, 'clock')

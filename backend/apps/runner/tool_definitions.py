@@ -6,30 +6,30 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
 
-from apps.agents.spec import ToolPermission
-from libs.tools.base import qualified_tool_name
+from apps.agents.spec import ToolInstance
+from libs.tools.base import wire_tool_name
 from libs.tools.registry import get_tool
 from libs.tools.schema import ToolDefinition
 
 
 def build_tool_definitions(
-    permissions: list[ToolPermission],
+    instances: list[ToolInstance],
     *,
-    is_allowed: Any,
+    is_allowed: Callable[..., bool],
 ) -> list[ToolDefinition]:
     definitions: list[ToolDefinition] = []
-    for perm in permissions:
-        tool = get_tool(perm.tool)
+    for inst in instances:
+        tool = get_tool(inst.type)
         if tool is None:
             continue
         for fn in tool.functions():
-            if not is_allowed(perm.tool, fn.name, permission=perm):
+            if not is_allowed(inst.id, fn.name, instance=inst):
                 continue
             definitions.append(
                 ToolDefinition(
-                    name=qualified_tool_name(perm.tool, fn.name),
+                    name=wire_tool_name(inst.id, fn.name),
                     description=fn.description,
                     parameters=fn.parameters,
                 )
