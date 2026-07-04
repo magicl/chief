@@ -1,15 +1,12 @@
 {
-  "name": "web",
+  "name": "chief-web-static",
   "version": "1.0.0",
-  "description": "",
-  "main": "agent_config_editor.js",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "build:editor": "esbuild agent_config_editor.js --bundle --format=esm --outfile=codemirror/agent_config_editor.bundle.mjs --minify"
+    "build:editor": "esbuild agent_config_editor.js --bundle --format=esm --outfile=codemirror/agent_config_editor.bundle.js --minify",
+    "lint": "eslint . --fix"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
@@ -19,5 +16,11 @@
     "@codemirror/view": "^6.43.5",
     "codemirror": "^6.0.2",
     "esbuild": "^0.25.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "globals": "^16.0.0",
+    "typescript": "^5.9.3"
   }
 }

@@ -6,13 +6,13 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.agents.models import Agent, AgentConfig
 from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
 from apps.sessions.models import AgentSession
+from django.urls import reverse
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
 from libs.agent_specs import list_examples
 from libs.providers.anthropic_provider import AnthropicProvider
@@ -23,6 +23,56 @@ from libs.sources.registry import all_adapters
 from libs.tools.registry import all_tools
 
 TRIGGER_KINDS = ['schedule', 'manual', 'agent']
+
+_READ_ACTIONS = frozenset({'get', 'list', 'read', 'search', 'fetch', 'take', 'now', 'peek', 'head'})
+_WRITE_ACTIONS = frozenset(
+    {
+        'put',
+        'post',
+        'create',
+        'delete',
+        'update',
+        'send',
+        'complete',
+        'fail',
+        'remove',
+        'add',
+        'set',
+    }
+)
+
+
+def _function_kind(name: str) -> str:
+    """Classify a tool sub-function as read or write for helper checkboxes."""
+    if name in _READ_ACTIONS:
+        return 'read'
+    if name in _WRITE_ACTIONS:
+        return 'write'
+    if name.startswith(('get_', 'list_', 'read_', 'fetch_', 'search_')):
+        return 'read'
+    if name.startswith(('put_', 'create_', 'delete_', 'update_', 'send_', 'post_')):
+        return 'write'
+    return 'read'
+
+
+def _spec_summary_from_spec(spec: Any) -> dict[str, Any]:
+    """Build helper dropdown summary from a parsed spec."""
+    return {
+        'tools': [{'id': t.id, 'type': t.type} for t in spec.tools],
+        'triggers': [{'name': t.name, 'kind': t.kind} for t in spec.triggers],
+        'queues': [
+            {
+                'id': q.id,
+                'sources': [{'id': s.id, 'type': s.adapter_type} for s in q.sources],
+            }
+            for q in spec.queues
+        ],
+    }
+
+
+def _empty_spec_summary() -> dict[str, Any]:
+    return {'tools': [], 'triggers': [], 'queues': []}
+
 
 SCHEMA_KEYS = [
     'schema_version',
@@ -82,7 +132,7 @@ def _tool_catalog() -> list[dict[str, Any]]:
             {
                 'type': name,
                 'credential_type': getattr(tool, 'credential_type', None),
-                'functions': [fn.name for fn in tool.functions()],
+                'functions': [{'name': fn.name, 'kind': _function_kind(fn.name)} for fn in tool.functions()],
             },
         )
     return items
@@ -125,6 +175,45 @@ def list_config_history(agent: Agent, *, limit: int = 10) -> list[AgentConfig]:
     return list(agent.configs.order_by('-fetched_at')[:limit])
 
 
+def get_create_editor_context(
+    user_id: int,
+    *,
+    initial_yaml: str,
+    active_example: str = 'minimal',
+    import_errors: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Template context for the create-agent editor (same UI as edit, no agent yet)."""
+    catalog = build_config_catalog(user_id)
+    spec_summary = _empty_spec_summary()
+    try:
+        from apps.agents.services.config_validation import (
+            ConfigValidationError,
+            validate_agent_config_yaml,
+        )
+
+        spec_summary = _spec_summary_from_spec(validate_agent_config_yaml(initial_yaml))
+    except ConfigValidationError:
+        pass
+    page_data = {
+        'initialYaml': initial_yaml,
+        'catalog': catalog,
+        'mode': 'create',
+        'urls': {},
+    }
+    return {
+        'is_create': True,
+        'agent': None,
+        'active_example': active_example,
+        'examples': list_examples(),
+        'import_errors': import_errors or [],
+        'spec_summary': spec_summary,
+        'catalog': catalog,
+        'page_data': page_data,
+        'save_url': reverse('agent_create'),
+        'mutate_url': reverse('agent_create_mutate'),
+    }
+
+
 def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     """Template context for the config editor page."""
     config = agent.current_config
@@ -144,21 +233,17 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     ).count()
 
     catalog = build_config_catalog(user_id)
-    spec_summary: dict[str, Any] = {'tools': [], 'triggers': [], 'queues': []}
+    spec_summary: dict[str, Any] = _empty_spec_summary()
     if config is not None:
-        spec = config.get_spec()
-        spec_summary = {
-            'tools': [{'id': t.id, 'type': t.type} for t in spec.tools],
-            'triggers': [{'name': t.name, 'kind': t.kind} for t in spec.triggers],
-            'queues': [
-                {
-                    'id': q.id,
-                    'sources': [{'id': s.id, 'type': s.adapter_type} for s in q.sources],
-                }
-                for q in spec.queues
-            ],
-        }
+        spec_summary = _spec_summary_from_spec(config.get_spec())
+    page_data = {
+        'initialYaml': spec_yaml,
+        'catalog': catalog,
+        'mode': 'edit',
+        'urls': {},
+    }
     return {
+        'is_create': False,
         'agent': agent,
         'config': config,
         'spec_yaml': spec_yaml,
@@ -169,12 +254,6 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'history': list_config_history(agent),
         'pinned_sessions': pinned_sessions,
         'catalog': catalog,
-        'catalog_json': json.dumps(catalog),
         'spec_summary': spec_summary,
-        'page_data_json': json.dumps(
-            {
-                'initialYaml': spec_yaml,
-                'catalog': catalog,
-            },
-        ),
+        'page_data': page_data,
     }

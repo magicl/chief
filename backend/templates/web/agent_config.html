@@ -1,13 +1,15 @@
 {% extends "web/base.html" %}
 
-{% block title %}{{ agent.identifier }} config — Chief{% endblock %}
+{% block title %}{% if is_create %}Create agent{% else %}{{ agent.identifier }} config{% endif %} — Chief{% endblock %}
 
 {% block extra_styles %}
 .config-layout { display:grid; gap:1rem; }
 .meta-bar { display:flex; flex-wrap:wrap; gap:.75rem 1.25rem; font-size:.85rem; color:#8b93a7; align-items:center; }
 .meta-bar .pill.warn { background:#4a3a1f; color:#f0e29b; }
 .editor-wrap { border:1px solid #262a33; border-radius:8px; overflow:hidden; min-height:420px; }
-#config-editor { min-height:420px; }
+#config-editor { min-height:420px; height:420px; }
+#config-editor .cm-editor { height:100%; }
+#config-editor .cm-scroller { min-height:100%; }
 .errors { background:#4a2326; color:#ff9ea3; border-radius:8px; padding:.75rem 1rem; margin-top:.75rem; }
 .errors ul { margin:.25rem 0 0; padding-left:1.25rem; }
 .helpers details { background:#161a21; border:1px solid #262a33; border-radius:8px; padding:.75rem 1rem; margin-top:.75rem; }
@@ -15,31 +17,80 @@
 .helper-form { display:grid; gap:.5rem; margin-top:.75rem; max-width:520px; }
 .helper-form label { display:grid; gap:.25rem; font-size:.85rem; }
 .helper-form input, .helper-form select, .helper-form textarea { padding:.35rem .5rem; }
-.actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; }
+.actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; align-items:center; }
 .actions button, .actions a.btn { padding:.4rem .75rem; border-radius:8px; border:1px solid #262a33; background:#1d3a5f; color:#9ec5ff; cursor:pointer; text-decoration:none; font-size:.85rem; }
 .history table { font-size:.85rem; }
 .cred-option-set { color:#9be7a8; }
 .cred-option-unset { color:#b8c0d4; }
+.example-grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); margin-top:.75rem; }
+.example-card { background:#12151c; border:1px solid #262a33; border-radius:8px; padding:.75rem 1rem; text-decoration:none; color:inherit; display:block; }
+.example-card:hover { border-color:#3a4a66; }
+.example-card.active { border-color:#9ec5ff; }
+.example-card h3 { margin:0; font-size:.95rem; color:#e6e6e6; text-transform:none; letter-spacing:0; }
+.tool-actions { display:grid; gap:.35rem; margin-top:.25rem; }
+.tool-actions fieldset { border:1px solid #262a33; border-radius:6px; padding:.5rem .75rem; margin:0; }
+.tool-actions legend { font-size:.8rem; color:#8b93a7; padding:0 .25rem; }
+.tool-actions label { display:flex; align-items:center; gap:.4rem; font-size:.85rem; }
 {% endblock %}
 
 {% block content %}
 <div class="config-layout">
   <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:.5rem;">
-    <h2 style="margin:0; text-transform:none; letter-spacing:0; color:#e6e6e6; font-size:1.1rem;">{{ agent.identifier }} — Configuration</h2>
+    <h2 style="margin:0; text-transform:none; letter-spacing:0; color:#e6e6e6; font-size:1.1rem;">
+      {% if is_create %}Create agent{% else %}{{ agent.identifier }} — Configuration{% endif %}
+    </h2>
     <div>
+      {% if is_create %}
+      <a href="{{ url('dashboard') }}" style="color:#9ec5ff; font-size:.85rem;">← Dashboard</a>
+      {% else %}
       <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" style="color:#9ec5ff; font-size:.85rem;">← Agent</a>
+      {% endif %}
     </div>
   </div>
 
+  {% if is_create %}
+  <p class="muted">Start from an example or edit the YAML below, then create the agent.</p>
+  {% if import_errors %}
+  <div class="errors">
+    <strong>Could not create agent:</strong>
+    <ul>
+      {% for err in import_errors %}
+      <li>{% if err.path %}{{ err.path }}: {% endif %}{{ err.message }}{% if err.line %} (line {{ err.line }}){% endif %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  <section class="card" style="padding:.75rem 1rem;">
+    <h2 style="margin:0 0 .25rem; font-size:.95rem;">Examples</h2>
+    <div class="example-grid">
+      {% for ex in examples %}
+      <a href="{{ url('agent_create') }}?example={{ ex.slug }}"
+         class="example-card{% if ex.slug == active_example %} active{% endif %}">
+        <h3>{{ ex.title }}</h3>
+        {% if ex.description %}<p class="muted" style="margin:.35rem 0 0; font-size:.85rem;">{{ ex.description }}</p>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
   <div class="meta-bar card" style="padding:.75rem 1rem;">
     <span>Source: <strong>{{ source_label }}</strong></span>
     <span>Revision: <code>{{ source_rev[:48] }}{% if source_rev|length > 48 %}…{% endif %}</code></span>
     <span>Schema v{{ spec_version }}</span>
     {% if pinned_sessions %}<span>{{ pinned_sessions }} active session(s) on older config</span>{% endif %}
   </div>
+  {% endif %}
 
   <div class="actions">
+    {% if is_create %}
+    <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
+      Identifier
+      <input type="text" id="create-identifier" pattern="[a-zA-Z0-9._-]+" placeholder="optional">
+    </label>
+    <button type="button" id="save-config" class="primary">Create agent</button>
+    {% else %}
     <button type="button" id="save-config" class="primary">Save</button>
+    {% endif %}
   </div>
 
   <div id="validation-errors" class="errors" style="display:none;"><ul></ul></div>
@@ -52,15 +103,18 @@
     <details>
       <summary>LLM helper</summary>
       <form class="helper-form" data-mutation="set_llm">
-        <label>Provider
-          <select name="provider" id="helper-provider">
+        <label>Model
+          <select name="model_choice" id="helper-model-choice" required>
             {% for p in catalog.providers %}
-            <option value="{{ p.provider }}">{{ p.provider }}</option>
+            {% for m in p.models %}
+            <option value="{{ p.provider }}::{{ m }}" data-provider="{{ p.provider }}" data-model="{{ m }}">
+              {{ p.provider }} — {{ m }}
+            </option>
+            {% endfor %}
             {% endfor %}
           </select>
         </label>
-        <label>Model <input name="model" id="helper-model" required></label>
-        <label>Temperature <input name="temperature" type="number" step="0.1" min="0" max="2"></label>
+        <label>Temperature <input name="temperature" type="number" step="0.1" min="0" max="2" value="0.7"></label>
         <label>Credential ref
           <select name="credential_ref">
             <option value="">(default)</option>
@@ -90,7 +144,7 @@
     <details>
       <summary>Add tool instance</summary>
       <form class="helper-form" data-mutation="add_tool">
-        <label>Id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required placeholder="my-gmail"></label>
+        <label>Id <input name="id" id="helper-tool-id" pattern="[a-z][a-z0-9_-]{0,63}" required placeholder="clock"></label>
         <label>Type
           <select name="type" id="helper-tool-type" required>
             {% for t in catalog.tool_types %}
@@ -103,17 +157,16 @@
             <option value="">(default)</option>
           </select>
         </label>
-        <label>Allow (comma-separated) <input name="allow" value="*"></label>
+        <div id="tool-allow-actions" class="tool-actions"></div>
         <button type="submit">Add tool</button>
       </form>
     </details>
 
-    {% if spec_summary.tools %}
-    <details>
+    <details id="remove-tool-helper"{% if not spec_summary.tools %} hidden{% endif %}>
       <summary>Remove tool instance</summary>
       <form class="helper-form" data-mutation="remove_tool">
         <label>Tool id
-          <select name="id" required>
+          <select name="id" id="remove-tool-select" required>
             {% for t in spec_summary.tools %}
             <option value="{{ t.id }}">{{ t.id }} ({{ t.type }})</option>
             {% endfor %}
@@ -122,7 +175,6 @@
         <button type="submit">Remove tool</button>
       </form>
     </details>
-    {% endif %}
 
     <details>
       <summary>Add trigger</summary>
@@ -140,12 +192,11 @@
       </form>
     </details>
 
-    {% if spec_summary.triggers %}
-    <details>
+    <details id="remove-trigger-helper"{% if not spec_summary.triggers %} hidden{% endif %}>
       <summary>Remove trigger</summary>
       <form class="helper-form" data-mutation="remove_trigger">
         <label>Trigger name
-          <select name="name" required>
+          <select name="name" id="remove-trigger-select" required>
             {% for t in spec_summary.triggers %}
             <option value="{{ t.name }}">{{ t.name }} ({{ t.kind }})</option>
             {% endfor %}
@@ -154,7 +205,6 @@
         <button type="submit">Remove trigger</button>
       </form>
     </details>
-    {% endif %}
 
     <details>
       <summary>Add queue</summary>
@@ -165,12 +215,11 @@
       </form>
     </details>
 
-    {% if spec_summary.queues %}
-    <details>
+    <details id="remove-queue-helper"{% if not spec_summary.queues %} hidden{% endif %}>
       <summary>Remove queue</summary>
       <form class="helper-form" data-mutation="remove_queue">
         <label>Queue id
-          <select name="id" required>
+          <select name="id" id="remove-queue-select" required>
             {% for q in spec_summary.queues %}
             <option value="{{ q.id }}">{{ q.id }}</option>
             {% endfor %}
@@ -179,14 +228,12 @@
         <button type="submit">Remove queue</button>
       </form>
     </details>
-    {% endif %}
 
-    {% if spec_summary.queues %}
-    <details>
+    <details id="add-source-helper"{% if not spec_summary.queues %} hidden{% endif %}>
       <summary>Add queue source</summary>
       <form class="helper-form" data-mutation="add_source">
         <label>Queue
-          <select name="queue_id" required>
+          <select name="queue_id" id="add-source-queue-select" required>
             {% for q in spec_summary.queues %}
             <option value="{{ q.id }}">{{ q.id }}</option>
             {% endfor %}
@@ -205,15 +252,21 @@
             <option value="">(default)</option>
           </select>
         </label>
-        <label>Adapter config (JSON)
-          <textarea name="config_json" rows="4" placeholder="{}">{}</textarea>
-        </label>
+        <div id="adapter-config-test" class="adapter-config-panel">
+          <label>Prefix <input name="config_prefix" value="test"></label>
+          <label>Batch size <input name="config_batch_size" type="number" value="1" min="1"></label>
+        </div>
+        <div id="adapter-config-json" class="adapter-config-panel" hidden>
+          <label>Adapter config (JSON)
+            <textarea name="config_json" rows="4" placeholder="{}">{}</textarea>
+          </label>
+        </div>
         <button type="submit">Add source</button>
       </form>
     </details>
-    {% endif %}
   </section>
 
+  {% if not is_create %}
   <section class="card history">
     <h2>Revision history</h2>
     {% if history %}
@@ -234,16 +287,9 @@
     <p class="empty">No revisions yet.</p>
     {% endif %}
   </section>
+  {% endif %}
 </div>
 
-  <script id="config-page-data" type="application/json">{{ page_data_json }}</script>
-<script>
-  window.__AGENT_CONFIG_URLS__ = {
-    save: "{{ save_url }}",
-    mutate: "{{ mutate_url }}",
-    csrf: "{{ csrf_token }}",
-    credentials: {{ catalog_json }},
-  };
-</script>
-<script type="module" src="{{ static('web/codemirror/agent_config_editor.bundle.mjs') }}"></script>
+<script id="config-page-data" type="application/json">{{ page_data_json|safe }}</script>
+<script type="module" src="{{ static('web/codemirror/agent_config_editor.bundle.js') }}"></script>
 {% endblock %}

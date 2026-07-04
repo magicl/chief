@@ -4,7 +4,9 @@
 # ~
 """Top-level URL configuration for the chief project."""
 
+from django.conf import settings
 from django.contrib import admin
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 from django.views.generic.base import RedirectView
 
@@ -18,3 +20,6 @@ urlpatterns = [
     path('client/check', check, name='client_check'),
     path('', include('apps.web.urls')),
 ]
+
+if settings.DEBUG:
+    urlpatterns += staticfiles_urlpatterns()

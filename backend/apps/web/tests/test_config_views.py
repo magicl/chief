@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
-from libs.agent_specs import load_example
+from libs.agent_specs import load_example, load_example_text
 
 from olib.py.django.test.cases import OTestCase
 
@@ -35,6 +35,19 @@ class AgentConfigWebTests(OTestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'config-editor')
+        self.assertContains(response, 'id: clock')
+
+    def test_create_mutate_without_agent(self) -> None:
+        spec_yaml = load_example_text('minimal')
+        mutation = json.dumps({'action': 'add_tool', 'id': 'clock', 'type': 'clock', 'allow': ['now']})
+        response = self.client.post(
+            reverse('agent_create_mutate'),
+            {'spec_yaml': spec_yaml, 'mutation': mutation},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertIn('yaml', payload)
+        self.assertIn('id: clock', payload['yaml'])
 
     def test_save_invalid_yaml_returns_json_errors(self) -> None:
         url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
@@ -88,4 +101,4 @@ class AgentConfigWebTests(OTestCase):
     def test_import_errors_rendered_on_create_page(self) -> None:
         response = self.client.post(reverse('agent_create'), {'spec_yaml': 'not: [valid'})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Could not import YAML')
+        self.assertContains(response, 'Could not create agent')

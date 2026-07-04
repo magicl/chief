@@ -15,7 +15,6 @@ from apps.agents.ingest import persist_agent_config
 from apps.agents.models import AgentConfig
 from apps.agents.services.config_commands import (
     ConfigCommandError,
-    create_from_example,
     create_from_yaml,
 )
 from apps.agents.services.config_mutations import (
@@ -27,7 +26,11 @@ from apps.agents.services.config_validation import (
     ConfigValidationError,
     validate_agent_config_yaml,
 )
-from apps.agents.services.queries import build_config_catalog, get_config_editor_context
+from apps.agents.services.queries import (
+    build_config_catalog,
+    get_config_editor_context,
+    get_create_editor_context,
+)
 from apps.web.views import _owned_agent
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
@@ -37,12 +40,13 @@ from django.http import (
     HttpResponseBadRequest,
     JsonResponse,
 )
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
-from libs.agent_specs import list_examples
+from libs.agent_specs import load_example_text
 
 
 def _validation_json_response(exc: ConfigValidationError) -> JsonResponse:
@@ -62,39 +66,82 @@ def _parse_mutation(request: HttpRequest) -> dict[str, Any]:
     return {}
 
 
+def _json_for_script_tag(payload: dict[str, Any]) -> str:
+    """Serialize JSON safe for embedding in a ``<script type=\"application/json\">`` tag."""
+    return json.dumps(payload).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+
+
+def _attach_page_urls(context: dict[str, Any], request: HttpRequest) -> None:
+    """Merge save/mutate/csrf into page_data for the editor script."""
+    context['page_data']['urls'] = {
+        'save': context['save_url'],
+        'mutate': context['mutate_url'],
+        'csrf': get_token(request),
+    }
+    context['page_data_json'] = _json_for_script_tag(context['page_data'])
+
+
 @login_required(login_url='/admin/login/')
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
 def agent_create(request: HttpRequest) -> HttpResponse:
-    """Show the create form or instantiate an agent from an example or pasted YAML."""
-    if request.method == 'GET':
-        return render(
-            request,
-            'web/agent_create.html',
-            {'examples': list_examples()},
-        )
+    """Show the unified create editor or instantiate an agent from editor YAML."""
     user = cast(AbstractBaseUser, request.user)
-    example_slug = request.POST.get('example_slug', '').strip()
+    if request.method == 'GET':
+        example_slug = request.GET.get('example', '').strip() or 'minimal'
+        try:
+            initial_yaml = load_example_text(example_slug)
+        except FileNotFoundError:
+            example_slug = 'minimal'
+            initial_yaml = load_example_text(example_slug)
+        context = get_create_editor_context(
+            user.pk,
+            initial_yaml=initial_yaml,
+            active_example=example_slug,
+        )
+        _attach_page_urls(context, request)
+        return render(request, 'web/agent_config.html', context)
+
     spec_yaml = request.POST.get('spec_yaml', '').strip()
     identifier = request.POST.get('identifier', '').strip() or None
+    if not spec_yaml:
+        return HttpResponseBadRequest('spec_yaml required')
     try:
-        if example_slug:
-            agent = create_from_example(user, example_slug, identifier=identifier)
-        elif spec_yaml:
-            agent = create_from_yaml(user, spec_yaml, identifier=identifier)
-        else:
-            return HttpResponseBadRequest('example_slug or spec_yaml required')
+        agent = create_from_yaml(user, spec_yaml, identifier=identifier)
     except ConfigValidationError as exc:
         if 'application/json' in request.headers.get('Accept', ''):
             return _validation_json_response(exc)
-        return render(
-            request,
-            'web/agent_create.html',
-            {'examples': list_examples(), 'import_errors': exc.errors, 'spec_yaml': spec_yaml},
+        context = get_create_editor_context(
+            user.pk,
+            initial_yaml=spec_yaml,
+            import_errors=exc.errors,
         )
+        _attach_page_urls(context, request)
+        return render(request, 'web/agent_config.html', context)
     except ConfigCommandError as exc:
         return HttpResponseBadRequest(str(exc))
-    return redirect('agent_config', agent_id=agent.id)
+    redirect_url = reverse('agent_config', kwargs={'agent_id': agent.id})
+    if 'application/json' in request.headers.get('Accept', ''):
+        return JsonResponse({'ok': True, 'redirect': redirect_url})
+    return redirect(redirect_url)
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def agent_create_mutate(request: HttpRequest) -> HttpResponse:
+    """Apply a helper mutation to posted YAML on the create screen (no agent yet)."""
+    spec_yaml = request.POST.get('spec_yaml', '')
+    if not spec_yaml.strip():
+        return JsonResponse({'errors': [{'path': '', 'message': 'spec_yaml required'}]}, status=400)
+    try:
+        mutation = _parse_mutation(request)
+        new_yaml = apply_config_mutation(spec_yaml, mutation)
+    except ConfigValidationError as exc:
+        return _validation_json_response(exc)
+    except (ConfigMutationError, json.JSONDecodeError, KeyError) as exc:
+        return JsonResponse({'errors': [{'path': '', 'message': str(exc)}]}, status=400)
+    return JsonResponse({'yaml': new_yaml})
 
 
 @login_required(login_url='/admin/login/')
@@ -106,6 +153,7 @@ def agent_config(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     context = get_config_editor_context(agent, user.pk)
     context['save_url'] = reverse('agent_config_save', kwargs={'agent_id': agent.id})
     context['mutate_url'] = reverse('agent_config_mutate', kwargs={'agent_id': agent.id})
+    _attach_page_urls(context, request)
     return render(request, 'web/agent_config.html', context)
 
 

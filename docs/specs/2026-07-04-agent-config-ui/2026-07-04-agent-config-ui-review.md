@@ -10,9 +10,9 @@
 
 ## Assessment
 
-**Ready to merge?** Yes (after fix commit)
+**Ready to merge?** Yes
 
-**Reasoning:** Review findings addressed: path containment, file-backed save errors, vendored CodeMirror, helper UI completion, tests, and minor spec alignment items.
+**Reasoning:** Review findings addressed; DB-only config (no disk bind/sync); pre-commit JS tooling wired via `@js`; test adapter uses structured helper fields.
 
 ## Strengths
 
@@ -30,20 +30,20 @@
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
 | 1 | Fixed | `backend/libs/agent_specs/__init__.py` | Path traversal in `load_example_text`. | `_example_path()` resolves and checks `is_relative_to(examples/)`. |
-| 2 | Fixed | `backend/apps/agents/services/config_sync.py`, `config_views.py` | File-backed save 500 when bound file unreadable. | `ConfigSyncError` + 400 JSON/flash; UI-only saves unchanged. |
+| 2 | N/A | `backend/apps/agents/services/config_sync.py`, `config_views.py` | File-backed save 500 when bound file unreadable. | Removed with DB-only config (no file bind/sync). |
 
 ### Important
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
 | 1 | Fixed | `backend/apps/agents/services/config_commands.py` | `create_from_example` bypassed unified validator. | Uses `validate_agent_config_yaml(load_example_text(slug))`. |
-| 2 | Fixed | `backend/apps/agents/tests/test_config_sync.py` | Missing file-sync tests. | Dirty, idempotent sync, missing file, clear source. |
+| 2 | N/A | `backend/apps/agents/tests/test_config_sync.py` | Missing file-sync tests. | File sync removed (DB-only). |
 | 3 | Fixed | `backend/templates/web/agent_config.html` | Incomplete helper UI. | System prompt, remove rows, add source, credential pickers. |
 | 4 | Fixed | `backend/templates/web/agent_create.html` | Import errors not rendered. | Error list with line numbers. |
 | 5 | Fixed | `backend/apps/web/static/web/codemirror/` | CDN CodeMirror. | Vendored esbuild bundle + `npm run build:editor`. |
 | 6 | Fixed | `backend/apps/agents/services/config_validation.py` | YAML line numbers stub. | `_yaml_error_line()` from `problem_mark`. |
-| 7 | Fixed | `backend/apps/web/config_views.py`, `base.html` | Sync “up to date” message missing. | Django messages flash. |
-| 8 | Fixed | `backend/apps/agents/services/config_commands.py` | Stale `dirty` on clear file source. | `clear_file_source()`. |
+| 7 | N/A | `backend/apps/web/config_views.py`, `base.html` | Sync “up to date” message missing. | Sync UI removed (DB-only). |
+| 8 | N/A | `backend/apps/agents/services/config_commands.py` | Stale `dirty` on clear file source. | `clear_file_source` removed (DB-only). |
 | 9 | Fixed | `backend/libs/agent_specs/__init__.py` | Duplicate `_EXAMPLES_DIR`. | Removed. |
 | 10 | Fixed | tests | Coverage gaps. | Mutate, ownership, YAML create, adapter errors, traversal. |
 
@@ -51,7 +51,7 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 1 | Fixed | `backend/apps/agents/services/config_sync.py` | `source_rev` format. | `ui-sha256:<hex>` for file-backed saves. |
+| 1 | N/A | `backend/apps/agents/services/config_sync.py` | `source_rev` format. | DB-only saves use `ui:<timestamp>`; no file-backed `ui-sha256`. |
 | 2 | Fixed | `backend/libs/agent_spec/yaml_dump.py` | `sort_keys=False`. | `sort_keys=True`. |
 | 3 | Fixed | `backend/apps/agents/services/queries.py` | Shallow autocomplete keys. | Nested `tools[]`, `queues[]`, `triggers[]` paths. |
 | 4 | Fixed | `backend/apps/web/urls.py` | `/agents/create/submit/` route. | POST merged into `/agents/create/`. |
@@ -61,5 +61,5 @@
 
 ## Recommendations
 
-- Consider adding `@js` to Chief `config.py` so pre-commit `eslint`/`tsc` hooks run on future JS edits.
-- Queue/source JSON sub-editor could grow into structured fields per adapter type (follow-on polish).
+- [x] **`@js` in Chief `config.py`** — `@js(roots=[JSRoot('./backend/apps/web/static/web', …)])` plus `tools = ['python', 'javascript']`; `eslint.config.mjs`, `tsconfig.json`, and `agent_config_editor.d.ts` for pre-commit `eslint`/`tsc`.
+- [x] **Structured adapter config fields** — test adapter shows prefix/batch-size inputs; other adapters keep JSON panel; `formToMutation` builds `config` object accordingly.

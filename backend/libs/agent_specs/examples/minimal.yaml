@@ -1,0 +1,14 @@
+# title: Minimal agent
+# description: Blank starting point with a manual trigger and no tools.
+schema_version: 1
+description: New agent
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+  temperature: 0.7
+system_prompt: |
+  You are a helpful assistant.
+triggers:
+  - name: manual
+    kind: manual
+tools: []

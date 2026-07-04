@@ -35,6 +35,7 @@ from olib.py.cli.run.templates.docker import (
     get_local_compose_entrypoint_url,
 )
 from olib.py.cli.run.templates.envs import EnvInfo
+from olib.py.cli.run.templates.js_ import JSRoot, js
 from olib.py.cli.run.templates.postgres import postgres
 from olib.py.cli.run.templates.py_ import PyRoot
 from olib.py.cli.run.templates.redis import redis
@@ -87,12 +88,20 @@ class TargetInfo(VersionClusterInfo):
         SubmoduleRoots('olib', aliases=['./backend/olib']),
     ],
 )
+@js(
+    roots=[
+        JSRoot(
+            './backend/apps/web/static/web',
+            noValidate=['node_modules/**', 'codemirror/**'],
+        ),
+    ],
+)
 @django_template()
 @remote(plugins=[], default_host='compose')
 @version_template
 class Config:
     displayName = 'Chief'
-    tools = ['python']
+    tools = ['python', 'javascript']
     license = 'apache'
 
     clusters: dict[str, TargetInfo] = {
