@@ -6,8 +6,23 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
-from apps.agents.spec import ToolInstance
+from apps.agents.hardcoded import bootstrap_agent
+from apps.agents.ingest import persist_agent_config
 from apps.agents.tool_wiring import build_bound_tools
+from apps.queues.models import Queue, QueueItem, QueueItemStatus
+from apps.queues.services import commands
+from apps.queues.tests.base import make_second_session
+from django.contrib.auth import get_user_model
+
+# isort: split
+
+from libs.agent_spec import (
+    AgentConfigSpec,
+    LLMSpec,
+    QueueSpec,
+    SourceSpec,
+    ToolInstance,
+)
 from libs.tools.base import Tool, ToolFunction
 from libs.tools.registry import register_tool
 
@@ -63,3 +78,46 @@ class TestBuildBoundTools(OTestCase):
             bound = build_bound_tools(instances, user_id=1)
         out = bound['gmail-a'].invoke('ping', {})
         self.assertEqual(out, {'token_set': True})
+
+    def test_queue_tool_round_trip_take_and_complete(self) -> None:
+        user = get_user_model().objects.create_user(username='queue-wire-user', password='x')
+        agent = bootstrap_agent(
+            user,
+            identifier='queue-wire-agent',
+            provider='openai',
+            model='gpt-5.4-mini',
+        )
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='hello',
+            tools=[ToolInstance(id='q1', type='queue', allow=['put', 'take', 'complete'])],
+            queues=[
+                QueueSpec(
+                    id='inbox',
+                    sources=[SourceSpec(id='src-a', adapter_type='test', config={'prefix': 'x'})],
+                ),
+            ],
+        )
+        persist_agent_config(agent, spec, source_rev='queue-wire-v1')
+        queue = Queue.objects.get(agent=agent, queue_id='inbox')
+        config = agent.current_config
+        assert config is not None
+        session = make_second_session(agent, config)
+
+        commands.put_item(queue=queue, payload={'task': 'one'})
+
+        bound = build_bound_tools(
+            spec.tools,
+            user_id=user.pk,
+            agent_id=agent.id,
+            session_id=session.id,
+        )
+        take_out = bound['q1'].invoke('take', {'queue': 'inbox'})
+        self.assertIn('item_id', take_out)
+        item_id = take_out['item_id']
+
+        complete_out = bound['q1'].invoke('complete', {'item_id': item_id})
+        self.assertEqual(complete_out, {'ok': True})
+
+        item = QueueItem.objects.get(pk=item_id)
+        self.assertEqual(item.status, QueueItemStatus.DONE)

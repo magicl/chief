@@ -13,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from apps.agents.spec import AgentConfigSpec
+from libs.agent_spec import AgentConfigSpec
 
 
 @dataclass

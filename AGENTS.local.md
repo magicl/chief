@@ -100,7 +100,8 @@ Backend apps have **one-directional** imports (see `docs/specs/2026-06-23-design
 
 | App | Role | May import from |
 |-----|------|-----------------|
-| `apps.agents` | Domain core: models, `AgentConfigSpec`, tool wiring | Django/stdlib, `libs.tools`, `keys` (resolve, via wiring) |
+| `apps.agents` | Domain core: models, config ingest/materialization, tool wiring | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), **`queues`** (materialize only) |
+| `apps.queues` | Agent-scoped queues, sources, items, poll/release | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only) |
 | `apps.sessions` | Session + event log + session services/tasks | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
 | `apps.bus` | Redis pub/sub + mailbox primitives | Django/stdlib only |
 | `apps.runner` | Celery step loop, tool invocation | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
@@ -108,7 +109,9 @@ Backend apps have **one-directional** imports (see `docs/specs/2026-06-23-design
 | `apps.web` | Dashboard, SSE, control endpoints | all of the above (keys: metadata + commands only) |
 
 Direction: `agents → sessions → runner → web`, with `bus` and `keys` as leaves (`keys`
-has no app imports; `web` must not import `resolve_*` from keys).
+has no app imports; `web` must not import `resolve_*` from keys). **`apps.agents`**
+imports **`apps.queues`** only for config materialization (`sync_from_spec`); see
+`docs/ARCHITECTURE.md` (Agent configuration).
 
 ## Credentials & secrets
 

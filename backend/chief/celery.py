@@ -7,3 +7,10 @@
 from olib.py.django.celery_workers import initCelery
 
 app = initCelery('chief')
+
+app.conf.beat_schedule = {
+    'queues-release-stale-items': {
+        'task': 'apps.queues.tasks.release_stale_items',
+        'schedule': 120.0,
+    },
+}

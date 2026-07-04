@@ -9,6 +9,8 @@ from __future__ import annotations
 
 def wire_tools() -> None:
     from libs.tools.builtin import ClockTool
+    from libs.tools.queue import QueueTool
     from libs.tools.registry import register_tool
 
     register_tool('clock', ClockTool())
+    register_tool('queue', QueueTool())

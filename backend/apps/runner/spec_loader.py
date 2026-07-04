@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from apps.agents.spec import (
+from libs.agent_spec import (
     AgentConfigSpec,
     LLMSpec,
     ToolInstance,

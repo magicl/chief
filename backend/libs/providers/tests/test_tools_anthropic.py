@@ -5,8 +5,11 @@
 from anthropic.types import RawMessageStreamEvent
 from anthropic.types.raw_content_block_start_event import RawContentBlockStartEvent
 from anthropic.types.text_block import TextBlock
-from apps.agents.spec import ToolInstance
 from apps.runner.tool_definitions import build_tool_definitions
+
+# isort: split
+
+from libs.agent_spec import ToolInstance
 from libs.providers.anthropic_provider import AnthropicProvider
 from pydantic import TypeAdapter
 

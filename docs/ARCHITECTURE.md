@@ -19,7 +19,8 @@ backend/
 
 | App | Role |
 |-----|------|
-| `apps.agents` | Agent models, `AgentConfigSpec`, tool wiring |
+| `apps.agents` | Agent models, config ingest/materialization, tool wiring |
+| `apps.queues` | Agent-scoped queues, sources, items, poll/release tasks |
 | `apps.sessions` | Sessions, event log, session services/tasks |
 | `apps.runner` | Celery step loop, LLM + tool invocation |
 | `apps.bus` | Redis pub/sub + mailbox |
@@ -35,12 +36,107 @@ Each app exposes **`services/queries.py`** (read) and **`services/commands.py`**
 
 | Package | Role |
 |---------|------|
+| `libs/agent_spec` | Pydantic `AgentConfigSpec`, load-time spec migrations (Django-free) |
 | `libs/providers` | LLM provider implementations |
 | `libs/tools` | Tool definitions + registry |
+| `libs/sources` | Source adapter protocol + registry |
 | `libs/algorithms` | Reusable algorithms (may call providers) |
 
 Libs stay Django-free. When a lib needs credentials, the **app boundary injects**
 callables (`token_supplier`, `secret_supplier`) — libs do not import `apps.keys`.
+
+`libs/agent_spec` holds the **config language** only (types, validation, dict
+upgrades). It does not touch the database or call other apps. Today this package
+lives under `apps/agents/` (`spec.py`, `spec_migrations/`); it moves to
+`libs/agent_spec/` as the schema grows (spec 3+).
+
+---
+
+## Agent configuration
+
+**Spec detail:** [`docs/specs/2026-07-03-agent-config-schema/`](specs/2026-07-03-agent-config-schema/2026-07-03-agent-config-schema-design.md)
+
+The **`AgentConfigSpec`** (YAML/JSON) is the declarative definition of an agent.
+Postgres holds an immutable **`AgentConfig`** row per revision plus **derived runtime
+rows** (triggers, queues, sources, …) that Celery and tools operate on.
+
+### Schema evolution
+
+- **`schema_version`** in JSON mirrors **`AgentConfig.spec_version`** on save.
+- **Breaking changes** (rename, remove, semantic change) → new step in
+  `libs/agent_spec/migrations/` and bump version.
+- **Backward-compatible additions** (new optional fields with defaults, e.g.
+  `queues: []`) → **no version bump**; pydantic accepts them on the current version.
+
+### Materialization (spec → runtime)
+
+One orchestrator applies a saved config to the platform. **Entry point:**
+`apps.agents.services.commands.persist_agent_config` (alias concept:
+`apply_agent_config`).
+
+```mermaid
+flowchart LR
+  Spec[AgentConfigSpec]
+  Persist[persist_agent_config]
+  Mat[materialize_agent_config]
+  AC[(AgentConfig)]
+  Trg[Trigger rows]
+  Que[apps.queues.sync_from_spec]
+
+  Spec --> Persist
+  Persist --> AC
+  Persist --> Mat
+  Mat --> Trg
+  Mat --> Que
+```
+
+**Rules:**
+
+1. **Orchestrator lives in `apps.agents`** — `materialize.py` (or equivalent) runs
+   inside the same `@transaction.atomic` as the new `AgentConfig` row.
+2. **Each domain owns its slice** — e.g. `apps.queues.commands.sync_from_spec(agent,
+   config, spec.queues)` reconciles `Queue` / `Source` DB rows from the optional
+   `queues[]` block. Same pattern for future spec-controlled infra.
+3. **Implementers do not orchestrate each other** — only `apps.agents` calls the
+   full list, in a documented order.
+4. **Consumers never materialize** — `runner`, `web`, and Celery tasks use DB state;
+   they do not re-sync from spec mid-session (except loading the pinned
+   `agent_config` row the session was started with).
+
+**Intentional dependency:** `apps.agents` imports **`apps.queues`** (and later apps
+as needed) for materialization only. `apps.queues` does **not** import `apps.agents`
+ingest. Direction remains: domain resource apps are leaves relative to the agents
+orchestrator.
+
+### What the spec controls
+
+| Spec section | Materialized? | Where |
+|--------------|---------------|--------|
+| `triggers[]` | Yes | `Trigger` rows (`apps.agents`) |
+| `queues[]` (optional) | Yes | `Queue`, `Source` rows (`apps.queues`) |
+| `tools[]` | No | Runtime wiring from spec JSON |
+| `credential_ref` | No | Resolve at invoke time (`apps.keys`) |
+
+**Queues are agent-scoped:** declared under `queues[]` on the owning agent’s spec
+(optional nested `sources[]` per queue). Config save creates/updates stable DB rows
+(by queue **id** slug) so Celery poll tasks and items keep a fixed identity. Another
+agent may **`put`** into a queue it does not own; only the owning agent’s sessions
+**take** from it (see spec 3 / spec 5).
+
+---
+
+## Queues & sources
+
+**Spec detail:** [`docs/specs/2026-07-04-sources-and-queues/`](specs/2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-design.md)
+
+Platform ingest: sources discover external items → deduped **queue items** → agents
+**take** / **complete** / **fail** via the `queue` tool. Queues replace the original
+“pipes” concept.
+
+**Attempt history:** when an item is retried across sessions (stale release, explicit
+`fail`, worker pool), **`QueueItemAttempt`** records **every** session that took it —
+not only the current taker on `QueueItem`. Operators and debug tooling can list all
+sessions that tried an item before it reached `done`, `failed`, or `exhausted`.
 
 ---
 

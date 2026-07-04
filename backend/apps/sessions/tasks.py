@@ -10,11 +10,14 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from apps.agents.spec import LLMSpec
 from apps.runner.llm_config import provider_config_from_spec
 from apps.sessions.models import AgentSession
 from apps.sessions.services.queries import get_first_input_text, get_session_name
 from celery import shared_task
+
+# isort: split
+
+from libs.agent_spec import LLMSpec
 from libs.algorithms.chat_name import (
     DEFAULT_CHAT_NAME_CONFIG,
     ChatNameConfig,

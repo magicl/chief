@@ -12,11 +12,11 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from apps.agents.spec import AgentConfigSpec
 from apps.runner.backends.base import RecordedEvent, SessionBackend
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
 from apps.sessions.rebuild import rebuild_messages_from_events
 from django.utils import timezone
+from libs.agent_spec import AgentConfigSpec
 
 
 class MemorySessionBackend(SessionBackend):

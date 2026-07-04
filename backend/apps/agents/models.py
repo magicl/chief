@@ -4,9 +4,9 @@
 # ~
 """Agent domain models."""
 
-from apps.agents.spec import AgentConfigSpec, load_spec
 from django.conf import settings
 from django.db import models
+from libs.agent_spec import AgentConfigSpec, load_spec
 
 from olib.py.utils.uuid7 import uuid7
 

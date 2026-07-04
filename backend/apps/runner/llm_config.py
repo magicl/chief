@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from apps.agents.spec import LLMSpec
 from apps.keys.exceptions import KeyStorageMisconfiguredError
 from apps.keys.services.queries import make_secret_supplier
 from apps.keys.types import is_registered_type
+
+# isort: split
+
+from libs.agent_spec import LLMSpec
 from libs.providers.errors import CredentialStorageMisconfigured
 from libs.providers.types import ProviderLLMConfig
 

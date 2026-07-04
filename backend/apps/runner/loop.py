@@ -14,7 +14,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from apps.agents.spec import AgentConfigSpec, ToolInstance
 from apps.agents.tool_wiring import build_bound_tools
 from apps.runner.backends.base import SessionBackend
 from apps.runner.backends.django import DjangoSessionBackend
@@ -27,6 +26,10 @@ from apps.runner.llm_config import provider_config_from_spec
 from apps.runner.tool_definitions import build_tool_definitions
 from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
 from django.utils import timezone
+
+# isort: split
+
+from libs.agent_spec import AgentConfigSpec, ToolInstance
 from libs.providers.base import LLMProvider, ProviderError, StreamResult
 from libs.providers.errors import ProviderConfigurationError
 from libs.providers.registry import make_provider
@@ -48,9 +51,12 @@ class SessionRunner:
     def __init__(self, backend: SessionBackend, *, emit_restart: bool = False) -> None:
         self.backend = backend
         self.config_spec: AgentConfigSpec = backend.get_spec()
+        session = getattr(backend, 'session', None)
         self.bound_tools = build_bound_tools(
             self.config_spec.tools,
             user_id=self.backend.user_id,
+            agent_id=getattr(session, 'agent_id', None),
+            session_id=backend.session_id,
         )
         self.control = LoopControl()
         self.emit_restart = emit_restart

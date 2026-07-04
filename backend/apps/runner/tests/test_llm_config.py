@@ -7,13 +7,16 @@ import os
 from unittest.mock import MagicMock, patch
 
 from apps.agents.hardcoded import HARDCODED_SPEC
-from apps.agents.spec import LLMSpec
 from apps.keys.services import commands
 from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.llm_config import provider_config_from_spec
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.test import override_settings
+
+# isort: split
+
+from libs.agent_spec import LLMSpec
 from libs.providers.errors import CredentialStorageMisconfigured
 
 from olib.py.django.test.cases import OTransactionTestCase

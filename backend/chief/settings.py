@@ -17,6 +17,7 @@ from olib.py.django.app.settingsbase import *  # noqa: F401,F403  pylint: disabl
 INSTALLED_APPS += [  # noqa: F405
     'chief',
     'apps.agents',
+    'apps.queues',
     'apps.sessions',
     'apps.bus',
     'apps.runner',

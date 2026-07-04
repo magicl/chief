@@ -4,7 +4,7 @@
 # ~
 from __future__ import annotations
 
-from apps.agents.spec_migrations.exceptions import SpecMigrationError
+from libs.agent_spec.exceptions import SpecMigrationError
 
 FROM_VERSION = 0
 TO_VERSION = 1

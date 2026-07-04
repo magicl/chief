@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
-from apps.agents.models import Agent, AgentConfig, Trigger, TriggerStatus
-from apps.agents.spec import AGENT_CONFIG_SPEC_VERSION, AgentConfigSpec, ToolInstance
+from apps.agents.materialize import materialize_agent_config
+from apps.agents.models import Agent, AgentConfig
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
+
+# isort: split
+
+from libs.agent_spec import AGENT_CONFIG_SPEC_VERSION, AgentConfigSpec, ToolInstance
 from libs.tools.registry import get_tool
 
 from olib.py.utils.uuid7 import uuid7
@@ -65,15 +69,7 @@ def persist_agent_config(
         spec=spec.model_dump(mode='json'),
     )
 
-    for trigger_spec in spec.triggers:
-        Trigger.objects.create(
-            agent=agent,
-            agent_config=config,
-            name=trigger_spec.name,
-            kind=trigger_spec.kind,
-            status=TriggerStatus.ACTIVE,
-            spec=trigger_spec.model_dump(mode='json'),
-        )
+    materialize_agent_config(agent, config, spec)
 
     agent.current_config = config
     agent.save(update_fields=['current_config'])

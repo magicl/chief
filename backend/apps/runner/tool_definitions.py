@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from apps.agents.spec import ToolInstance
+from libs.agent_spec import ToolInstance
 from libs.tools.base import wire_tool_name
 from libs.tools.registry import get_tool
 from libs.tools.schema import ToolDefinition

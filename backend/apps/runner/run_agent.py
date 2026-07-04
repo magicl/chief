@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from apps.agents.spec import AgentConfigSpec
 from apps.runner.backends.memory import MemorySessionBackend, memory_backend_for_turn
 from apps.runner.loop import SessionRunner
 from apps.runner.spec_loader import (
@@ -17,6 +16,7 @@ from apps.runner.spec_loader import (
     load_agent_config_spec,
     load_agent_config_spec_file,
 )
+from libs.agent_spec import AgentConfigSpec
 
 
 def resolve_run_agent_spec(

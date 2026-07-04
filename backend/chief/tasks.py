@@ -12,5 +12,6 @@ Import each app's task module here so their ``@shared_task`` definitions registe
 with the worker.
 """
 
+import apps.queues.tasks  # noqa: F401  # pylint: disable=unused-import
 import apps.runner.tasks  # noqa: F401  # pylint: disable=unused-import
 import apps.sessions.tasks  # noqa: F401  # pylint: disable=unused-import

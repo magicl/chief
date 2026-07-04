@@ -5,10 +5,23 @@
 """Tests for agent config ingest."""
 
 from apps.agents.hardcoded import HARDCODED_SPEC, bootstrap_agent
-from apps.agents.ingest import IngestError, create_agent_from_spec, validate_spec_tools
+from apps.agents.ingest import (
+    IngestError,
+    create_agent_from_spec,
+    persist_agent_config,
+    validate_spec_tools,
+)
 from apps.agents.models import Agent, AgentConfig, Trigger
-from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolInstance, TriggerSpec
+from apps.queues.models import Queue, Source
 from django.contrib.auth import get_user_model
+from libs.agent_spec import (
+    AgentConfigSpec,
+    LLMSpec,
+    QueueSpec,
+    SourceSpec,
+    ToolInstance,
+    TriggerSpec,
+)
 
 from olib.py.django.test.cases import OTestCase
 
@@ -71,3 +84,24 @@ class CreateAgentFromSpecTests(OTestCase):
         user = get_user_model().objects.create_user(username='boot', password='x')
         agent = bootstrap_agent(user, provider='openai', model='gpt-5.4-mini', identifier='demo')
         self.assertTrue(Agent.objects.filter(pk=agent.pk).exists())
+
+    def test_persist_spec_with_queues_materializes_queue_rows(self) -> None:
+        user = get_user_model().objects.create_user(username='ingest-queue', password='x')
+
+        agent = Agent.objects.create(user_id=user.pk, identifier='queue-ingest-agent')
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='hello',
+            triggers=[TriggerSpec(name='manual', kind='manual')],
+            tools=[ToolInstance(id='clock', type='clock', allow=['now'])],
+            queues=[
+                QueueSpec(
+                    id='inbox',
+                    sources=[SourceSpec(id='poll-a', adapter_type='test', config={'prefix': 'in'})],
+                ),
+            ],
+        )
+        persist_agent_config(agent, spec, source_rev='with-queues')
+
+        queue = Queue.objects.get(agent=agent, queue_id='inbox')
+        self.assertTrue(Source.objects.filter(queue=queue, source_id='poll-a').exists())

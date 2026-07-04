@@ -5,10 +5,13 @@
 from unittest.mock import patch
 
 from apps.agents.hardcoded import HARDCODED_SPEC
-from apps.agents.spec import LLMSpec
 from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.loop import SessionRunner
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
+
+# isort: split
+
+from libs.agent_spec import LLMSpec
 from libs.providers.base import ProviderError, StreamResult
 from libs.providers.fake_provider import FakeProvider
 

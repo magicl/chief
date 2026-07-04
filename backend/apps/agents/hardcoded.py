@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from apps.agents.ingest import create_agent_from_spec
 from apps.agents.models import Agent
-from apps.agents.spec import AgentConfigSpec, LLMSpec, ToolInstance, TriggerSpec
 from django.contrib.auth.models import AbstractBaseUser
+from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance, TriggerSpec
 
 HARDCODED_SPEC = AgentConfigSpec(
     schema_version=1,

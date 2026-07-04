@@ -2,21 +2,30 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+"""Agent configuration spec schema and migration loader."""
+
 from __future__ import annotations
 
 from typing import Any
 
-from apps.agents.spec_migrations.exceptions import (
+from libs.agent_spec.exceptions import (
     SpecMigrationError,
     UnsupportedSpecVersionError,
 )
-from apps.agents.spec_migrations.registry import (
-    get_spec_migrations,
-    latest_spec_version,
+from libs.agent_spec.registry import get_spec_migrations, latest_spec_version
+from libs.agent_spec.spec import (
+    AGENT_CONFIG_SPEC_VERSION,
+    AgentConfigSpec,
+    LLMSpec,
+    QueueSpec,
+    SourceSpec,
+    ToolInstance,
+    TriggerSpec,
 )
 
 
 def detect_version(raw: dict[str, Any]) -> int:
+    """Infer stored spec version from JSON shape (0 = legacy tool permissions)."""
     if 'schema_version' in raw:
         return int(raw['schema_version'])
     tools = raw.get('tools') or []
@@ -26,6 +35,7 @@ def detect_version(raw: dict[str, Any]) -> int:
 
 
 def apply_upgrade_chain(raw: dict[str, Any], *, from_version: int) -> dict[str, Any]:
+    """Apply registered migration steps from *from_version* through latest."""
     current = dict(raw)
     version = from_version
     for step in get_spec_migrations():
@@ -44,6 +54,7 @@ def apply_upgrade_chain(raw: dict[str, Any], *, from_version: int) -> dict[str, 
 
 
 def load_spec_dict(raw: dict[str, Any], *, stored_version: int | None = None) -> dict[str, Any]:
+    """Upgrade *raw* dict to the latest schema version in memory."""
     version = stored_version if stored_version is not None else detect_version(raw)
     latest = latest_spec_version()
     if version > latest:
@@ -51,10 +62,24 @@ def load_spec_dict(raw: dict[str, Any], *, stored_version: int | None = None) ->
     return apply_upgrade_chain(raw, from_version=version)
 
 
+def load_spec(raw: dict[str, Any], *, stored_version: int | None = None) -> AgentConfigSpec:
+    """Parse and upgrade *raw* into a validated ``AgentConfigSpec``."""
+    return AgentConfigSpec.model_validate(load_spec_dict(raw, stored_version=stored_version))
+
+
 __all__ = [
-    'UnsupportedSpecVersionError',
+    'AGENT_CONFIG_SPEC_VERSION',
+    'AgentConfigSpec',
+    'LLMSpec',
+    'QueueSpec',
+    'SourceSpec',
+    'ToolInstance',
+    'TriggerSpec',
     'SpecMigrationError',
+    'UnsupportedSpecVersionError',
     'detect_version',
-    'load_spec_dict',
+    'get_spec_migrations',
     'latest_spec_version',
+    'load_spec',
+    'load_spec_dict',
 ]

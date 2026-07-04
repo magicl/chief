@@ -11,7 +11,6 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from apps.agents.spec import AgentConfigSpec
 from apps.bus.channels import mailbox_drain
 from apps.runner.backends.base import RecordedEvent, SessionBackend
 from apps.sessions.events import append_event, events_for
@@ -19,6 +18,7 @@ from apps.sessions.models import AgentSession, AgentSessionEvent
 from apps.sessions.notify import publish_session_event
 from apps.sessions.rebuild import rebuild_messages
 from apps.sessions.services.commands import record_input as record_input_command
+from libs.agent_spec import AgentConfigSpec
 
 
 def _recorded_from_row(row: AgentSessionEvent) -> RecordedEvent:

@@ -3,18 +3,17 @@
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
 from apps.agents.models import Agent, AgentConfig
-from apps.agents.spec import AGENT_CONFIG_SPEC_VERSION
-from apps.agents.spec_migrations import detect_version, load_spec_dict
-from apps.agents.spec_migrations.exceptions import (
+from django.contrib.auth import get_user_model
+from libs.agent_spec import AGENT_CONFIG_SPEC_VERSION, detect_version, load_spec_dict
+from libs.agent_spec.exceptions import (
     SpecMigrationError,
     UnsupportedSpecVersionError,
 )
-from apps.agents.spec_migrations.migrations import tool_instances as mig001
-from apps.agents.spec_migrations.registry import (
+from libs.agent_spec.migrations import tool_instances as mig001
+from libs.agent_spec.registry import (
     get_spec_migrations,
     latest_spec_version,
 )
-from django.contrib.auth import get_user_model
 
 from olib.py.django.test.cases import OTestCase
 

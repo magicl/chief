@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apps.agents.spec_migrations.exceptions import SpecMigrationError
+from libs.agent_spec.exceptions import SpecMigrationError
 
 _MIGRATION_RE = re.compile(r'^(\d{3})_(.+)\.py$')
 
@@ -27,7 +27,7 @@ class SpecMigration:
 
 
 def _discover_migrations() -> tuple[SpecMigration, ...]:
-    migrations_pkg = importlib.import_module('apps.agents.spec_migrations.migrations')
+    migrations_pkg = importlib.import_module('libs.agent_spec.migrations')
     pkg_file = migrations_pkg.__file__
     if pkg_file is None:
         raise SpecMigrationError('migrations package has no __file__')
@@ -37,7 +37,7 @@ def _discover_migrations() -> tuple[SpecMigration, ...]:
         match = _MIGRATION_RE.match(f'{info.name}.py')
         if not match:
             continue
-        module = importlib.import_module(f'apps.agents.spec_migrations.migrations.{info.name}')
+        module = importlib.import_module(f'libs.agent_spec.migrations.{info.name}')
         expected_to = int(match.group(1))
         from_v = int(module.FROM_VERSION)
         to_v = int(module.TO_VERSION)
@@ -68,10 +68,12 @@ def _cached_migrations() -> tuple[SpecMigration, ...]:
 
 
 def get_spec_migrations() -> tuple[SpecMigration, ...]:
+    """Return the ordered spec migration chain discovered at import time."""
     return _cached_migrations()
 
 
 def latest_spec_version() -> int:
+    """Return ``TO_VERSION`` of the last registered migration step."""
     steps = get_spec_migrations()
     if not steps:
         return 0
