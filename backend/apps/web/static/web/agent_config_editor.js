@@ -320,8 +320,8 @@ function renderToolActionCheckboxes(container, toolTypes, toolType, _yaml) {
     container.appendChild(note);
     return;
   }
-  const readFns = meta.functions.filter((fn) => fn.kind === 'read');
-  const writeFns = meta.functions.filter((fn) => fn.kind === 'write');
+  const readFns = meta.functions.filter((fn) => fn.readonly);
+  const writeFns = meta.functions.filter((fn) => !fn.readonly);
   const groups = [
     ['Read', readFns],
     ['Write', writeFns],

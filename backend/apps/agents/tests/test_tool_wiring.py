@@ -40,6 +40,7 @@ class _EchoCredTool(Tool):
                 description='x',
                 parameters={'type': 'object', 'properties': {}},
                 handler=self._ping,
+                readonly=True,
             ),
         ]
 

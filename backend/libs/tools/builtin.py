@@ -19,6 +19,7 @@ class ClockTool(Tool):
                 description='Return the current UTC time as an ISO-8601 string.',
                 parameters={'type': 'object', 'properties': {}, 'required': []},
                 handler=self._now,
+                readonly=True,
             ),
         ]
 

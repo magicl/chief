@@ -72,6 +72,7 @@ class QueueTool(Tool):
                     'required': ['owner_agent', 'queue', 'payload'],
                 },
                 handler=self._put_unbound,
+                readonly=False,
             ),
             ToolFunction(
                 name='take',
@@ -84,6 +85,7 @@ class QueueTool(Tool):
                     'required': ['queue'],
                 },
                 handler=self._take_unbound,
+                readonly=True,
             ),
             ToolFunction(
                 name='complete',
@@ -96,6 +98,7 @@ class QueueTool(Tool):
                     'required': ['item_id'],
                 },
                 handler=self._complete_unbound,
+                readonly=False,
             ),
             ToolFunction(
                 name='fail',
@@ -109,6 +112,7 @@ class QueueTool(Tool):
                     'required': ['item_id'],
                 },
                 handler=self._fail_unbound,
+                readonly=False,
             ),
         ]
 

@@ -24,36 +24,6 @@ from libs.tools.registry import all_tools
 
 TRIGGER_KINDS = ['schedule', 'manual', 'agent']
 
-_READ_ACTIONS = frozenset({'get', 'list', 'read', 'search', 'fetch', 'take', 'now', 'peek', 'head'})
-_WRITE_ACTIONS = frozenset(
-    {
-        'put',
-        'post',
-        'create',
-        'delete',
-        'update',
-        'send',
-        'complete',
-        'fail',
-        'remove',
-        'add',
-        'set',
-    }
-)
-
-
-def _function_kind(name: str) -> str:
-    """Classify a tool sub-function as read or write for helper checkboxes."""
-    if name in _READ_ACTIONS:
-        return 'read'
-    if name in _WRITE_ACTIONS:
-        return 'write'
-    if name.startswith(('get_', 'list_', 'read_', 'fetch_', 'search_')):
-        return 'read'
-    if name.startswith(('put_', 'create_', 'delete_', 'update_', 'send_', 'post_')):
-        return 'write'
-    return 'read'
-
 
 def _spec_summary_from_spec(spec: Any) -> dict[str, Any]:
     """Build helper dropdown summary from a parsed spec."""
@@ -132,7 +102,7 @@ def _tool_catalog() -> list[dict[str, Any]]:
             {
                 'type': name,
                 'credential_type': getattr(tool, 'credential_type', None),
-                'functions': [{'name': fn.name, 'kind': _function_kind(fn.name)} for fn in tool.functions()],
+                'functions': [{'name': fn.name, 'readonly': fn.readonly} for fn in tool.functions()],
             },
         )
     return items

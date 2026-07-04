@@ -20,6 +20,7 @@ class ToolFunction:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., Any]
+    readonly: bool = False
 
 
 def qualified_tool_name(tool_name: str, function_name: str) -> str:
