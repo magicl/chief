@@ -15,6 +15,8 @@
   {% endif %}
 </div>
 <div class="frame-header-actions">
+  <a href="{{ url('agent_config', kwargs={'agent_id': agent.id}) }}" class="frame-btn" style="text-decoration:none; color:#9ec5ff;">Configuration</a>
+  <span class="muted" style="font-size:.8rem;">{{ source_label }}{% if config_dirty %} · dirty{% endif %}</span>
   <a href="{{ url('dashboard') }}" class="frame-btn muted-btn" style="text-decoration: none;">All agents</a>
   <form method="post" action="{{ url('delete_agent', kwargs={'agent_id': agent.id}) }}">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">

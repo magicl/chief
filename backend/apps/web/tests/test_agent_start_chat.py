@@ -5,7 +5,7 @@
 import logging
 from unittest.mock import MagicMock, patch
 
-from apps.agents.hardcoded import bootstrap_agent
+from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -21,11 +21,10 @@ class TestAgentStartChatView(OTransactionTestCase):
         User = get_user_model()
         self.user = User.objects.create_user(username='start-chat-user', password='test')
         self.other = User.objects.create_user(username='other-start-chat-user', password='test')
-        self.agent = bootstrap_agent(
+        self.agent = create_from_example(
             self.user,
+            'clock-assistant',
             identifier='start-chat-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
         )
 
     def test_requires_login(self) -> None:
@@ -36,7 +35,9 @@ class TestAgentStartChatView(OTransactionTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn('/admin/login/', response['Location'])
 
-    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/chat/', count=1)])
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/chat/', count=1)]
+    )
     def test_requires_content(self) -> None:
         self.client.force_login(self.user)
         response = self.client.post(reverse('agent_start_chat', kwargs={'agent_id': self.agent.id}))

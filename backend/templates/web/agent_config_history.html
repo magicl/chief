@@ -1,0 +1,19 @@
+{% extends "web/base.html" %}
+
+{% block title %}{{ agent.identifier }} config @ {{ config.fetched_at.strftime('%Y-%m-%d %H:%M') }} — Chief{% endblock %}
+
+{% block content %}
+<p><a href="{{ url('agent_config', kwargs={'agent_id': agent.id}) }}" style="color:#9ec5ff;">← Back to editor</a></p>
+<h2 style="text-transform:none; letter-spacing:0; color:#e6e6e6;">Revision {{ config.source_rev }}</h2>
+<pre style="background:#161a21; border:1px solid #262a33; border-radius:8px; padding:1rem; overflow:auto; font-size:.85rem;">{{ spec_yaml }}</pre>
+<button type="button" id="restore-yaml" class="primary" data-yaml="{{ spec_yaml|e }}">Restore to editor</button>
+<script>
+  document.getElementById('restore-yaml')?.addEventListener('click', () => {
+    sessionStorage.setItem('agentConfigRestoreYaml', document.getElementById('restore-yaml').dataset.yaml || '');
+    window.location.href = "{{ url('agent_config', kwargs={'agent_id': agent.id}) }}";
+  });
+</script>
+<style>
+  button.primary { padding:.4rem .75rem; border-radius:8px; border:1px solid #262a33; background:#1d3a5f; color:#9ec5ff; cursor:pointer; margin-top:1rem; }
+</style>
+{% endblock %}

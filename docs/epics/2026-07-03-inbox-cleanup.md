@@ -14,8 +14,8 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 
 - [x] 1. Key management — [spec](../specs/2026-07-03-key-management/)
 - [x] 2. Agent config schema extensions — [spec](../specs/2026-07-03-agent-config-schema/) · [plan](../specs/2026-07-03-agent-config-schema/2026-07-03-agent-config-schema-plan.md)
-- [ ] 3. Sources and queues — [spec](../specs/2026-07-04-sources-and-queues/) · [plan](../specs/2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-plan.md)
-- [ ] 4. Agent configuration UI
+- [x] 3. Sources and queues — [spec](../specs/2026-07-04-sources-and-queues/) · [plan](../specs/2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-plan.md)
+- [x] 4. Agent configuration UI — [spec](../specs/2026-07-04-agent-config-ui/)
 - [ ] 5. Agent scheduling
 - [ ] 6. Gmail library and tool
 - [ ] 7. ClickUp library and tool

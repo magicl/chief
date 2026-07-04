@@ -2,25 +2,16 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from libs.providers.anthropic_provider import AnthropicProvider
-from libs.providers.local_openai_provider import LocalOpenAIProvider
-from libs.providers.openai_provider import OpenAIProvider
-from apps.web.demo_models import list_demo_models
+"""Tests for example specs catalog."""
+
+from libs.agent_specs import list_examples
 
 from olib.py.django.test.cases import OTestCase
 
 
-class TestDemoModels(OTestCase):
-    def test_includes_catalog_models_from_providers(self) -> None:
-        options = list_demo_models()
-        providers = {option.provider for option in options}
-        self.assertIn('openai', providers)
-        self.assertIn('anthropic', providers)
-        self.assertIn('local_openai', providers)
-        openai_models = {option.model for option in options if option.provider == 'openai'}
-        self.assertEqual(openai_models, set(OpenAIProvider.models.keys()))
-        anthropic_models = {option.model for option in options if option.provider == 'anthropic'}
-        self.assertTrue(anthropic_models)
-        self.assertTrue(anthropic_models.issubset(set(AnthropicProvider.models.keys())))
-        local_models = {option.model for option in options if option.provider == 'local_openai'}
-        self.assertEqual(local_models, set(LocalOpenAIProvider.models.keys()))
+class TestExampleSpecs(OTestCase):
+    def test_list_examples_non_empty(self) -> None:
+        examples = list_examples()
+        self.assertGreaterEqual(len(examples), 2)
+        titles = {ex.title for ex in examples}
+        self.assertIn('Clock assistant', titles)

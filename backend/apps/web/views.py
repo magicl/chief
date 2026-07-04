@@ -14,8 +14,8 @@ from typing import Any, cast
 from uuid import UUID
 
 from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
-from apps.agents.hardcoded import bootstrap_agent as create_bootstrap_agent
 from apps.agents.models import Agent
+from apps.agents.services.config_sync import config_source_label
 from apps.bus.client import async_client, key_prefix
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
 from apps.keys.services import commands
@@ -29,7 +29,6 @@ from apps.runner.dispatch import (
 from apps.runner.start import StartSessionError, start_manual_session
 from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession
-from apps.web.demo_models import list_demo_models
 from asgiref.sync import sync_to_async
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
@@ -44,6 +43,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
+from libs.agent_specs import list_examples
 
 logger = logging.getLogger(__name__)
 
@@ -97,28 +97,12 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         agents = agents.filter(user=request.user)
         sessions = sessions.filter(agent__user=request.user)
     sessions = sessions[:20]
-    demo_models = list_demo_models() if request.user.is_authenticated else []
+    examples = list_examples() if request.user.is_authenticated else []
     return render(
         request,
         'web/dashboard.html',
-        {'agents': agents, 'sessions': sessions, 'demo_models': demo_models},
+        {'agents': agents, 'sessions': sessions, 'examples': examples},
     )
-
-
-@login_required(login_url='/admin/login/')
-@csrf_protect
-@require_POST
-def bootstrap_agent(request: HttpRequest) -> HttpResponse:
-    provider = request.POST.get('provider', '').strip()
-    model = request.POST.get('model', '').strip()
-    if not provider or not model:
-        return HttpResponseBadRequest('provider and model required')
-    agent = create_bootstrap_agent(
-        cast(AbstractBaseUser, request.user),
-        provider=provider,
-        model=model,
-    )
-    return redirect('agent_detail', agent_id=agent.id)
 
 
 @login_required(login_url='/admin/login/')
@@ -126,7 +110,12 @@ def bootstrap_agent(request: HttpRequest) -> HttpResponse:
 def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     agent = _owned_agent(request, agent_id)
     sessions = AgentSession.objects.filter(agent=agent).order_by('-created_at')
-    context = {'agent': agent, 'sessions': sessions}
+    context = {
+        'agent': agent,
+        'sessions': sessions,
+        'source_label': config_source_label(agent.config_source),
+        'config_dirty': agent.current_config.dirty if agent.current_config else False,
+    }
     context.update(_chatbox_context(agent=agent, session=None))
     return render(request, 'web/agent_detail.html', context)
 

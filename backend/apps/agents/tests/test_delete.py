@@ -3,7 +3,7 @@
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
 from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
-from apps.agents.hardcoded import bootstrap_agent
+from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
 from django.contrib.auth import get_user_model
 
@@ -13,13 +13,13 @@ from olib.py.django.test.cases import OTestCase
 class TestDeleteAgent(OTestCase):
     def test_delete_agent_for_user_removes_agent(self) -> None:
         user = get_user_model().objects.create_user(username='delete-user', password='test')
-        agent = bootstrap_agent(user, provider='openai', model='gpt-5.4-mini')
+        agent = create_from_example(user, 'clock-assistant')
         delete_agent_for_user(user, agent.id)
         self.assertFalse(agent.__class__.objects.filter(pk=agent.id).exists())
 
     def test_delete_agent_for_user_cascades_sessions(self) -> None:
         user = get_user_model().objects.create_user(username='delete-sessions-user', password='test')
-        agent = bootstrap_agent(user, provider='openai', model='gpt-5.4-mini')
+        agent = create_from_example(user, 'clock-assistant')
         config = agent.current_config
         assert config is not None
         trigger = agent.triggers.filter(name='manual').first()
@@ -38,6 +38,6 @@ class TestDeleteAgent(OTestCase):
         User = get_user_model()
         owner = User.objects.create_user(username='owner', password='test')
         other = User.objects.create_user(username='other', password='test')
-        agent = bootstrap_agent(owner, provider='openai', model='gpt-5.4-mini')
+        agent = create_from_example(owner, 'clock-assistant')
         with self.assertRaises(AgentNotFoundError):
             delete_agent_for_user(other, agent.id)

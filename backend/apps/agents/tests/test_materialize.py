@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from apps.agents.hardcoded import HARDCODED_SPEC
 from apps.agents.ingest import persist_agent_config
 from apps.agents.materialize import materialize_agent_config
 from apps.agents.models import Agent, AgentConfig, Trigger
@@ -20,8 +19,11 @@ from libs.agent_spec import (
     ToolInstance,
     TriggerSpec,
 )
+from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTestCase
+
+CLOCK_SPEC = load_example('clock-assistant')
 
 
 class TestMaterializeAgentConfig(OTestCase):
@@ -56,7 +58,7 @@ class TestMaterializeAgentConfig(OTestCase):
             agent=agent,
             source_rev='bare',
             spec_version=1,
-            spec=HARDCODED_SPEC.model_dump(mode='json'),
+            spec=CLOCK_SPEC.model_dump(mode='json'),
         )
-        materialize_agent_config(agent, config, HARDCODED_SPEC)
+        materialize_agent_config(agent, config, CLOCK_SPEC)
         self.assertEqual(Queue.objects.filter(agent=agent).count(), 0)

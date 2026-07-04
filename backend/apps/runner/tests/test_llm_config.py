@@ -6,7 +6,6 @@ import logging
 import os
 from unittest.mock import MagicMock, patch
 
-from apps.agents.hardcoded import HARDCODED_SPEC
 from apps.keys.services import commands
 from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.llm_config import provider_config_from_spec
@@ -17,6 +16,7 @@ from django.test import override_settings
 # isort: split
 
 from libs.agent_spec import LLMSpec
+from libs.agent_specs import load_example
 from libs.providers.errors import CredentialStorageMisconfigured
 
 from olib.py.django.test.cases import OTransactionTestCase
@@ -65,7 +65,7 @@ class TestEnvOnlyCredentialPath(OTransactionTestCase):
         user = get_user_model().objects.create_user(username='env-only-user', password='x')
         with override_settings(CREDENTIALS_KEY=key):
             commands.set_system_default('openai', 'sk-from-db')
-            backend = MemorySessionBackend(HARDCODED_SPEC.model_copy(), user_id=None)
+            backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=None)
             cfg = provider_config_from_spec(backend.get_spec().llm, user_id=backend.user_id)
             self.assertIsNone(cfg.secret_supplier)
             with patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-env'}, clear=False):

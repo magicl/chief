@@ -1,0 +1,20 @@
+# title: Clock assistant
+# description: Manual-trigger demo with the clock tool.
+schema_version: 1
+description: Clock assistant example
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+  temperature: 0.7
+system_prompt: |
+  You are a helpful assistant running inside Chief.
+  You can check the current UTC time using the clock tool when asked.
+  Keep responses concise.
+triggers:
+  - name: manual
+    kind: manual
+tools:
+  - id: clock
+    type: clock
+    allow:
+      - now

@@ -15,7 +15,7 @@ class Agent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='agents')
     identifier = models.CharField(max_length=255)
-    config_source = models.CharField(max_length=255, default='hardcoded')
+    config_source = models.CharField(max_length=255, default='ui')
     current_config = models.ForeignKey(
         'AgentConfig',
         null=True,

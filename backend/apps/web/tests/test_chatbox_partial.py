@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from apps.agents.hardcoded import bootstrap_agent
+from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -16,11 +16,10 @@ class TestChatboxPartial(OTransactionTestCase):
         self.client = Client()
         User = get_user_model()
         self.user = User.objects.create_user(username='chatbox-user', password='test')
-        self.agent = bootstrap_agent(
+        self.agent = create_from_example(
             self.user,
+            'clock-assistant',
             identifier='chatbox-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
         )
         config = self.agent.current_config
         assert config is not None

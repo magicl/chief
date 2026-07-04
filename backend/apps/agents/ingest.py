@@ -82,8 +82,8 @@ def create_agent_from_spec(
     spec: AgentConfigSpec,
     *,
     identifier: str | None = None,
-    config_source: str = 'hardcoded',
-    source_rev: str = 'hardcoded-v0.1',
+    config_source: str = 'ui',
+    source_rev: str = 'ui:initial',
 ) -> Agent:
     """Create ``Agent`` and persist config from a validated spec."""
     if identifier is None:

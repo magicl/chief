@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from apps.agents.hardcoded import bootstrap_agent
 from apps.agents.models import Agent, AgentConfig
+from apps.agents.services.config_commands import create_from_example
 from apps.queues.exceptions import QueueValidationError
 from apps.queues.models import Queue, Source, SourceStatus
 from apps.queues.services import commands
@@ -24,15 +24,10 @@ class TestSyncFromSpec(OTransactionTestCase):
     def setUp(self) -> None:
         super().setUp()
         user = get_user_model().objects.create_user(username='sync-user', password='x')
-        self.agent = bootstrap_agent(
-            user,
-            identifier='sync-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
-        )
+        self.agent = create_from_example(user, 'clock-assistant', identifier='sync-agent')
         config = self.agent.current_config
         if config is None:
-            raise RuntimeError('bootstrap_agent did not set current_config')
+            raise RuntimeError('create_from_example did not set current_config')
         self.config = config
 
     def test_empty_queues_is_noop(self) -> None:

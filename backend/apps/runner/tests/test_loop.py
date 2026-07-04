@@ -4,7 +4,6 @@
 # ~
 from unittest.mock import patch
 
-from apps.agents.hardcoded import HARDCODED_SPEC
 from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.loop import SessionRunner
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
@@ -12,6 +11,7 @@ from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
 # isort: split
 
 from libs.agent_spec import LLMSpec
+from libs.agent_specs import load_example
 from libs.providers.base import ProviderError, StreamResult
 from libs.providers.fake_provider import FakeProvider
 
@@ -20,7 +20,7 @@ from olib.py.django.test.cases import OTestCase
 
 class TestSessionRunner(OTestCase):
     def _backend(self, *, llm: LLMSpec | None = None) -> MemorySessionBackend:
-        spec = HARDCODED_SPEC.model_copy()
+        spec = load_example('clock-assistant').model_copy()
         if llm is not None:
             spec.llm = llm
         return MemorySessionBackend(spec)
@@ -107,7 +107,7 @@ class TestSessionRunner(OTestCase):
         self.assertEqual(failure.payload['code'], 'unsupported_llm_provider')
 
     def test_env_only_backend_passes_no_supplier_to_provider_config(self) -> None:
-        backend = MemorySessionBackend(HARDCODED_SPEC.model_copy(), user_id=None)
+        backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=None)
         backend.push_mailbox({'action': 'chat', 'content': 'ping'})
         with patch('apps.runner.loop.make_provider') as mock_make:
             mock_make.return_value = FakeProvider.for_responses([StreamResult(content='pong')])

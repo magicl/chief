@@ -4,8 +4,8 @@
 # ~
 from __future__ import annotations
 
-from apps.agents.hardcoded import bootstrap_agent
 from apps.agents.models import Agent, AgentConfig
+from apps.agents.services.config_commands import create_from_example
 from apps.queues.models import Queue, Source
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
 from django.contrib.auth import get_user_model
@@ -18,12 +18,7 @@ def make_test_queue(
     max_attempts: int = 3,
 ) -> tuple[Queue, AgentSession]:
     user = get_user_model().objects.create_user(username=f'user-{identifier}', password='test')
-    agent = bootstrap_agent(
-        user,
-        identifier=identifier,
-        provider='openai',
-        model='gpt-5.4-mini',
-    )
+    agent = create_from_example(user, 'clock-assistant', identifier=identifier)
     config = agent.current_config
     assert config is not None
     queue = Queue.objects.create(

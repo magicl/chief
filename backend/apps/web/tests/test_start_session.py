@@ -4,7 +4,7 @@
 # ~
 import logging
 
-from apps.agents.hardcoded import bootstrap_agent
+from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -20,11 +20,10 @@ class TestStartAgentSessionView(OTransactionTestCase):
         User = get_user_model()
         self.user = User.objects.create_user(username='start-user', password='test')
         self.other = User.objects.create_user(username='other-user', password='test')
-        self.agent = bootstrap_agent(
+        self.agent = create_from_example(
             self.user,
+            'clock-assistant',
             identifier='start-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
         )
 
     def test_requires_login(self) -> None:
@@ -44,7 +43,9 @@ class TestStartAgentSessionView(OTransactionTestCase):
         page = self.client.get(response['Location'])
         self.assertEqual(page.status_code, 200)
 
-    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Not Found: /agents/[0-9a-f-]+/start/', count=1)])
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Not Found: /agents/[0-9a-f-]+/start/', count=1)]
+    )
     def test_cannot_start_other_users_agent(self) -> None:
         self.client.force_login(self.other)
         response = self.client.post(reverse('start_agent_session', kwargs={'agent_id': self.agent.id}))

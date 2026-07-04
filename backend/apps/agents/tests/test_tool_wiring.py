@@ -6,8 +6,7 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
-from apps.agents.hardcoded import bootstrap_agent
-from apps.agents.ingest import persist_agent_config
+from apps.agents.ingest import create_agent_from_spec, persist_agent_config
 from apps.agents.tool_wiring import build_bound_tools
 from apps.queues.models import Queue, QueueItem, QueueItemStatus
 from apps.queues.services import commands
@@ -23,6 +22,7 @@ from libs.agent_spec import (
     SourceSpec,
     ToolInstance,
 )
+from libs.agent_specs import load_example
 from libs.tools.base import Tool, ToolFunction
 from libs.tools.registry import register_tool
 
@@ -81,11 +81,12 @@ class TestBuildBoundTools(OTestCase):
 
     def test_queue_tool_round_trip_take_and_complete(self) -> None:
         user = get_user_model().objects.create_user(username='queue-wire-user', password='x')
-        agent = bootstrap_agent(
+        agent = create_agent_from_spec(
             user,
+            load_example('queue-echo'),
             identifier='queue-wire-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
+            config_source='ui',
+            source_rev='test',
         )
         spec = AgentConfigSpec(
             llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),

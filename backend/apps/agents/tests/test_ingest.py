@@ -4,7 +4,6 @@
 # ~
 """Tests for agent config ingest."""
 
-from apps.agents.hardcoded import HARDCODED_SPEC, bootstrap_agent
 from apps.agents.ingest import (
     IngestError,
     create_agent_from_spec,
@@ -12,6 +11,7 @@ from apps.agents.ingest import (
     validate_spec_tools,
 )
 from apps.agents.models import Agent, AgentConfig, Trigger
+from apps.agents.services.config_commands import create_from_example
 from apps.queues.models import Queue, Source
 from django.contrib.auth import get_user_model
 from libs.agent_spec import (
@@ -22,16 +22,19 @@ from libs.agent_spec import (
     ToolInstance,
     TriggerSpec,
 )
+from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTestCase
 
+CLOCK_SPEC = load_example('clock-assistant')
+
 
 class ValidateSpecToolsTests(OTestCase):
-    def test_valid_hardcoded_spec(self) -> None:
-        validate_spec_tools(HARDCODED_SPEC)
+    def test_valid_clock_example_spec(self) -> None:
+        validate_spec_tools(CLOCK_SPEC)
 
     def test_unknown_tool_raises(self) -> None:
-        spec = HARDCODED_SPEC.model_copy(
+        spec = CLOCK_SPEC.model_copy(
             update={'tools': [ToolInstance(id='missing', type='missing', allow=['*'])]},
         )
         with self.assertRaises(IngestError) as ctx:
@@ -39,7 +42,7 @@ class ValidateSpecToolsTests(OTestCase):
         self.assertIn('missing', str(ctx.exception))
 
     def test_unknown_allow_function_raises(self) -> None:
-        spec = HARDCODED_SPEC.model_copy(
+        spec = CLOCK_SPEC.model_copy(
             update={'tools': [ToolInstance(id='clock', type='clock', allow=['nope'])]},
         )
         with self.assertRaises(IngestError) as ctx:
@@ -47,7 +50,7 @@ class ValidateSpecToolsTests(OTestCase):
         self.assertIn('nope', str(ctx.exception))
 
     def test_credential_ref_on_clock_rejected(self) -> None:
-        spec = HARDCODED_SPEC.model_copy(
+        spec = CLOCK_SPEC.model_copy(
             update={'tools': [ToolInstance(id='clock', type='clock', credential_ref='x', allow=['now'])]},
         )
         with self.assertRaises(IngestError):
@@ -72,7 +75,7 @@ class CreateAgentFromSpecTests(OTestCase):
 
     def test_create_writes_spec_version_one(self) -> None:
         user = get_user_model().objects.create_user(username='sv', password='x')
-        spec = HARDCODED_SPEC.model_copy()
+        spec = CLOCK_SPEC.model_copy()
         agent = create_agent_from_spec(user, spec, identifier='sv-agent')
         config = agent.current_config
         self.assertIsNotNone(config)
@@ -80,9 +83,9 @@ class CreateAgentFromSpecTests(OTestCase):
         self.assertEqual(config.spec_version, 1)
         self.assertEqual(config.spec['schema_version'], 1)
 
-    def test_bootstrap_agent_delegates_to_ingest(self) -> None:
+    def test_create_from_example_delegates_to_ingest(self) -> None:
         user = get_user_model().objects.create_user(username='boot', password='x')
-        agent = bootstrap_agent(user, provider='openai', model='gpt-5.4-mini', identifier='demo')
+        agent = create_from_example(user, 'clock-assistant', identifier='demo')
         self.assertTrue(Agent.objects.filter(pk=agent.pk).exists())
 
     def test_persist_spec_with_queues_materializes_queue_rows(self) -> None:

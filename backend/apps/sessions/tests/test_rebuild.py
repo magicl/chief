@@ -2,11 +2,11 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from apps.agents.hardcoded import HARDCODED_SPEC
 from apps.sessions.events import append_event
 from apps.sessions.models import AgentSessionEventKind
 from apps.sessions.rebuild import rebuild_messages
 from apps.sessions.tests.base import make_test_session
+from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTransactionTestCase
 
@@ -26,7 +26,7 @@ class TestRebuildMessages(OTransactionTestCase):
         )
         append_event(session, AgentSessionEventKind.OUTPUT, {'content': 'It is midnight UTC.'})
 
-        messages = rebuild_messages(session, system_prompt=HARDCODED_SPEC.system_prompt)
+        messages = rebuild_messages(session, system_prompt=load_example('clock-assistant').system_prompt)
         self.assertEqual(messages[0]['role'], 'system')
         self.assertEqual(messages[1], {'role': 'user', 'content': 'What time is it?'})
         self.assertEqual(messages[2]['role'], 'assistant')

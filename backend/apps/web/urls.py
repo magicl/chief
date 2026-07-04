@@ -2,13 +2,25 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from apps.web import views
+from apps.web import config_views, views
 from django.urls import path
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
-    path('agents/bootstrap/', views.bootstrap_agent, name='bootstrap_agent'),
+    path('agents/create/', config_views.agent_create, name='agent_create'),
+    path('agents/create/submit/', config_views.agent_create_submit, name='agent_create_submit'),
     path('agents/<uuid:agent_id>/', views.agent_detail, name='agent_detail'),
+    path('agents/<uuid:agent_id>/config/', config_views.agent_config, name='agent_config'),
+    path('agents/<uuid:agent_id>/config/save/', config_views.agent_config_save, name='agent_config_save'),
+    path('agents/<uuid:agent_id>/config/mutate/', config_views.agent_config_mutate, name='agent_config_mutate'),
+    path('agents/<uuid:agent_id>/config/sync/', config_views.agent_config_sync, name='agent_config_sync'),
+    path('agents/<uuid:agent_id>/config/source/', config_views.agent_config_source, name='agent_config_source'),
+    path(
+        'agents/<uuid:agent_id>/config/history/<uuid:config_id>/',
+        config_views.agent_config_history,
+        name='agent_config_history',
+    ),
+    path('agents/config/catalog/', config_views.agent_config_catalog, name='agent_config_catalog'),
     path('agents/<uuid:agent_id>/chat/', views.agent_start_chat, name='agent_start_chat'),
     path('agents/<uuid:agent_id>/delete/', views.delete_agent, name='delete_agent'),
     path('agents/<uuid:agent_id>/start/', views.start_agent_session, name='start_agent_session'),

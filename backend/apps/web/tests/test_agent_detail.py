@@ -4,7 +4,7 @@
 # ~
 import logging
 
-from apps.agents.hardcoded import bootstrap_agent
+from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -20,11 +20,10 @@ class TestAgentDetailView(OTransactionTestCase):
         User = get_user_model()
         self.user = User.objects.create_user(username='agent-detail-user', password='test')
         self.other = User.objects.create_user(username='other-detail-user', password='test')
-        self.agent = bootstrap_agent(
+        self.agent = create_from_example(
             self.user,
+            'clock-assistant',
             identifier='detail-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
         )
 
     def test_requires_login(self) -> None:
@@ -65,11 +64,10 @@ class TestAgentDetailView(OTransactionTestCase):
             trigger_type=TriggerType.TRIGGER,
             trigger_ref=trigger.id if trigger else None,
         )
-        other_agent = bootstrap_agent(
+        other_agent = create_from_example(
             self.other,
+            'clock-assistant',
             identifier='other-detail-agent',
-            provider='openai',
-            model='gpt-5.4-mini',
         )
         other_config = other_agent.current_config
         assert other_config is not None
