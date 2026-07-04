@@ -32,21 +32,14 @@
   </div>
 
   <div class="meta-bar card" style="padding:.75rem 1rem;">
-    <span>Source: <strong>{{ source_label }}</strong>{% if dirty %} <span class="pill warn">dirty</span>{% endif %}</span>
+    <span>Source: <strong>{{ source_label }}</strong></span>
     <span>Revision: <code>{{ source_rev[:48] }}{% if source_rev|length > 48 %}…{% endif %}</code></span>
     <span>Schema v{{ spec_version }}</span>
     {% if pinned_sessions %}<span>{{ pinned_sessions }} active session(s) on older config</span>{% endif %}
-    {% if file_path %}<span>Path: <code>{{ file_path }}</code></span>{% endif %}
   </div>
 
   <div class="actions">
     <button type="button" id="save-config" class="primary">Save</button>
-    {% if file_path %}
-    <form method="post" action="{{ url('agent_config_sync', kwargs={'agent_id': agent.id}) }}" style="margin:0;">
-      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <button type="submit">Sync from file</button>
-    </form>
-    {% endif %}
   </div>
 
   <div id="validation-errors" class="errors" style="display:none;"><ul></ul></div>
@@ -241,22 +234,9 @@
     <p class="empty">No revisions yet.</p>
     {% endif %}
   </section>
-
-  <section class="card">
-    <h2>Bind to config file</h2>
-    <p class="muted" style="margin-top:0;">Optional: load this agent's spec from a YAML file on disk. Leave path empty and save to edit only in the UI.</p>
-    <form method="post" action="{{ url('agent_config_source', kwargs={'agent_id': agent.id}) }}" style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:end;">
-      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <label style="flex:1; min-width:280px;">Absolute path
-        <input type="text" name="file_path" value="{{ file_path }}" placeholder="/workspace/agents/foo.yaml" style="width:100%; padding:.35rem .5rem;">
-      </label>
-      <button type="submit">{% if file_path %}Update path{% else %}Bind file{% endif %}</button>
-      {% if file_path %}<button type="submit" name="file_path" value="">Unbind</button>{% endif %}
-    </form>
-  </section>
 </div>
 
-<script id="config-page-data" type="application/json">{{ page_data_json }}</script>
+  <script id="config-page-data" type="application/json">{{ page_data_json }}</script>
 <script>
   window.__AGENT_CONFIG_URLS__ = {
     save: "{{ save_url }}",

@@ -33,6 +33,7 @@ class ConfigValidationError(Exception):
 
 
 def _yaml_error_line(exc: yaml.YAMLError) -> int | None:
+    """Extract a 1-based line number from a PyYAML error, when available."""
     mark = getattr(exc, 'problem_mark', None)
     if mark is None:
         return None
@@ -40,6 +41,7 @@ def _yaml_error_line(exc: yaml.YAMLError) -> int | None:
 
 
 def _pydantic_errors(exc: ValidationError) -> list[ValidationErrorItem]:
+    """Convert a Pydantic ``ValidationError`` into structured UI error items."""
     items: list[ValidationErrorItem] = []
     for err in exc.errors():
         loc = '.'.join(str(part) for part in err.get('loc', ()))
@@ -48,6 +50,7 @@ def _pydantic_errors(exc: ValidationError) -> list[ValidationErrorItem]:
 
 
 def _validate_queue_sources(spec: AgentConfigSpec) -> list[ValidationErrorItem]:
+    """Validate each queue source adapter config; return errors without raising."""
     items: list[ValidationErrorItem] = []
     for queue in spec.queues:
         for source in queue.sources:

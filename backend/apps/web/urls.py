@@ -12,8 +12,6 @@ urlpatterns = [
     path('agents/<uuid:agent_id>/config/', config_views.agent_config, name='agent_config'),
     path('agents/<uuid:agent_id>/config/save/', config_views.agent_config_save, name='agent_config_save'),
     path('agents/<uuid:agent_id>/config/mutate/', config_views.agent_config_mutate, name='agent_config_mutate'),
-    path('agents/<uuid:agent_id>/config/sync/', config_views.agent_config_sync, name='agent_config_sync'),
-    path('agents/<uuid:agent_id>/config/source/', config_views.agent_config_source, name='agent_config_source'),
     path(
         'agents/<uuid:agent_id>/config/history/<uuid:config_id>/',
         config_views.agent_config_history,

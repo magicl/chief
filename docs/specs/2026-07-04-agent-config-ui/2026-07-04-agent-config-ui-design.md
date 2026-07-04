@@ -35,9 +35,7 @@ Chief users can:
 4. **Use server-side helpers** for repetitive sections (LLM, tool instances, triggers,
    queues/sources, credential refs) that **mutate YAML server-side** (parse → patch pydantic
    → re-dump) and push updated text back to the editor.
-5. **Sync from a local file path** when `config_source` is file-backed: revision + **dirty**
-   when DB edits diverge from the file.
-6. **Pick credentials by name** — options from `list_referenceable_credentials` filtered by
+5. **Pick credentials by name** — options from `list_referenceable_credentials` filtered by
    type; **Set / Not set** only.
 
 Downstream specs assume operators can configure agents in the product UI without CLI or admin
@@ -45,6 +43,8 @@ JSON editing.
 
 ### Non-goals
 
+- **Disk-backed agent configs** — no bind/sync to arbitrary filesystem paths; DB is the only
+  runtime source of truth. Shipped **examples** in `libs/agent_specs` are the only disk reads.
 - **GitHub / remote sync** — poll, webhook, PR-back (TODO follow-on).
 - **Queue trigger kind** UI wiring — spec 5; raw YAML remains editable.
 - **Replacing YAML** — every runtime field expressible in YAML without the UI.
@@ -204,7 +204,7 @@ metadata only. No `resolve_*`.
 | `apps/agents/services/config_validation.py` | `validate_agent_config_yaml(raw) -> AgentConfigSpec` + structured errors |
 | `apps/agents/services/config_mutations.py` | `apply_config_mutation(raw, mutation) -> str` for helpers |
 | `apps/agents/services/queries.py` | `get_config_editor_context`, history, catalog payload |
-| `apps/agents/services/config_commands.py` | `create_from_example`, `sync_from_file`, `set_file_source` |
+| `apps/agents/services/config_commands.py` | `create_from_example`, `create_from_yaml` |
 
 **Delete:** `apps/agents/hardcoded.py`, `apps/web/demo_models.py`.
 
@@ -228,24 +228,26 @@ Helpers use the same catalog for dropdowns; no duplicated option lists in templa
 
 ---
 
-## Config source modes
+## Config source (DB-only)
 
 | `config_source` | Meaning |
 |-----------------|---------|
-| `ui` | Created/edited in product UI (default for new agents) |
-| `file:<absolute-path>` | Local filesystem YAML; sync reads this path |
+| `ui` | Created/edited in product UI (default for all new agents) |
 
-**Remove** `hardcoded` as a source value. Migration: existing rows may keep legacy values
-until re-saved; UI displays them as **Legacy** badge.
+**Remove** `hardcoded` and `file:` as active source values. Legacy rows may remain until
+re-saved; UI displays unknown values as **Legacy** badge.
 
 **Revision (`source_rev`):**
 
 - Example create: `example:<slug>`
-- UI save: `ui:<iso-timestamp>` or content hash `ui-sha256:<hex>`
-- File sync: `sha256:<hex>` of normalized file bytes
+- YAML import create: `sha256:<hex>` of normalized pasted YAML
+- UI save: `ui:<iso-timestamp>`
 
-**Dirty:** `true` when user saves edited YAML while `file:`-bound and content ≠ file hash.
-Clear via **Sync now** (reload file → persist, `dirty=False`).
+**Dirty:** unused for new saves (`false`). Historical rows may retain legacy `dirty=true` from
+earlier implementations.
+
+**Disk reads:** only `libs/agent_specs/examples/*.yaml` at create time — never arbitrary
+operator paths, never write-back to disk.
 
 ---
 
@@ -260,8 +262,6 @@ Clear via **Sync now** (reload file → persist, `dirty=False`).
 | `/agents/<id>/config/` | GET | Editor + metadata + helpers + catalog |
 | `/agents/<id>/config/save/` | POST | Body: `spec_yaml` → validate → persist |
 | `/agents/<id>/config/mutate/` | POST | Body: `spec_yaml` + mutation → new YAML |
-| `/agents/<id>/config/sync/` | POST | File-backed reload |
-| `/agents/<id>/config/source/` | POST | Set/clear `file:` path |
 | `/agents/<id>/config/history/<config_id>/` | GET | Read-only revision |
 
 Remove `/agents/bootstrap/` (demo model POST).
@@ -273,8 +273,8 @@ Create button). Link: **Create agent** → `/agents/create/` (examples + import)
 
 ### Config page layout
 
-1. **Metadata bar** — source, revision, dirty, spec_version, pinned-session count (info).
-2. **Actions** — Save, Sync now (if file), Set file path.
+1. **Metadata bar** — source, revision, spec_version, pinned-session count (info).
+2. **Actions** — Save.
 3. **YAML editor** — CodeMirror (see above); validation errors render below editor (field
    path + message list; map line numbers when parser provides them).
 4. **Structured helpers** (collapsible; htmx or fetch):
@@ -312,7 +312,7 @@ sequenceDiagram
 ```
 
 **`validate_agent_config_yaml(raw: str) -> AgentConfigSpec`** (single validation entry point
-for save, mutate, import, sync):
+for save, mutate, and import):
 
 1. Parse YAML/JSON (`load_agent_config_spec` / upgrade chain).
 2. `validate_spec_tools(spec)`.
@@ -324,7 +324,7 @@ for save, mutate, import, sync):
 
 1. Read `spec_yaml` from POST (frontend always sends editor text).
 2. `validate_agent_config_yaml(spec_yaml)`.
-3. Compute `source_rev` + `dirty` (file-backed rules).
+3. `source_rev = ui:<timestamp>`; `dirty = false`.
 4. `persist_agent_config(agent, spec, source_rev=..., dirty=...)`.
 5. On error: **400** with JSON `{"errors": [...]}` for fetch/htmx; re-render page with
    error list for full POST.
@@ -348,17 +348,6 @@ until user Saves).
 
 ---
 
-## File sync
-
-**Sync now:** require `file:` source; read + hash; if unchanged, flash "up to date"; else
-`validate_agent_config_yaml` → `persist_agent_config(..., dirty=False)`.
-
-**Set file path:** POST path; verify readable; optional immediate sync.
-
-**Push to file:** deferred v1.
-
----
-
 ## Error handling
 
 | Situation | Response |
@@ -367,10 +356,9 @@ until user Saves).
 | Pydantic / ingest | structured `path` + message |
 | Adapter config | `queues.<id>.sources.<id>.config` + message |
 | Unsupported schema version | single error: upgrade Chief |
-| Missing file on sync | 400 |
 | Save with running sessions | allow; banner with pinned count |
 
-Prefer JSON error bodies for editor Save (htmx/fetch); flash for sync redirects.
+Prefer JSON error bodies for editor Save (htmx/fetch).
 
 ---
 
@@ -382,7 +370,7 @@ Prefer JSON error bodies for editor Save (htmx/fetch); flash for sync redirects.
 | `validate_agent_config_yaml` | syntax, tools, adapters, error shape |
 | `apply_config_mutation` | add tool instance changes YAML |
 | `create_from_example` | agent + materialized rows |
-| File sync | dirty flag, idempotent sync |
+| `compute_save_metadata` | UI timestamp revision |
 | `apps/web` | save 400 returns errors JSON; login/404 |
 | Regression | remove bootstrap; tests use examples or fixtures |
 
@@ -399,9 +387,8 @@ Prefer JSON error bodies for editor Save (htmx/fetch); flash for sync redirects.
 5. **YAML editor** — CodeMirror bundle + schema autocomplete from catalog.
 6. **Config page** — save/mutate routes, error display.
 7. **Helpers** — LLM, tools, triggers, queues partials.
-8. **File sync** — source path, dirty, sync now.
-9. **History + agent detail link** — badges, revision list.
-10. **Test migration** — replace `bootstrap_agent` usages.
+8. **History + agent detail link** — badges, revision list.
+9. **Test migration** — replace `bootstrap_agent` usages.
 
 ---
 
@@ -417,7 +404,7 @@ Prefer JSON error bodies for editor Save (htmx/fetch); flash for sync redirects.
 | Helper mutations | **Server-side** parse → patch → dump |
 | Helper options | **`config catalog`** server payload |
 | Create agent | **`libs/agent_specs/examples/`** — no hardcoded bootstrap |
-| `config_source` | **`ui`** + **`file:<path>`**; drop `hardcoded` |
+| `config_source` | **`ui`** only for new agents; drop `hardcoded` and `file:` |
 | GitHub sync | Deferred |
 | Push DB → file | Deferred v1 |
 

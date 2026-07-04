@@ -42,6 +42,7 @@ class ExampleSpecInfo:
 
 
 def _parse_meta(text: str) -> tuple[str | None, str | None]:
+    """Parse ``# title:`` and ``# description:`` comment metadata from example YAML."""
     title_match = _META_TITLE.search(text)
     desc_match = _META_DESC.search(text)
     title = title_match.group(1).strip() if title_match else None
@@ -67,6 +68,7 @@ def list_examples() -> list[ExampleSpecInfo]:
 
 
 def _parse_structured_text(raw: str) -> Any:
+    """Parse raw text as JSON or YAML for example spec loading."""
     stripped = raw.strip()
     if not stripped:
         raise ValueError('Spec text is empty')

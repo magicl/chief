@@ -15,24 +15,20 @@ from apps.agents.ingest import persist_agent_config
 from apps.agents.models import AgentConfig
 from apps.agents.services.config_commands import (
     ConfigCommandError,
-    clear_file_source,
     create_from_example,
     create_from_yaml,
-    set_file_source,
-    sync_from_file,
 )
 from apps.agents.services.config_mutations import (
     ConfigMutationError,
     apply_config_mutation,
 )
-from apps.agents.services.config_sync import ConfigSyncError, compute_save_metadata
+from apps.agents.services.config_sync import compute_save_metadata
 from apps.agents.services.config_validation import (
     ConfigValidationError,
     validate_agent_config_yaml,
 )
 from apps.agents.services.queries import build_config_catalog, get_config_editor_context
 from apps.web.views import _owned_agent
-from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
 from django.http import (
@@ -50,20 +46,15 @@ from libs.agent_specs import list_examples
 
 
 def _validation_json_response(exc: ConfigValidationError) -> JsonResponse:
+    """Serialize structured validation errors as a 400 JSON response."""
     return JsonResponse(
         {'errors': [asdict(item) for item in exc.errors]},
         status=400,
     )
 
 
-def _command_error_response(request: HttpRequest, message: str) -> HttpResponse:
-    if 'application/json' in request.headers.get('Accept', ''):
-        return JsonResponse({'errors': [{'path': '', 'message': message}]}, status=400)
-    messages.error(request, message)
-    return HttpResponseBadRequest(message)
-
-
 def _parse_mutation(request: HttpRequest) -> dict[str, Any]:
+    """Parse the helper mutation JSON object from POST form data."""
     raw = request.POST.get('mutation', '').strip()
     if raw:
         parsed: dict[str, Any] = json.loads(raw)
@@ -75,6 +66,7 @@ def _parse_mutation(request: HttpRequest) -> dict[str, Any]:
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
 def agent_create(request: HttpRequest) -> HttpResponse:
+    """Show the create form or instantiate an agent from an example or pasted YAML."""
     if request.method == 'GET':
         return render(
             request,
@@ -108,6 +100,7 @@ def agent_create(request: HttpRequest) -> HttpResponse:
 @login_required(login_url='/admin/login/')
 @require_GET
 def agent_config(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    """Render the YAML config editor and helpers for an owned agent."""
     agent = _owned_agent(request, agent_id)
     user = cast(AbstractBaseUser, request.user)
     context = get_config_editor_context(agent, user.pk)
@@ -119,6 +112,7 @@ def agent_config(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @login_required(login_url='/admin/login/')
 @require_GET
 def agent_config_catalog(request: HttpRequest) -> JsonResponse:
+    """Return the server-side catalog for autocomplete and helper dropdowns."""
     user = cast(AbstractBaseUser, request.user)
     return JsonResponse(build_config_catalog(user.pk))
 
@@ -127,6 +121,7 @@ def agent_config_catalog(request: HttpRequest) -> JsonResponse:
 @csrf_protect
 @require_POST
 def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    """Validate posted YAML and persist a new immutable config revision."""
     agent = _owned_agent(request, agent_id)
     spec_yaml = request.POST.get('spec_yaml', '')
     if not spec_yaml.strip():
@@ -136,8 +131,6 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
         source_rev, dirty = compute_save_metadata(agent, spec_yaml)
     except ConfigValidationError as exc:
         return _validation_json_response(exc)
-    except ConfigSyncError as exc:
-        return _command_error_response(request, str(exc))
     persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty)
     if request.headers.get('Accept', '').find('application/json') >= 0:
         return JsonResponse({'ok': True, 'source_rev': source_rev, 'dirty': dirty})
@@ -148,6 +141,7 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @csrf_protect
 @require_POST
 def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    """Apply a helper mutation to posted YAML without persisting."""
     _owned_agent(request, agent_id)
     spec_yaml = request.POST.get('spec_yaml', '')
     if not spec_yaml.strip():
@@ -163,46 +157,9 @@ def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 
 
 @login_required(login_url='/admin/login/')
-@csrf_protect
-@require_POST
-def agent_config_sync(request: HttpRequest, agent_id: UUID) -> HttpResponse:
-    agent = _owned_agent(request, agent_id)
-    try:
-        result = sync_from_file(agent)
-    except ConfigValidationError as exc:
-        return _validation_json_response(exc)
-    except ConfigCommandError as exc:
-        return _command_error_response(request, str(exc))
-    if result is None:
-        messages.info(request, 'Config file is up to date.')
-    else:
-        messages.success(request, 'Reloaded configuration from file.')
-    return redirect('agent_config', agent_id=agent.id)
-
-
-@login_required(login_url='/admin/login/')
-@csrf_protect
-@require_POST
-def agent_config_source(request: HttpRequest, agent_id: UUID) -> HttpResponse:
-    agent = _owned_agent(request, agent_id)
-    path = request.POST.get('file_path', '').strip()
-    if not path:
-        clear_file_source(agent)
-        messages.info(request, 'Stopped syncing from config file.')
-        return redirect('agent_config', agent_id=agent.id)
-    try:
-        set_file_source(agent, path, sync_now=True)
-    except ConfigValidationError as exc:
-        return _validation_json_response(exc)
-    except ConfigCommandError as exc:
-        return _command_error_response(request, str(exc))
-    messages.success(request, 'Bound agent to config file.')
-    return redirect('agent_config', agent_id=agent.id)
-
-
-@login_required(login_url='/admin/login/')
 @require_GET
 def agent_config_history(request: HttpRequest, agent_id: UUID, config_id: UUID) -> HttpResponse:
+    """Show a read-only historical config revision with restore-to-editor action."""
     agent = _owned_agent(request, agent_id)
     config = get_object_or_404(AgentConfig, pk=config_id, agent=agent)
     spec_yaml = dump_agent_config_spec(config.get_spec())

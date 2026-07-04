@@ -10,7 +10,7 @@ import json
 from typing import Any
 
 from apps.agents.models import Agent, AgentConfig
-from apps.agents.services.config_sync import config_source_label, file_path_from_source
+from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
 from apps.sessions.models import AgentSession
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
@@ -59,6 +59,7 @@ SCHEMA_KEYS = [
 
 
 def _provider_catalog() -> list[dict[str, Any]]:
+    """Build provider/model options for the config editor catalog."""
     items: list[dict[str, Any]] = []
     for name in sorted(PROVIDERS):
         if name == 'openai':
@@ -74,6 +75,7 @@ def _provider_catalog() -> list[dict[str, Any]]:
 
 
 def _tool_catalog() -> list[dict[str, Any]]:
+    """Build registered tool types for helper dropdowns."""
     items: list[dict[str, Any]] = []
     for name, tool in sorted(all_tools().items()):
         items.append(
@@ -87,6 +89,7 @@ def _tool_catalog() -> list[dict[str, Any]]:
 
 
 def _adapter_catalog() -> list[dict[str, Any]]:
+    """Build registered source adapter types for helper dropdowns."""
     items: list[dict[str, Any]] = []
     for name, adapter in sorted(all_adapters().items()):
         items.append(
@@ -163,7 +166,6 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'source_rev': source_rev,
         'dirty': dirty,
         'source_label': config_source_label(agent.config_source),
-        'file_path': file_path_from_source(agent.config_source) or '',
         'history': list_config_history(agent),
         'pinned_sessions': pinned_sessions,
         'catalog': catalog,

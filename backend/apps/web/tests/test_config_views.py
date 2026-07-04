@@ -73,16 +73,6 @@ class AgentConfigWebTests(OTestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 404)
 
-    def test_save_with_missing_bound_file_returns_400(self) -> None:
-        self.agent.config_source = 'file:/tmp/missing-chief-agent-config.yaml'
-        self.agent.save(update_fields=['config_source'])
-        url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
-        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
-        response = self.client.post(url, {'spec_yaml': spec_yaml}, HTTP_ACCEPT='application/json')
-        self.assertEqual(response.status_code, 400)
-        payload = json.loads(response.content)
-        self.assertIn('errors', payload)
-
     def test_create_from_yaml_via_web(self) -> None:
         spec_yaml = dump_agent_config_spec(load_example('queue-echo'))
         response = self.client.post(
