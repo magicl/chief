@@ -13,6 +13,7 @@ from typing import Any
 
 from apps.bus.channels import release_lock, try_acquire_lock
 from apps.runner.loop import SessionRunner
+from apps.runner.session_lifecycle import finalize_automated_trigger_session
 from apps.sessions.events import append_event
 from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
 from celery import shared_task
@@ -50,11 +51,6 @@ def run_session(self: Any, session_id: str) -> None:
 
     try:
         SessionRunner.for_session(session, emit_restart=emit_restart).run()
-        session.refresh_from_db()
-        if session.status == AgentSessionStatus.RUNNING:
-            session.status = AgentSessionStatus.DONE
-            session.ended_at = timezone.now()
-            session.save(update_fields=['status', 'ended_at'])
     except Exception:  # pylint: disable=broad-except
         logger.exception('Unhandled failure in session %s', session_id)
         session.refresh_from_db()
@@ -71,4 +67,11 @@ def run_session(self: Any, session_id: str) -> None:
             session.status = AgentSessionStatus.WAITING
             session.save(update_fields=['status'])
     finally:
+        session.refresh_from_db()
+        finalize_automated_trigger_session(session)
+        session.refresh_from_db()
+        if session.status == AgentSessionStatus.RUNNING:
+            session.status = AgentSessionStatus.DONE
+            session.ended_at = timezone.now()
+            session.save(update_fields=['status', 'ended_at'])
         release_lock(session_id, token)

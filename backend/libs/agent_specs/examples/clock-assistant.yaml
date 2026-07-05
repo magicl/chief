@@ -1,6 +1,6 @@
 # title: Clock assistant
 # description: Manual-trigger demo with the clock tool.
-schema_version: 1
+schema_version: 2
 description: Clock assistant example
 llm:
   provider: openai

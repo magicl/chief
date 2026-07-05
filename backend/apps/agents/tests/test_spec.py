@@ -22,7 +22,7 @@ V0_CLOCK_SPEC = {
 }
 
 MINIMAL_SPEC_DICT = {
-    'schema_version': 1,
+    'schema_version': 2,
     'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
     'system_prompt': 'hello',
     'triggers': [{'name': 'manual', 'kind': 'manual'}],
@@ -32,7 +32,7 @@ MINIMAL_SPEC_DICT = {
 
 class TestAgentConfigSpec(OTestCase):
     def test_current_schema_version_constant(self) -> None:
-        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 1)
+        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 2)
 
     def test_tool_instance_requires_id_and_type(self) -> None:
         inst = ToolInstance(id='clock', type='clock', allow=['now'])
@@ -41,7 +41,7 @@ class TestAgentConfigSpec(OTestCase):
     def test_duplicate_instance_ids_rejected_at_spec_level(self) -> None:
         with self.assertRaises(ValidationError):
             AgentConfigSpec(
-                schema_version=1,
+                schema_version=2,
                 llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
                 system_prompt='hi',
                 tools=[
@@ -52,7 +52,7 @@ class TestAgentConfigSpec(OTestCase):
 
     def test_load_spec_upgrades_v0_dict(self) -> None:
         spec = load_spec(V0_CLOCK_SPEC, stored_version=0)
-        self.assertEqual(spec.schema_version, 1)
+        self.assertEqual(spec.schema_version, 2)
         self.assertEqual(spec.tools[0].id, 'clock')
 
 
@@ -140,16 +140,84 @@ class TestTriggerSpec(OTestCase):
             AgentConfigSpec.model_validate(
                 {
                     **MINIMAL_SPEC_DICT,
-                    'triggers': [{'name': 'sweep', 'kind': 'schedule'}],
+                    'triggers': [
+                        {
+                            'name': 'sweep',
+                            'kind': 'schedule',
+                            'prompt': 'Run sweep.',
+                        },
+                    ],
                 }
             )
 
-    def test_max_sessions_defaults_to_one(self) -> None:
+    def test_schedule_trigger_requires_prompt(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [{'name': 'sweep', 'kind': 'schedule', 'cron': '0 * * * *'}],
+                }
+            )
+
+    def test_manual_trigger_rejects_prompt(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [{'name': 'manual', 'kind': 'manual', 'prompt': 'hello'}],
+                }
+            )
+
+    def test_manual_max_sessions_defaults_to_none(self) -> None:
+        spec = AgentConfigSpec.model_validate(MINIMAL_SPEC_DICT)
+        self.assertIsNone(spec.triggers[0].max_sessions)
+
+    def test_max_sessions_defaults_to_one_for_queue(self) -> None:
         spec = AgentConfigSpec.model_validate(
             {
                 **MINIMAL_SPEC_DICT,
-                'triggers': [{'name': 'worker', 'kind': 'queue', 'queue': 'inbox'}],
+                'triggers': [
+                    {
+                        'name': 'worker',
+                        'kind': 'queue',
+                        'queue': 'inbox',
+                        'prompt': 'Process items.',
+                    },
+                ],
                 'queues': [{'id': 'inbox', 'sources': []}],
+            }
+        )
+        self.assertEqual(spec.triggers[0].max_sessions, 1)
+
+    def test_max_sessions_null_means_unlimited_for_schedule(self) -> None:
+        spec = AgentConfigSpec.model_validate(
+            {
+                **MINIMAL_SPEC_DICT,
+                'triggers': [
+                    {
+                        'name': 'sweep',
+                        'kind': 'schedule',
+                        'cron': '0 * * * *',
+                        'prompt': 'Run sweep.',
+                        'max_sessions': None,
+                    },
+                ],
+            }
+        )
+        self.assertIsNone(spec.triggers[0].max_sessions)
+
+    def test_max_sessions_omitted_defaults_to_one_for_schedule(self) -> None:
+        spec = AgentConfigSpec.model_validate(
+            {
+                **MINIMAL_SPEC_DICT,
+                'triggers': [
+                    {
+                        'name': 'sweep',
+                        'kind': 'schedule',
+                        'cron': '0 * * * *',
+                        'prompt': 'Run sweep.',
+                    },
+                ],
             }
         )
         self.assertEqual(spec.triggers[0].max_sessions, 1)

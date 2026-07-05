@@ -51,7 +51,12 @@ class TestScheduleBeatSync(OTestCase):
                     system_prompt='hello',
                     triggers=[
                         TriggerSpec(name='manual', kind='manual'),
-                        TriggerSpec(name='sweep', kind='schedule', cron=cron),
+                        TriggerSpec(
+                            name='sweep',
+                            kind='schedule',
+                            cron=cron,
+                            prompt='Run scheduled tasks.',
+                        ),
                     ],
                 ),
                 source_rev='beat-sync-v1',
@@ -84,7 +89,12 @@ class TestScheduleBeatSync(OTestCase):
                     system_prompt='hello',
                     triggers=[
                         TriggerSpec(name='manual', kind='manual'),
-                        TriggerSpec(name='sweep', kind='schedule', cron='5 * * * *'),
+                        TriggerSpec(
+                            name='sweep',
+                            kind='schedule',
+                            cron='5 * * * *',
+                            prompt='Run scheduled tasks.',
+                        ),
                     ],
                 ),
                 source_rev='beat-sync-v2',
@@ -125,7 +135,12 @@ class TestScheduleBeatSync(OTestCase):
                     system_prompt='hello',
                     triggers=[
                         TriggerSpec(name='manual', kind='manual'),
-                        TriggerSpec(name='sweep', kind='schedule', cron='0 9 * * *'),
+                        TriggerSpec(
+                            name='sweep',
+                            kind='schedule',
+                            cron='0 9 * * *',
+                            prompt='Run scheduled tasks.',
+                        ),
                     ],
                 ),
                 source_rev='beat-sync-b-v1',

@@ -62,12 +62,14 @@ def apply_config_mutation(raw: str, mutation: dict[str, Any]) -> str:
             raise ConfigMutationError(f'Unknown tool instance {tool_id!r}')
         spec = spec.model_copy(update={'tools': tools})
     elif action == 'add_trigger':
+        max_sessions = mutation.get('max_sessions')
         trig = TriggerSpec(
             name=mutation['name'],
             kind=mutation['kind'],
             cron=mutation.get('cron'),
             queue=mutation.get('queue'),
-            max_sessions=int(mutation.get('max_sessions') or 1),
+            prompt=mutation.get('prompt'),
+            max_sessions=int(max_sessions) if max_sessions is not None else None,
         )
         spec = spec.model_copy(update={'triggers': [*spec.triggers, trig]})
     elif action == 'remove_trigger':

@@ -1,6 +1,6 @@
 # title: Minimal agent
 # description: Blank starting point with a manual trigger and no tools.
-schema_version: 1
+schema_version: 2
 description: New agent
 llm:
   provider: openai

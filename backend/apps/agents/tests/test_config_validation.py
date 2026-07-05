@@ -63,7 +63,7 @@ class ValidateAgentConfigYamlTests(OTestCase):
 
     def test_invalid_cron_rejected_in_yaml_validation(self) -> None:
         raw = """
-schema_version: 1
+schema_version: 2
 llm:
   provider: openai
   model: gpt-5.4-mini
@@ -72,6 +72,7 @@ triggers:
   - name: sweep
     kind: schedule
     cron: not-a-cron
+    prompt: Run sweep.
 """
         with self.assertRaises(ConfigValidationError) as ctx:
             validate_agent_config_yaml(raw)
@@ -79,7 +80,7 @@ triggers:
 
     def test_six_field_cron_rejected_in_yaml_validation(self) -> None:
         raw = """
-schema_version: 1
+schema_version: 2
 llm:
   provider: openai
   model: gpt-5.4-mini
@@ -88,6 +89,7 @@ triggers:
   - name: sweep
     kind: schedule
     cron: "0 * * * * *"
+    prompt: Run sweep.
 """
         with self.assertRaises(ConfigValidationError) as ctx:
             validate_agent_config_yaml(raw)

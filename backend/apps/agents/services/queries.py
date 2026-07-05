@@ -60,6 +60,7 @@ SCHEMA_KEYS = [
     'triggers[].kind',
     'triggers[].cron',
     'triggers[].queue',
+    'triggers[].prompt',
     'triggers[].max_sessions',
     'tools',
     'tools[]',

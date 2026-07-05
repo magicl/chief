@@ -17,10 +17,9 @@ from apps.queues.models import Queue
 from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.db import transaction
 from django.db.models import F
+from libs.agent_spec.trigger_prompts import default_trigger_prompt
 
 logger = logging.getLogger(__name__)
-
-SCHEDULE_BOOTSTRAP = 'Scheduled run started. Execute your configured tasks.'
 
 _ACTIVE_STATUSES = frozenset(
     {
@@ -42,17 +41,50 @@ class DispatchStats:
 
 def active_session_count(trigger: Trigger) -> int:
     """Return in-flight sessions bound to *trigger* (queued through waiting)."""
+    statuses = set(_ACTIVE_STATUSES)
+    # Automated triggers finalize at waiting; stale waiting rows must not block capacity.
+    if trigger.kind in (TriggerKind.SCHEDULE, TriggerKind.QUEUE):
+        statuses.discard(AgentSessionStatus.WAITING)
     return AgentSession.objects.filter(
         trigger_ref=trigger.id,
-        status__in=_ACTIVE_STATUSES,
+        status__in=statuses,
     ).count()
 
 
-def queue_item_bootstrap_message(*, item_id: UUID, payload: dict[str, object]) -> str:
-    """Format the locked bootstrap user message for a queue-trigger session."""
+def trigger_max_sessions(trigger: Trigger) -> int | None:
+    """Return configured concurrency cap, or ``None`` when unlimited."""
+    if 'max_sessions' not in trigger.spec:
+        if trigger.kind in (TriggerKind.SCHEDULE, TriggerKind.QUEUE):
+            return 1
+        return None
+    raw = trigger.spec.get('max_sessions')
+    if raw is None:
+        return None
+    return int(raw)
+
+
+def trigger_has_capacity(trigger: Trigger) -> bool:
+    """True when *trigger* may start another session under its ``max_sessions`` cap."""
+    cap = trigger_max_sessions(trigger)
+    if cap is None:
+        return True
+    return active_session_count(trigger) < cap
+
+
+def trigger_prompt(trigger: Trigger) -> str:
+    """Return the configured bootstrap prompt for *trigger*, with legacy defaults as fallback."""
+    raw = trigger.spec.get('prompt')
+    if raw and str(raw).strip():
+        return str(raw).strip()
+    fallback = default_trigger_prompt(trigger.kind)
+    return fallback or ''
+
+
+def queue_item_bootstrap_message(*, prompt: str, item_id: UUID, payload: dict[str, object]) -> str:
+    """Format the bootstrap user message for a queue-trigger session."""
     payload_json = json.dumps(payload, indent=2, sort_keys=True)
     return (
-        'Process this queue item.\n'
+        f'{prompt.rstrip()}\n'
         '\n'
         f'item_id: {item_id}\n'
         '\n'
@@ -97,12 +129,11 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
         disable_schedule_trigger_beat(trigger.id)
         return False
 
-    max_sessions = int(trigger.spec.get('max_sessions') or 1)
     session = None
     try:
         with transaction.atomic():
             locked = Trigger.objects.select_for_update().get(pk=trigger.pk)
-            if active_session_count(locked) < max_sessions:
+            if trigger_has_capacity(locked):
                 session = start_trigger_session(locked.agent, locked)
             Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
     except Exception:  # pylint: disable=broad-exception-caught
@@ -110,7 +141,7 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
         return False
 
     if session is not None:
-        push_chat_and_dispatch(session.id, SCHEDULE_BOOTSTRAP)
+        push_chat_and_dispatch(session.id, trigger_prompt(trigger))
         return True
     return False
 
@@ -139,7 +170,6 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
     from apps.runner.dispatch import push_chat_and_dispatch
     from apps.runner.session_start import StartSessionError, start_trigger_session
 
-    max_sessions = int(trigger.spec.get('max_sessions') or 1)
     started = 0
 
     while True:
@@ -148,7 +178,7 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
         try:
             with transaction.atomic():
                 Trigger.objects.select_for_update().get(pk=trigger.pk)
-                if active_session_count(trigger) >= max_sessions:
+                if not trigger_has_capacity(trigger):
                     break
                 session = start_trigger_session(trigger.agent, trigger)
                 take_result = take_item(queue=queue, session_id=session.id)
@@ -167,6 +197,7 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
             break
 
         message = queue_item_bootstrap_message(
+            prompt=trigger_prompt(trigger),
             item_id=take_result.item_id,
             payload=take_result.payload,
         )

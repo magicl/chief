@@ -40,7 +40,7 @@ def build_agent_config_spec(
     tools: list[ToolInstance] | None = None,
 ) -> AgentConfigSpec:
     return AgentConfigSpec(
-        schema_version=1,
+        schema_version=2,
         llm=LLMSpec(provider=provider, model=model, temperature=temperature),
         system_prompt=system_prompt,
         triggers=[TriggerSpec(name='manual', kind='manual')],

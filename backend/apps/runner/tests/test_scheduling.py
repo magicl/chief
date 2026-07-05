@@ -16,19 +16,26 @@ from apps.agents.models import Agent, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue, QueueItem, QueueItemStatus
 from apps.queues.services import commands
 from apps.runner.scheduling import (
-    SCHEDULE_BOOTSTRAP,
     _active_triggers,
     active_session_count,
     dispatch_queue_triggers,
     dispatch_queue_triggers_for_queue,
     dispatch_schedule_trigger,
     queue_item_bootstrap_message,
+    trigger_has_capacity,
+    trigger_prompt,
 )
+from apps.runner.session_lifecycle import finalize_automated_trigger_session
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
 from django.contrib.auth import get_user_model
 from libs.agent_spec import AgentConfigSpec, LLMSpec, QueueSpec, TriggerSpec
+from libs.agent_spec.trigger_prompts import DEFAULT_SCHEDULE_TRIGGER_PROMPT
 
 from olib.py.django.test.cases import OTestCase
+
+SCHEDULE_PROMPT = 'Run scheduled tasks.'
+QUEUE_PROMPT = 'Process this queue item.'
+_UNSET_MAX_SESSIONS = object()
 
 
 def _minimal_spec(*, triggers: list[TriggerSpec], queues: list[QueueSpec] | None = None) -> AgentConfigSpec:
@@ -40,6 +47,44 @@ def _minimal_spec(*, triggers: list[TriggerSpec], queues: list[QueueSpec] | None
     )
 
 
+def _schedule_trigger(
+    *,
+    name: str = 'sweep',
+    cron: str = '0 * * * *',
+    prompt: str = SCHEDULE_PROMPT,
+    max_sessions: int | None | object = _UNSET_MAX_SESSIONS,
+) -> TriggerSpec:
+    if max_sessions is _UNSET_MAX_SESSIONS:
+        return TriggerSpec(name=name, kind='schedule', cron=cron, prompt=prompt)
+    assert isinstance(max_sessions, (int, type(None)))
+    return TriggerSpec(
+        name=name,
+        kind='schedule',
+        cron=cron,
+        prompt=prompt,
+        max_sessions=max_sessions,
+    )
+
+
+def _queue_trigger(
+    *,
+    name: str = 'worker',
+    queue: str = 'inbox',
+    prompt: str = QUEUE_PROMPT,
+    max_sessions: int | None | object = _UNSET_MAX_SESSIONS,
+) -> TriggerSpec:
+    if max_sessions is _UNSET_MAX_SESSIONS:
+        return TriggerSpec(name=name, kind='queue', queue=queue, prompt=prompt)
+    assert isinstance(max_sessions, (int, type(None)))
+    return TriggerSpec(
+        name=name,
+        kind='queue',
+        queue=queue,
+        prompt=prompt,
+        max_sessions=max_sessions,
+    )
+
+
 class TestActiveSessionCount(OTestCase):
     def test_counts_only_active_statuses_for_trigger(self) -> None:
         user = get_user_model().objects.create_user(username='sched-count', password='x')
@@ -47,7 +92,7 @@ class TestActiveSessionCount(OTestCase):
         spec = _minimal_spec(
             triggers=[
                 TriggerSpec(name='manual', kind='manual'),
-                TriggerSpec(name='sweep', kind='schedule', cron='0 * * * *'),
+                _schedule_trigger(),
             ],
         )
         config = persist_agent_config(agent, spec, source_rev='sched-count-v1')
@@ -83,17 +128,35 @@ class TestActiveSessionCount(OTestCase):
             trigger_ref=manual_trigger.id,
         )
 
-        self.assertEqual(active_session_count(schedule_trigger), 4)
+        self.assertEqual(active_session_count(schedule_trigger), 3)
+
+    def test_schedule_waiting_not_counted_toward_capacity(self) -> None:
+        user = get_user_model().objects.create_user(username='sched-wait-cap', password='x')
+        agent = Agent.objects.create(user_id=user.pk, name='Sched', identifier='sched-wait-cap-agent')
+        config = persist_agent_config(
+            agent,
+            _minimal_spec(triggers=[TriggerSpec(name='manual', kind='manual'), _schedule_trigger()]),
+            source_rev='sched-wait-cap-v1',
+        )
+        trigger = Trigger.objects.get(agent=agent, agent_config=config, name='sweep')
+        AgentSession.objects.create(
+            agent=agent,
+            agent_config=config,
+            status=AgentSessionStatus.WAITING,
+            trigger_type=TriggerType.TRIGGER,
+            trigger_ref=trigger.id,
+        )
+        self.assertTrue(trigger_has_capacity(trigger))
 
 
 class TestQueueItemBootstrapMessage(OTestCase):
-    def test_message_contains_item_id_and_payload_json(self) -> None:
+    def test_message_contains_prompt_item_id_and_payload_json(self) -> None:
         item_id = uuid.UUID('01234567-89ab-cdef-0123-456789abcdef')
         payload = {'subject': 'hello', 'priority': 2}
 
-        message = queue_item_bootstrap_message(item_id=item_id, payload=payload)
+        message = queue_item_bootstrap_message(item_id=item_id, payload=payload, prompt=QUEUE_PROMPT)
 
-        self.assertIn('Process this queue item.', message)
+        self.assertIn(QUEUE_PROMPT, message)
         self.assertIn(f'item_id: {item_id}', message)
         self.assertIn('payload:', message)
         self.assertIn(json.dumps(payload, indent=2, sort_keys=True), message)
@@ -109,7 +172,7 @@ class TestActiveTriggers(OTestCase):
             _minimal_spec(
                 triggers=[
                     TriggerSpec(name='manual', kind='manual'),
-                    TriggerSpec(name='sweep', kind='schedule', cron='0 * * * *'),
+                    _schedule_trigger(),
                 ],
             ),
             source_rev='sched-triggers-v1',
@@ -121,8 +184,8 @@ class TestActiveTriggers(OTestCase):
             _minimal_spec(
                 triggers=[
                     TriggerSpec(name='manual', kind='manual'),
-                    TriggerSpec(name='sweep', kind='schedule', cron='5 * * * *'),
-                    TriggerSpec(name='inbox', kind='queue', queue='inbox'),
+                    _schedule_trigger(cron='5 * * * *'),
+                    _queue_trigger(name='inbox'),
                 ],
                 queues=[QueueSpec(id='inbox')],
             ),
@@ -141,7 +204,7 @@ class TestActiveTriggers(OTestCase):
         self.assertEqual(queue_triggers, [v2_queue])
         self.assertNotIn(v1_schedule, schedule_triggers)
         self.assertNotIn(v2_schedule, schedule_triggers)
-        self.assertEqual(SCHEDULE_BOOTSTRAP, 'Scheduled run started. Execute your configured tasks.')
+        self.assertEqual(trigger_prompt(v2_queue), QUEUE_PROMPT)
 
 
 class TestDispatchScheduleTriggers(OTestCase):
@@ -153,7 +216,7 @@ class TestDispatchScheduleTriggers(OTestCase):
             _minimal_spec(
                 triggers=[
                     TriggerSpec(name='manual', kind='manual'),
-                    TriggerSpec(name='sweep', kind='schedule', cron='0 * * * *'),
+                    _schedule_trigger(),
                 ],
             ),
             source_rev='sched-dispatch-v1',
@@ -172,7 +235,7 @@ class TestDispatchScheduleTriggers(OTestCase):
         self.assertEqual(AgentSession.objects.filter(agent=agent).count(), 1)
         session = AgentSession.objects.get(agent=agent)
         self.assertEqual(session.trigger_ref, trigger.id)
-        mock_push.assert_called_once_with(session.id, SCHEDULE_BOOTSTRAP)
+        mock_push.assert_called_once_with(session.id, SCHEDULE_PROMPT)
         trigger.refresh_from_db()
         self.assertEqual(trigger.last_fired_at, fire_at)
 
@@ -204,7 +267,7 @@ class TestDispatchScheduleTriggers(OTestCase):
         AgentSession.objects.create(
             agent=agent,
             agent_config=config,
-            status=AgentSessionStatus.WAITING,
+            status=AgentSessionStatus.RUNNING,
             trigger_type=TriggerType.TRIGGER,
             trigger_ref=trigger.id,
         )
@@ -236,7 +299,7 @@ class TestDispatchScheduleTriggers(OTestCase):
                 _minimal_spec(
                     triggers=[
                         TriggerSpec(name='manual', kind='manual'),
-                        TriggerSpec(name='sweep', kind='schedule', cron='0 * * * *'),
+                        _schedule_trigger(),
                     ],
                 ),
                 source_rev=rev,
@@ -266,7 +329,7 @@ class TestDispatchScheduleTriggers(OTestCase):
 
         self.assertTrue(started_b)
         session_b = AgentSession.objects.get(agent=agent_b, trigger_ref=trigger_b.id)
-        mock_push.assert_called_once_with(session_b.id, SCHEDULE_BOOTSTRAP)
+        mock_push.assert_called_once_with(session_b.id, SCHEDULE_PROMPT)
 
 
 class TestDispatchQueueTriggers(OTestCase):
@@ -285,12 +348,7 @@ class TestDispatchQueueTriggers(OTestCase):
             _minimal_spec(
                 triggers=[
                     TriggerSpec(name='manual', kind='manual'),
-                    TriggerSpec(
-                        name='worker',
-                        kind='queue',
-                        queue=queue_id,
-                        max_sessions=max_sessions,
-                    ),
+                    _queue_trigger(queue=queue_id, max_sessions=max_sessions),
                 ],
                 queues=[QueueSpec(id=queue_id)],
             ),
@@ -318,6 +376,7 @@ class TestDispatchQueueTriggers(OTestCase):
         mock_push.assert_called_once()
         session_id, message = mock_push.call_args.args
         self.assertEqual(session_id, session.id)
+        self.assertIn(QUEUE_PROMPT, message)
         self.assertIn(f'item_id: {put_result.item_id}', message)
         self.assertIn(json.dumps({'subject': 'hello'}, indent=2, sort_keys=True), message)
 
@@ -333,7 +392,7 @@ class TestDispatchQueueTriggers(OTestCase):
         AgentSession.objects.create(
             agent=agent,
             agent_config=config,
-            status=AgentSessionStatus.WAITING,
+            status=AgentSessionStatus.RUNNING,
             trigger_type=TriggerType.TRIGGER,
             trigger_ref=trigger.id,
         )
@@ -373,4 +432,81 @@ class TestDispatchQueueTriggers(OTestCase):
             QueueItem.objects.filter(queue=queue_b, status=QueueItemStatus.AVAILABLE).count(),
             1,
         )
+        mock_push.assert_called_once()
+
+
+class TestTriggerPromptFallback(OTestCase):
+    def test_materialized_spec_without_prompt_uses_legacy_default(self) -> None:
+        user = get_user_model().objects.create_user(username='prompt-fallback', password='x')
+        agent = Agent.objects.create(user_id=user.pk, name='Sched', identifier='prompt-fallback-agent')
+        config = persist_agent_config(
+            agent,
+            _minimal_spec(triggers=[TriggerSpec(name='manual', kind='manual'), _schedule_trigger()]),
+            source_rev='prompt-fallback-v1',
+        )
+        trigger = Trigger.objects.get(agent=agent, agent_config=config, name='sweep')
+        trigger.spec = {'kind': 'schedule', 'cron': '0 * * * *', 'max_sessions': 1}
+        trigger.save(update_fields=['spec'])
+
+        self.assertEqual(trigger_prompt(trigger), DEFAULT_SCHEDULE_TRIGGER_PROMPT)
+
+
+class TestScheduleSlotRelease(OTestCase):
+    def _schedule_agent(self) -> tuple[Agent, Trigger]:
+        user = get_user_model().objects.create_user(username='slot-release', password='x')
+        agent = Agent.objects.create(user_id=user.pk, name='Sched', identifier='slot-release-agent')
+        config = persist_agent_config(
+            agent,
+            _minimal_spec(
+                triggers=[TriggerSpec(name='manual', kind='manual'), _schedule_trigger(max_sessions=1)],
+            ),
+            source_rev='slot-release-v1',
+        )
+        trigger = Trigger.objects.get(agent=agent, agent_config=config, name='sweep')
+        return agent, trigger
+
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
+    def test_completed_session_frees_slot_for_next_dispatch(self, mock_push: MagicMock) -> None:
+        agent, trigger = self._schedule_agent()
+        fire_at = datetime(2026, 7, 5, 14, 0, tzinfo=UTC)
+
+        self.assertTrue(dispatch_schedule_trigger(trigger_id=trigger.id, now=fire_at))
+        session = AgentSession.objects.get(agent=agent, trigger_ref=trigger.id)
+        session.status = AgentSessionStatus.WAITING
+        session.save(update_fields=['status'])
+        finalize_automated_trigger_session(session)
+
+        self.assertTrue(dispatch_schedule_trigger(trigger_id=trigger.id, now=fire_at.replace(minute=1)))
+        self.assertEqual(AgentSession.objects.filter(agent=agent, trigger_ref=trigger.id).count(), 2)
+        self.assertEqual(mock_push.call_count, 2)
+
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
+    def test_unlimited_max_sessions_allows_second_dispatch(self, mock_push: MagicMock) -> None:
+        user = get_user_model().objects.create_user(username='slot-unlimited', password='x')
+        agent = Agent.objects.create(user_id=user.pk, name='Sched', identifier='slot-unlimited-agent')
+        config = persist_agent_config(
+            agent,
+            _minimal_spec(
+                triggers=[
+                    TriggerSpec(name='manual', kind='manual'),
+                    _schedule_trigger(max_sessions=None),
+                ],
+            ),
+            source_rev='slot-unlimited-v1',
+        )
+        trigger = Trigger.objects.get(agent=agent, agent_config=config, name='sweep')
+        assert config is not None
+        AgentSession.objects.create(
+            agent=agent,
+            agent_config=config,
+            status=AgentSessionStatus.RUNNING,
+            trigger_type=TriggerType.TRIGGER,
+            trigger_ref=trigger.id,
+        )
+        fire_at = datetime(2026, 7, 5, 14, 0, tzinfo=UTC)
+
+        started = dispatch_schedule_trigger(trigger_id=trigger.id, now=fire_at)
+
+        self.assertTrue(started)
+        self.assertEqual(AgentSession.objects.filter(agent=agent, trigger_ref=trigger.id).count(), 2)
         mock_push.assert_called_once()

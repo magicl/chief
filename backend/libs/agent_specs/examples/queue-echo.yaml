@@ -1,6 +1,6 @@
 # title: Queue echo
 # description: Agent with a test source feeding a queue (for queue-tool smoke tests).
-schema_version: 1
+schema_version: 2
 description: Queue echo example with test source
 llm:
   provider: openai
@@ -14,6 +14,8 @@ triggers:
   - name: inbox-worker
     kind: queue
     queue: inbox
+    prompt: |
+      Process the next inbox item. Use the queue tool to complete or fail each item.
     max_sessions: 2
 tools:
   - id: clock

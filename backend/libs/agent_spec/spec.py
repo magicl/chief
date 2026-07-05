@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-AGENT_CONFIG_SPEC_VERSION = 1
+AGENT_CONFIG_SPEC_VERSION = 2
 
 _INSTANCE_ID_RE = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
@@ -28,7 +28,22 @@ class TriggerSpec(BaseModel):
     kind: Literal['schedule', 'manual', 'agent', 'queue']
     cron: str | None = None
     queue: str | None = None
-    max_sessions: int = Field(default=1, ge=1)
+    prompt: str | None = None
+    max_sessions: int | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def _trigger_defaults(cls, data: Any) -> Any:
+        """Apply per-kind defaults without conflating omitted and explicit null max_sessions."""
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        kind = out.get('kind')
+        if kind == 'manual':
+            out['max_sessions'] = None
+        elif kind in ('schedule', 'queue') and 'max_sessions' not in out:
+            out['max_sessions'] = 1
+        return out
 
     @model_validator(mode='after')
     def _kind_specific_fields(self) -> TriggerSpec:
@@ -36,6 +51,13 @@ class TriggerSpec(BaseModel):
             raise ValueError('cron is required when kind is schedule')
         if self.kind == 'queue' and not self.queue:
             raise ValueError('queue is required when kind is queue')
+        if self.kind == 'manual':
+            if self.prompt is not None and self.prompt.strip():
+                raise ValueError('prompt must not be set when kind is manual')
+        elif not (self.prompt and self.prompt.strip()):
+            raise ValueError('prompt is required when kind is not manual')
+        if self.max_sessions is not None and self.max_sessions < 1:
+            raise ValueError('max_sessions must be >= 1 when set')
         return self
 
 
@@ -79,7 +101,7 @@ class QueueSpec(BaseModel):
 
 
 class AgentConfigSpec(BaseModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     description: str | None = None
     llm: LLMSpec
     system_prompt: str

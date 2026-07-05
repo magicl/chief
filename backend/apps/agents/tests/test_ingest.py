@@ -73,15 +73,15 @@ class CreateAgentFromSpecTests(OTestCase):
         self.assertEqual(AgentConfig.objects.filter(agent=agent).count(), 1)
         self.assertEqual(Trigger.objects.filter(agent=agent).count(), 1)
 
-    def test_create_writes_spec_version_one(self) -> None:
+    def test_create_writes_current_spec_version(self) -> None:
         user = get_user_model().objects.create_user(username='sv', password='x')
         spec = CLOCK_SPEC.model_copy()
         agent = create_agent_from_spec(user, spec, name='SV agent', identifier='sv-agent')
         config = agent.current_config
         self.assertIsNotNone(config)
         assert config is not None
-        self.assertEqual(config.spec_version, 1)
-        self.assertEqual(config.spec['schema_version'], 1)
+        self.assertEqual(config.spec_version, 2)
+        self.assertEqual(config.spec['schema_version'], 2)
 
     def test_create_from_example_delegates_to_ingest(self) -> None:
         user = get_user_model().objects.create_user(username='boot', password='x')

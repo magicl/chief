@@ -49,6 +49,7 @@ def _queue_agent_with_trigger(
                     name='worker',
                     kind='queue',
                     queue=queue_id,
+                    prompt='Process this queue item.',
                     max_sessions=max_sessions,
                 ),
             ],
@@ -83,7 +84,7 @@ class TestPutItemDispatch(OTransactionTestCase):
         AgentSession.objects.create(
             agent=agent,
             agent_config=config,
-            status=AgentSessionStatus.WAITING,
+            status=AgentSessionStatus.RUNNING,
             trigger_type=TriggerType.TRIGGER,
             trigger_ref=trigger.id,
         )
