@@ -7,13 +7,9 @@
 from __future__ import annotations
 
 from apps.agents.models import Agent, Trigger, TriggerKind, TriggerStatus
-from apps.runner.dispatch import push_chat_and_dispatch
-from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
+from apps.runner.session_start import StartSessionError, start_trigger_session
+from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.utils import timezone
-
-
-class StartSessionError(Exception):
-    """Agent is not ready to start a manual session."""
 
 
 def start_manual_session(agent: Agent, *, initial_message: str = '') -> AgentSession:
@@ -30,16 +26,12 @@ def start_manual_session(agent: Agent, *, initial_message: str = '') -> AgentSes
     if trigger is None:
         raise StartSessionError(f'No active manual trigger for agent {agent.identifier!r}')
 
-    session = AgentSession.objects.create(
-        agent=agent,
-        agent_config=agent.current_config,
-        status=AgentSessionStatus.QUEUED,
-        trigger_type=TriggerType.TRIGGER,
-        trigger_ref=trigger.id,
-    )
+    session = start_trigger_session(agent, trigger)
 
     initial = initial_message.strip()
     if initial:
+        from apps.runner.dispatch import push_chat_and_dispatch
+
         push_chat_and_dispatch(session.id, initial)
     else:
         session.status = AgentSessionStatus.WAITING

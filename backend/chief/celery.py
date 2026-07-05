@@ -4,13 +4,25 @@
 # ~
 """Celery app for chief. Workers run agents and periodic monitors."""
 
+from django.conf import settings
+
 from olib.py.django.celery_workers import initCelery
 
 app = initCelery('chief')
+
+app.conf.beat_scheduler = settings.CELERY_BEAT_SCHEDULER
 
 app.conf.beat_schedule = {
     'queues-release-stale-items': {
         'task': 'apps.queues.tasks.release_stale_items',
         'schedule': 120.0,
+    },
+    'queues-poll-active-sources': {
+        'task': 'apps.queues.tasks.poll_active_sources',
+        'schedule': 300.0,
+    },
+    'runner-dispatch-queue-triggers': {
+        'task': 'apps.runner.trigger_tasks.dispatch_queue_triggers',
+        'schedule': 15.0,
     },
 }

@@ -112,3 +112,44 @@ class TestQueueSpec(OTestCase):
     def test_queue_hold_seconds_must_be_ordered(self) -> None:
         with self.assertRaises(ValidationError):
             QueueSpec(id='inbox', min_hold_seconds=300, early_release_seconds=60)
+
+
+class TestTriggerSpec(OTestCase):
+    def test_queue_trigger_requires_queue_field(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [{'name': 'worker', 'kind': 'queue'}],
+                    'queues': [{'id': 'inbox', 'sources': []}],
+                }
+            )
+
+    def test_queue_trigger_must_reference_declared_queue(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [{'name': 'worker', 'kind': 'queue', 'queue': 'missing'}],
+                    'queues': [{'id': 'inbox', 'sources': []}],
+                }
+            )
+
+    def test_schedule_trigger_requires_cron(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [{'name': 'sweep', 'kind': 'schedule'}],
+                }
+            )
+
+    def test_max_sessions_defaults_to_one(self) -> None:
+        spec = AgentConfigSpec.model_validate(
+            {
+                **MINIMAL_SPEC_DICT,
+                'triggers': [{'name': 'worker', 'kind': 'queue', 'queue': 'inbox'}],
+                'queues': [{'id': 'inbox', 'sources': []}],
+            }
+        )
+        self.assertEqual(spec.triggers[0].max_sessions, 1)

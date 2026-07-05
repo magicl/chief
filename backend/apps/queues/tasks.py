@@ -74,6 +74,13 @@ def poll_source(source_pk: str) -> None:
 
 
 @shared_task(ignore_result=True)
+def poll_active_sources() -> None:
+    """Beat entry: enqueue poll_source for each active Source."""
+    for source_pk in Source.objects.filter(status=SourceStatus.ACTIVE).values_list('pk', flat=True):
+        poll_source.delay(str(source_pk))
+
+
+@shared_task(ignore_result=True)
 def release_stale_items() -> None:
     """Celery beat entry: reclaim queue items held past min/early/long thresholds."""
     from apps.queues.services.commands import release_stale_items as release_command

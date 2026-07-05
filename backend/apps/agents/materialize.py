@@ -29,3 +29,9 @@ def materialize_agent_config(agent: Agent, config: AgentConfig, spec: AgentConfi
     from apps.queues.services import commands as queue_commands
 
     queue_commands.sync_from_spec(agent, config, spec.queues)
+
+    from django.db import transaction
+
+    from apps.agents.services.schedule_beat import sync_agent_schedule_triggers
+
+    transaction.on_commit(lambda: sync_agent_schedule_triggers(agent.id))

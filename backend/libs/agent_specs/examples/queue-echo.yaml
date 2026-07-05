@@ -11,6 +11,10 @@ system_prompt: |
 triggers:
   - name: manual
     kind: manual
+  - name: inbox-worker
+    kind: queue
+    queue: inbox
+    max_sessions: 2
 tools:
   - id: clock
     type: clock

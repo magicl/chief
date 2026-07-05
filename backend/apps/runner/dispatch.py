@@ -10,7 +10,6 @@ import logging
 from uuid import UUID
 
 from apps.bus.channels import is_locked, mailbox_push
-from apps.runner.tasks import run_session
 from apps.sessions.models import AgentSession, AgentSessionStatus
 
 logger = logging.getLogger(__name__)
@@ -39,6 +38,9 @@ def maybe_dispatch_session(session_id: UUID | str) -> bool:
 
     session.status = AgentSessionStatus.QUEUED
     session.save(update_fields=['status'])
+
+    from apps.runner.tasks import run_session
+
     run_session.delay(str(session_id))
     return True
 

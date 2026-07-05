@@ -123,6 +123,14 @@ orchestrator.
 agent may **`put`** into a queue it does not own; only the owning agent’s sessions
 **take** from it (see spec 3 / spec 5).
 
+**Schedule and queue triggers** start agent sessions from Celery beat (and, for queue
+triggers, immediately after `put_item` when an item is available). A **`schedule`**
+trigger gets a **`django-celery-beat`** `PeriodicTask` on config save (UTC crontab per
+trigger cron); a **`queue`** trigger is scanned every 15 s plus immediate dispatch on
+`put_item`, until `max_sessions` concurrent sessions (default 1) are in flight. Beat also
+runs **`poll_active_sources`** every five minutes to enqueue source polling across the
+platform. See [`docs/specs/2026-07-05-agent-scheduling/`](specs/2026-07-05-agent-scheduling/2026-07-05-agent-scheduling-design.md).
+
 ---
 
 ## Queues & sources

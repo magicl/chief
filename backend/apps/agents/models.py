@@ -54,6 +54,7 @@ class TriggerKind(models.TextChoices):
     SCHEDULE = 'schedule', 'Schedule'
     MANUAL = 'manual', 'Manual'
     AGENT = 'agent', 'Agent'
+    QUEUE = 'queue', 'Queue'
 
 
 class TriggerStatus(models.TextChoices):
@@ -68,6 +69,7 @@ class Trigger(models.Model):
     name = models.CharField(max_length=255)
     kind = models.CharField(max_length=32, choices=TriggerKind.choices)
     status = models.CharField(max_length=32, choices=TriggerStatus.choices, default=TriggerStatus.ACTIVE)
+    last_fired_at = models.DateTimeField(null=True, blank=True)
     spec = models.JSONField()
 
     class Meta:

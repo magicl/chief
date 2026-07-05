@@ -26,7 +26,8 @@ from apps.runner.dispatch import (
     push_chat_and_dispatch,
     push_control_and_maybe_dispatch,
 )
-from apps.runner.start import StartSessionError, start_manual_session
+from apps.runner.session_start import StartSessionError
+from apps.runner.start import start_manual_session
 from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession
 from asgiref.sync import sync_to_async

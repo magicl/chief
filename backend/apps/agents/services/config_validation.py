@@ -12,6 +12,7 @@ import yaml
 from apps.agents.ingest import IngestError, validate_spec_tools
 from apps.runner.spec_loader import load_agent_config_spec
 from libs.agent_spec import AgentConfigSpec
+from libs.agent_spec.cron import validate_cron_expression
 from libs.agent_spec.exceptions import UnsupportedSpecVersionError
 from libs.sources.registry import get_adapter
 from pydantic import ValidationError
@@ -49,6 +50,31 @@ def _pydantic_errors(exc: ValidationError) -> list[ValidationErrorItem]:
     return items
 
 
+def _validate_triggers(spec: AgentConfigSpec) -> list[ValidationErrorItem]:
+    """Validate trigger cron expressions and queue references; return errors without raising."""
+    items: list[ValidationErrorItem] = []
+    queue_ids = {queue.id for queue in spec.queues}
+    for trigger in spec.triggers:
+        if trigger.kind == 'schedule' and trigger.cron is not None:
+            try:
+                validate_cron_expression(trigger.cron)
+            except ValueError as exc:
+                items.append(
+                    ValidationErrorItem(
+                        path=f'triggers.{trigger.name}.cron',
+                        message=str(exc),
+                    ),
+                )
+        if trigger.kind == 'queue' and trigger.queue is not None and trigger.queue not in queue_ids:
+            items.append(
+                ValidationErrorItem(
+                    path=f'triggers.{trigger.name}.queue',
+                    message=f"Unknown queue {trigger.queue!r}",
+                ),
+            )
+    return items
+
+
 def _validate_queue_sources(spec: AgentConfigSpec) -> list[ValidationErrorItem]:
     """Validate each queue source adapter config; return errors without raising."""
     items: list[ValidationErrorItem] = []
@@ -72,12 +98,12 @@ def _validate_queue_sources(spec: AgentConfigSpec) -> list[ValidationErrorItem]:
 
 
 def validate_agent_config_spec(spec: AgentConfigSpec) -> AgentConfigSpec:
-    """Validate an in-memory spec (tools + queue adapters)."""
+    """Validate an in-memory spec (tools, triggers, and queue adapters)."""
     try:
         validate_spec_tools(spec)
     except IngestError as exc:
         raise ConfigValidationError([ValidationErrorItem(path='tools', message=str(exc))]) from exc
-    errors = _validate_queue_sources(spec)
+    errors = _validate_triggers(spec) + _validate_queue_sources(spec)
     if errors:
         raise ConfigValidationError(errors)
     return spec

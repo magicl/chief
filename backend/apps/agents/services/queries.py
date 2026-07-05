@@ -23,7 +23,7 @@ from libs.providers.registry import PROVIDERS
 from libs.sources.registry import all_adapters
 from libs.tools.registry import all_tools
 
-TRIGGER_KINDS = ['schedule', 'manual', 'agent']
+TRIGGER_KINDS = ['schedule', 'manual', 'agent', 'queue']
 
 
 def _spec_summary_from_spec(spec: Any) -> dict[str, Any]:
@@ -59,6 +59,8 @@ SCHEMA_KEYS = [
     'triggers[].name',
     'triggers[].kind',
     'triggers[].cron',
+    'triggers[].queue',
+    'triggers[].max_sessions',
     'tools',
     'tools[]',
     'tools[].id',

@@ -43,7 +43,7 @@ class TestAgentStartChatView(OTransactionTestCase):
         response = self.client.post(reverse('agent_start_chat', kwargs={'agent_id': self.agent.id}))
         self.assertEqual(response.status_code, 400)
 
-    @patch('apps.runner.start.push_chat_and_dispatch')
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
     def test_creates_session_with_initial_message(self, mock_push: MagicMock) -> None:
         self.client.force_login(self.user)
         before = AgentSession.objects.filter(agent=self.agent).count()
@@ -78,7 +78,7 @@ class TestAgentStartChatView(OTransactionTestCase):
             reverse('agent_start_chat', kwargs={'agent_id': self.agent.id}),
         )
 
-    @patch('apps.runner.start.push_chat_and_dispatch')
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
     def test_agent_start_chat_lands_on_session_with_same_frame(self, mock_push: MagicMock) -> None:
         self.client.force_login(self.user)
         agent_page = self.client.get(reverse('agent_detail', kwargs={'agent_id': self.agent.id}))

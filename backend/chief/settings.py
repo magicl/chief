@@ -24,7 +24,11 @@ INSTALLED_APPS += [  # noqa: F405
     'apps.web',
     'apps.keys',
     'django_extensions',
+    'django_celery_beat',
 ]
+
+# Per-trigger schedule crons live in the DB; platform beats stay in chief/celery.py.
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
 ROOT_URLCONF = 'chief.urls'
 ASGI_APPLICATION = 'chief.asgi.application'

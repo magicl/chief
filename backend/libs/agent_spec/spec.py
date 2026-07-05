@@ -25,8 +25,18 @@ class LLMSpec(BaseModel):
 
 class TriggerSpec(BaseModel):
     name: str
-    kind: Literal['schedule', 'manual', 'agent']
+    kind: Literal['schedule', 'manual', 'agent', 'queue']
     cron: str | None = None
+    queue: str | None = None
+    max_sessions: int = Field(default=1, ge=1)
+
+    @model_validator(mode='after')
+    def _kind_specific_fields(self) -> TriggerSpec:
+        if self.kind == 'schedule' and not self.cron:
+            raise ValueError('cron is required when kind is schedule')
+        if self.kind == 'queue' and not self.queue:
+            raise ValueError('queue is required when kind is queue')
+        return self
 
 
 class ToolInstance(BaseModel):
@@ -90,4 +100,15 @@ class AgentConfigSpec(BaseModel):
             source_ids = [s.id for s in queue.sources]
             if len(source_ids) != len(set(source_ids)):
                 raise ValueError(f'duplicate source id in queue {queue.id!r}')
+        return self
+
+    @model_validator(mode='after')
+    def _trigger_queue_refs(self) -> AgentConfigSpec:
+        """Ensure queue triggers reference ids declared in queues[]."""
+        queue_ids = {queue.id for queue in self.queues}
+        for trigger in self.triggers:
+            if trigger.kind == 'queue' and trigger.queue not in queue_ids:
+                raise ValueError(
+                    f"trigger {trigger.name!r} references unknown queue {trigger.queue!r}",
+                )
         return self

@@ -41,6 +41,21 @@ logger = logging.getLogger(__name__)
 MAX_PAYLOAD_BYTES = 65536
 
 
+def _notify_queue_item_available(queue_id: UUID) -> None:
+    """Enqueue per-queue trigger dispatch via Celery (no runner import at load time)."""
+    from celery import current_app
+
+    current_app.send_task(
+        'apps.runner.trigger_tasks.dispatch_queue_triggers_for_queue',
+        args=[str(queue_id)],
+    )
+
+
+def _schedule_queue_dispatch_on_commit(queue_id: UUID) -> None:
+    """Fire queue trigger dispatch after the enclosing transaction commits."""
+    transaction.on_commit(lambda: _notify_queue_item_available(queue_id))
+
+
 @dataclass(frozen=True, slots=True)
 class PutResult:
     item_id: UUID
@@ -88,6 +103,8 @@ def put_item(
             raise QueueValidationError('external_id is required when source is set')
         existing = QueueItem.objects.filter(source=source, external_id=dedup_key).first()
         if existing is not None:
+            if existing.status == QueueItemStatus.AVAILABLE:
+                _schedule_queue_dispatch_on_commit(queue.id)
             return PutResult(item_id=existing.id, created=False)
         try:
             item = QueueItem.objects.create(
@@ -99,7 +116,10 @@ def put_item(
             )
         except IntegrityError:
             existing = QueueItem.objects.get(source=source, external_id=dedup_key)
+            if existing.status == QueueItemStatus.AVAILABLE:
+                _schedule_queue_dispatch_on_commit(queue.id)
             return PutResult(item_id=existing.id, created=False)
+        _schedule_queue_dispatch_on_commit(queue.id)
         return PutResult(item_id=item.id, created=True)
 
     item = QueueItem.objects.create(
@@ -109,6 +129,7 @@ def put_item(
         payload=payload,
         status=QueueItemStatus.AVAILABLE,
     )
+    _schedule_queue_dispatch_on_commit(queue.id)
     return PutResult(item_id=item.id, created=True)
 
 

@@ -20,6 +20,8 @@ dependencies = [
   "PyYAML==6.0.2",
   "uvicorn==0.42.0",
   "uuid7==0.1.0",
+  "croniter==6.0.0",
+  "django-celery-beat==2.8.1",
 ]
 
 [tool.uv]

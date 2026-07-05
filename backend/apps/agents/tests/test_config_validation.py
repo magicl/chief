@@ -60,3 +60,19 @@ class ValidateAgentConfigYamlTests(OTestCase):
         with self.assertRaises(ConfigValidationError) as ctx:
             validate_agent_config_yaml(raw)
         self.assertTrue(any('missing' in e.message for e in ctx.exception.errors))
+
+    def test_invalid_cron_rejected_in_yaml_validation(self) -> None:
+        raw = """
+schema_version: 1
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+system_prompt: hi
+triggers:
+  - name: sweep
+    kind: schedule
+    cron: not-a-cron
+"""
+        with self.assertRaises(ConfigValidationError) as ctx:
+            validate_agent_config_yaml(raw)
+        self.assertTrue(any('cron' in item.path for item in ctx.exception.errors))

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from apps.queues.models import QueueItem, QueueItemStatus
 from apps.queues.services import commands
-from apps.queues.tasks import poll_source, release_stale_items
+from apps.queues.tasks import poll_active_sources, poll_source, release_stale_items
 from apps.queues.tests.base import make_test_queue, make_test_source
 from apps.sessions.models import AgentSessionStatus
 from django.utils import timezone
@@ -51,6 +51,21 @@ class TestPollSourceTask(OTransactionTestCase):
         self.assertIn('unknown adapter type', source.last_error or '')
         self.assertIsNotNone(source.last_error_at)
         self.assertEqual(QueueItem.objects.filter(queue=queue).count(), 0)
+
+
+class TestPollActiveSourcesTask(OTransactionTestCase):
+    def test_poll_active_sources_enqueues_poll_for_each_active_source(self) -> None:
+        queue_a, _session_a = make_test_queue(identifier='poll-active-a')
+        queue_b, _session_b = make_test_queue(identifier='poll-active-b')
+        source_a = make_test_source(queue_a, source_id='active-a')
+        source_b = make_test_source(queue_b, source_id='active-b')
+
+        with patch('apps.queues.tasks.poll_source.delay') as mock_delay:
+            poll_active_sources()
+
+        self.assertEqual(mock_delay.call_count, 2)
+        enqueued = {call.args[0] for call in mock_delay.call_args_list}
+        self.assertEqual(enqueued, {str(source_a.pk), str(source_b.pk)})
 
 
 class TestReleaseStaleItemsTask(OTransactionTestCase):

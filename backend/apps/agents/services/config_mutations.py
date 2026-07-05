@@ -66,6 +66,8 @@ def apply_config_mutation(raw: str, mutation: dict[str, Any]) -> str:
             name=mutation['name'],
             kind=mutation['kind'],
             cron=mutation.get('cron'),
+            queue=mutation.get('queue'),
+            max_sessions=int(mutation.get('max_sessions') or 1),
         )
         spec = spec.model_copy(update={'triggers': [*spec.triggers, trig]})
     elif action == 'remove_trigger':
