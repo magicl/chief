@@ -36,6 +36,34 @@ class AgentConfigWebTests(OTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'config-editor')
         self.assertContains(response, 'id: clock')
+        self.assertContains(response, 'config-sidebar')
+        self.assertContains(response, 'id="agent-identifier"')
+        self.assertContains(response, 'value="cfg-agent"')
+
+    def test_save_renames_agent_identifier(self) -> None:
+        url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+        response = self.client.post(
+            url,
+            {'spec_yaml': spec_yaml, 'identifier': 'renamed-agent'},
+            HTTP_ACCEPT='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.identifier, 'renamed-agent')
+
+    def test_save_rejects_duplicate_identifier(self) -> None:
+        create_from_example(self.user, 'clock-assistant', identifier='taken-name')
+        url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+        response = self.client.post(
+            url,
+            {'spec_yaml': spec_yaml, 'identifier': 'taken-name'},
+            HTTP_ACCEPT='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.content)
+        self.assertEqual(payload['errors'][0]['path'], 'identifier')
 
     def test_create_mutate_without_agent(self) -> None:
         spec_yaml = load_example_text('minimal')

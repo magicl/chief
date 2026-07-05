@@ -16,6 +16,7 @@ from apps.agents.models import AgentConfig
 from apps.agents.services.config_commands import (
     ConfigCommandError,
     create_from_yaml,
+    rename_agent,
 )
 from apps.agents.services.config_mutations import (
     ConfigMutationError,
@@ -179,6 +180,15 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
         source_rev, dirty = compute_save_metadata(agent, spec_yaml)
     except ConfigValidationError as exc:
         return _validation_json_response(exc)
+    new_identifier = request.POST.get('identifier', '').strip()
+    if new_identifier and new_identifier != agent.identifier:
+        try:
+            rename_agent(agent, cast(AbstractBaseUser, request.user).pk, new_identifier)
+        except ConfigCommandError as exc:
+            return JsonResponse(
+                {'errors': [{'path': 'identifier', 'message': str(exc)}]},
+                status=400,
+            )
     persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty)
     if request.headers.get('Accept', '').find('application/json') >= 0:
         return JsonResponse({'ok': True, 'source_rev': source_rev, 'dirty': dirty})

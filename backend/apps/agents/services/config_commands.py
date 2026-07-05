@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 from apps.agents.ingest import create_agent_from_spec
 from apps.agents.models import Agent
 from apps.agents.services.config_sync import spec_content_hash
@@ -14,6 +16,8 @@ from django.contrib.auth.models import AbstractBaseUser
 from libs.agent_specs import load_example_text
 
 from olib.py.utils.uuid7 import uuid7
+
+_IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 
 class ConfigCommandError(ValueError):
@@ -56,3 +60,20 @@ def create_from_yaml(
         config_source='ui',
         source_rev=spec_content_hash(raw_yaml),
     )
+
+
+def rename_agent(agent: Agent, user_id: int, new_identifier: str) -> None:
+    """Rename *agent* when *new_identifier* is valid and unique for the user."""
+    cleaned = new_identifier.strip()
+    if not cleaned:
+        raise ConfigCommandError('identifier required')
+    if not _IDENTIFIER_RE.fullmatch(cleaned):
+        raise ConfigCommandError(
+            'identifier must contain only letters, numbers, dots, underscores, and hyphens',
+        )
+    if cleaned == agent.identifier:
+        return
+    if Agent.objects.filter(user_id=user_id, identifier=cleaned).exists():
+        raise ConfigCommandError(f'agent {cleaned!r} already exists')
+    agent.identifier = cleaned
+    agent.save(update_fields=['identifier'])

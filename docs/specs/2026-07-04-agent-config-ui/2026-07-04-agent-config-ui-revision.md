@@ -30,4 +30,7 @@
 - [x] queue tool. let's have a "list" function that lists the names of the queues we have available to us
 - [x] queue tool. remove owner_agent from the put function. and for now, let's remove the capability of one agent adding something to another agent's queue
 - [x] the clock tool should be in a file called "clock.py" .. and let's put the tools themselves under a new folder under tools called tools.. right now tools are sitting next to utility functions, registries etc.. let's have a folder that just has tools
-
+- [x] in a session view, group pause/resume/aort in a box called "session". make it more clear that the session status is actually session status
+- [x] in session view, have two additional buttons: "new session" and "back to agent"
+- [x] in agent configuration, let's also allow renaming the agent. i.e. changing its identifier
+- [x] in agent/create/edit.. let's try to have the helpers on the right side as a sidebar.. a resizeable sidebar. because we want the text-edit window to resize to fit all the text.. i.e. scroll the website, not scroll inside the text edit

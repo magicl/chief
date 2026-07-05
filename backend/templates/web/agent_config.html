@@ -2,35 +2,92 @@
 
 {% block title %}{% if is_create %}Create agent{% else %}{{ agent.identifier }} config{% endif %} — Chief{% endblock %}
 
+{% block body_class %}config-page{% endblock %}
+
 {% block extra_styles %}
-.config-layout { display:grid; gap:1rem; }
-.meta-bar { display:flex; flex-wrap:wrap; gap:.75rem 1.25rem; font-size:.85rem; color:#8b93a7; align-items:center; }
-.meta-bar .pill.warn { background:#4a3a1f; color:#f0e29b; }
-.editor-wrap { border:1px solid #262a33; border-radius:8px; overflow:hidden; min-height:420px; }
-#config-editor { min-height:420px; height:420px; }
-#config-editor .cm-editor { height:100%; }
-#config-editor .cm-scroller { min-height:100%; }
-.errors { background:#4a2326; color:#ff9ea3; border-radius:8px; padding:.75rem 1rem; margin-top:.75rem; }
-.errors ul { margin:.25rem 0 0; padding-left:1.25rem; }
-.helpers details { background:#161a21; border:1px solid #262a33; border-radius:8px; padding:.75rem 1rem; margin-top:.75rem; }
-.helpers summary { cursor:pointer; color:#9ec5ff; }
-.helper-form { display:grid; gap:.5rem; margin-top:.75rem; max-width:520px; }
-.helper-form label { display:grid; gap:.25rem; font-size:.85rem; }
-.helper-form input, .helper-form select, .helper-form textarea { padding:.35rem .5rem; }
-.actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; align-items:center; }
-.actions button, .actions a.btn { padding:.4rem .75rem; border-radius:8px; border:1px solid #262a33; background:#1d3a5f; color:#9ec5ff; cursor:pointer; text-decoration:none; font-size:.85rem; }
-.history table { font-size:.85rem; }
-.cred-option-set { color:#9be7a8; }
-.cred-option-unset { color:#b8c0d4; }
-.example-grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); margin-top:.75rem; }
-.example-card { background:#12151c; border:1px solid #262a33; border-radius:8px; padding:.75rem 1rem; text-decoration:none; color:inherit; display:block; }
-.example-card:hover { border-color:#3a4a66; }
-.example-card.active { border-color:#9ec5ff; }
-.example-card h3 { margin:0; font-size:.95rem; color:#e6e6e6; text-transform:none; letter-spacing:0; }
-.tool-actions { display:grid; gap:.35rem; margin-top:.25rem; }
-.tool-actions fieldset { border:1px solid #262a33; border-radius:6px; padding:.5rem .75rem; margin:0; }
-.tool-actions legend { font-size:.8rem; color:#8b93a7; padding:0 .25rem; }
-.tool-actions label { display:flex; align-items:center; gap:.4rem; font-size:.85rem; }
+body.config-page main { max-width: none; }
+.config-layout { display: grid; gap: 1rem; padding-bottom: 2rem; }
+.meta-bar { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; font-size: .85rem; color: #8b93a7; align-items: center; }
+.meta-bar .pill.warn { background: #4a3a1f; color: #f0e29b; }
+.config-workspace {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 24rem;
+}
+.config-main { flex: 1 1 auto; min-width: 0; display: grid; gap: .75rem; align-content: start; }
+.config-sidebar {
+  flex: 0 0 var(--config-sidebar-width, 22rem);
+  max-width: 50%;
+  min-width: 16rem;
+  border-left: 1px solid #262a33;
+  padding-left: .75rem;
+  overflow-y: auto;
+  max-height: none;
+}
+.config-resizer {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+}
+.config-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: #262a33;
+}
+.config-resizer:hover::after,
+.config-resizer.dragging::after { background: #9ec5ff; }
+.editor-wrap { border: 1px solid #262a33; border-radius: 8px; overflow: hidden; }
+#config-editor { min-height: 8rem; }
+#config-editor .cm-editor { height: auto; }
+#config-editor .cm-scroller { overflow: visible; min-height: 8rem; }
+.errors { background: #4a2326; color: #ff9ea3; border-radius: 8px; padding: .75rem 1rem; }
+.errors ul { margin: .25rem 0 0; padding-left: 1.25rem; }
+.helpers { display: grid; gap: .75rem; }
+.helpers h3 {
+  margin: 0 0 .25rem;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #8b93a7;
+}
+.helpers details { background: #161a21; border: 1px solid #262a33; border-radius: 8px; padding: .75rem 1rem; }
+.helpers summary { cursor: pointer; color: #9ec5ff; }
+.helper-form { display: grid; gap: .5rem; margin-top: .75rem; }
+.helper-form label { display: grid; gap: .25rem; font-size: .85rem; }
+.helper-form input, .helper-form select, .helper-form textarea { padding: .35rem .5rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.actions button, .actions a.btn { padding: .4rem .75rem; border-radius: 8px; border: 1px solid #262a33; background: #1d3a5f; color: #9ec5ff; cursor: pointer; text-decoration: none; font-size: .85rem; }
+.history table { font-size: .85rem; }
+.cred-option-set { color: #9be7a8; }
+.cred-option-unset { color: #b8c0d4; }
+.example-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-top: .75rem; }
+.example-card { background: #12151c; border: 1px solid #262a33; border-radius: 8px; padding: .75rem 1rem; text-decoration: none; color: inherit; display: block; }
+.example-card:hover { border-color: #3a4a66; }
+.example-card.active { border-color: #9ec5ff; }
+.example-card h3 { margin: 0; font-size: .95rem; color: #e6e6e6; text-transform: none; letter-spacing: 0; }
+.tool-actions { display: grid; gap: .35rem; margin-top: .25rem; }
+.tool-actions fieldset { border: 1px solid #262a33; border-radius: 6px; padding: .5rem .75rem; margin: 0; }
+.tool-actions legend { font-size: .8rem; color: #8b93a7; padding: 0 .25rem; }
+.tool-actions label { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
+@media (max-width: 900px) {
+  .config-workspace { flex-direction: column; }
+  .config-sidebar {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid #262a33;
+    padding-left: 0;
+    padding-top: .75rem;
+  }
+  .config-resizer { display: none; }
+}
 {% endblock %}
 
 {% block content %}
@@ -81,213 +138,224 @@
   </div>
   {% endif %}
 
-  <div class="actions">
-    {% if is_create %}
-    <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
-      Identifier
-      <input type="text" id="create-identifier" pattern="[a-zA-Z0-9._-]+" placeholder="optional">
-    </label>
-    <button type="button" id="save-config" class="primary">Create agent</button>
-    {% else %}
-    <button type="button" id="save-config" class="primary">Save</button>
-    {% endif %}
+  <div class="config-workspace">
+    <div class="config-main">
+      <div class="actions">
+        <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
+          Identifier
+          <input type="text" id="agent-identifier"
+                 pattern="[a-zA-Z0-9._-]+"
+                 value="{% if not is_create %}{{ agent.identifier }}{% endif %}"
+                 placeholder="{% if is_create %}optional{% else %}required{% endif %}"
+                 {% if not is_create %}required{% endif %}>
+        </label>
+        <button type="button" id="save-config" class="primary">
+          {% if is_create %}Create agent{% else %}Save{% endif %}
+        </button>
+      </div>
+
+      <div id="validation-errors" class="errors" style="display:none;"><ul></ul></div>
+
+      <div class="editor-wrap">
+        <div id="config-editor"></div>
+      </div>
+
+      {% if not is_create %}
+      <section class="card history">
+        <h2>Revision history</h2>
+        {% if history %}
+        <table>
+          <thead><tr><th>Revision</th><th>When</th><th>Dirty</th><th></th></tr></thead>
+          <tbody>
+            {% for h in history %}
+            <tr>
+              <td><code>{{ h.source_rev[:40] }}{% if h.source_rev|length > 40 %}…{% endif %}</code></td>
+              <td class="muted">{{ h.fetched_at.strftime('%Y-%m-%d %H:%M') }}</td>
+              <td>{% if h.dirty %}yes{% else %}—{% endif %}</td>
+              <td><a href="{{ url('agent_config_history', kwargs={'agent_id': agent.id, 'config_id': h.id}) }}" style="color:#9ec5ff;">View</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No revisions yet.</p>
+        {% endif %}
+      </section>
+      {% endif %}
+    </div>
+
+    <div class="config-resizer" id="config-sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize helpers sidebar"></div>
+
+    <aside class="config-sidebar" id="config-sidebar">
+      <section class="helpers">
+        <h3>Helpers</h3>
+        <details>
+          <summary>LLM helper</summary>
+          <form class="helper-form" data-mutation="set_llm">
+            <label>Model
+              <select name="model_choice" id="helper-model-choice" required>
+                {% for p in catalog.providers %}
+                {% for m in p.models %}
+                <option value="{{ p.provider }}::{{ m }}" data-provider="{{ p.provider }}" data-model="{{ m }}">
+                  {{ p.provider }} — {{ m }}
+                </option>
+                {% endfor %}
+                {% endfor %}
+              </select>
+            </label>
+            <label>Temperature <input name="temperature" type="number" step="0.1" min="0" max="2" value="0.7"></label>
+            <label>Credential ref
+              <select name="credential_ref">
+                <option value="">(default)</option>
+                {% for cred_type, creds in catalog.credentials.items() %}
+                {% for cred in creds %}
+                <option value="{{ cred.name }}" class="{% if cred.is_set %}cred-option-set{% else %}cred-option-unset{% endif %}">
+                  {{ cred.name }} — {% if cred.is_set %}Set{% else %}Not set{% endif %} ({{ cred_type }})
+                </option>
+                {% endfor %}
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Apply to YAML</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>System prompt helper</summary>
+          <form class="helper-form" data-mutation="set_system_prompt">
+            <label>System prompt
+              <textarea name="system_prompt" rows="8" required placeholder="You are a helpful assistant."></textarea>
+            </label>
+            <button type="submit">Apply to YAML</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>Add tool instance</summary>
+          <form class="helper-form" data-mutation="add_tool">
+            <label>Id <input name="id" id="helper-tool-id" pattern="[a-z][a-z0-9_-]{0,63}" required placeholder="clock"></label>
+            <label>Type
+              <select name="type" id="helper-tool-type" required>
+                {% for t in catalog.tool_types %}
+                <option value="{{ t.type }}" data-credential-type="{{ t.credential_type or '' }}">{{ t.type }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Credential ref
+              <select name="credential_ref" id="helper-tool-credential">
+                <option value="">(default)</option>
+              </select>
+            </label>
+            <div id="tool-allow-actions" class="tool-actions"></div>
+            <button type="submit">Add tool</button>
+          </form>
+        </details>
+
+        <details id="remove-tool-helper"{% if not spec_summary.tools %} hidden{% endif %}>
+          <summary>Remove tool instance</summary>
+          <form class="helper-form" data-mutation="remove_tool">
+            <label>Tool id
+              <select name="id" id="remove-tool-select" required>
+                {% for t in spec_summary.tools %}
+                <option value="{{ t.id }}">{{ t.id }} ({{ t.type }})</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Remove tool</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>Add trigger</summary>
+          <form class="helper-form" data-mutation="add_trigger">
+            <label>Name <input name="name" required></label>
+            <label>Kind
+              <select name="kind">
+                {% for k in catalog.trigger_kinds %}
+                <option value="{{ k }}">{{ k }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Cron (schedule only) <input name="cron" placeholder="0 * * * *"></label>
+            <button type="submit">Add trigger</button>
+          </form>
+        </details>
+
+        <details id="remove-trigger-helper"{% if not spec_summary.triggers %} hidden{% endif %}>
+          <summary>Remove trigger</summary>
+          <form class="helper-form" data-mutation="remove_trigger">
+            <label>Trigger name
+              <select name="name" id="remove-trigger-select" required>
+                {% for t in spec_summary.triggers %}
+                <option value="{{ t.name }}">{{ t.name }} ({{ t.kind }})</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Remove trigger</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>Add queue</summary>
+          <form class="helper-form" data-mutation="add_queue">
+            <label>Queue id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required></label>
+            <label>Max attempts <input name="max_attempts" type="number" value="3" min="1"></label>
+            <button type="submit">Add queue</button>
+          </form>
+        </details>
+
+        <details id="remove-queue-helper"{% if not spec_summary.queues %} hidden{% endif %}>
+          <summary>Remove queue</summary>
+          <form class="helper-form" data-mutation="remove_queue">
+            <label>Queue id
+              <select name="id" id="remove-queue-select" required>
+                {% for q in spec_summary.queues %}
+                <option value="{{ q.id }}">{{ q.id }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Remove queue</button>
+          </form>
+        </details>
+
+        <details id="add-source-helper"{% if not spec_summary.queues %} hidden{% endif %}>
+          <summary>Add queue source</summary>
+          <form class="helper-form" data-mutation="add_source">
+            <label>Queue
+              <select name="queue_id" id="add-source-queue-select" required>
+                {% for q in spec_summary.queues %}
+                <option value="{{ q.id }}">{{ q.id }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Source id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required></label>
+            <label>Adapter type
+              <select name="type" id="helper-adapter-type" required>
+                {% for a in catalog.adapter_types %}
+                <option value="{{ a.type }}" data-credential-type="{{ a.credential_type or '' }}">{{ a.type }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Credential ref
+              <select name="credential_ref" id="helper-source-credential">
+                <option value="">(default)</option>
+              </select>
+            </label>
+            <div id="adapter-config-test" class="adapter-config-panel">
+              <label>Prefix <input name="config_prefix" value="test"></label>
+              <label>Batch size <input name="config_batch_size" type="number" value="1" min="1"></label>
+            </div>
+            <div id="adapter-config-json" class="adapter-config-panel" hidden>
+              <label>Adapter config (JSON)
+                <textarea name="config_json" rows="4" placeholder="{}">{}</textarea>
+              </label>
+            </div>
+            <button type="submit">Add source</button>
+          </form>
+        </details>
+      </section>
+    </aside>
   </div>
-
-  <div id="validation-errors" class="errors" style="display:none;"><ul></ul></div>
-
-  <div class="editor-wrap">
-    <div id="config-editor"></div>
-  </div>
-
-  <section class="helpers">
-    <details>
-      <summary>LLM helper</summary>
-      <form class="helper-form" data-mutation="set_llm">
-        <label>Model
-          <select name="model_choice" id="helper-model-choice" required>
-            {% for p in catalog.providers %}
-            {% for m in p.models %}
-            <option value="{{ p.provider }}::{{ m }}" data-provider="{{ p.provider }}" data-model="{{ m }}">
-              {{ p.provider }} — {{ m }}
-            </option>
-            {% endfor %}
-            {% endfor %}
-          </select>
-        </label>
-        <label>Temperature <input name="temperature" type="number" step="0.1" min="0" max="2" value="0.7"></label>
-        <label>Credential ref
-          <select name="credential_ref">
-            <option value="">(default)</option>
-            {% for cred_type, creds in catalog.credentials.items() %}
-            {% for cred in creds %}
-            <option value="{{ cred.name }}" class="{% if cred.is_set %}cred-option-set{% else %}cred-option-unset{% endif %}">
-              {{ cred.name }} — {% if cred.is_set %}Set{% else %}Not set{% endif %} ({{ cred_type }})
-            </option>
-            {% endfor %}
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit">Apply to YAML</button>
-      </form>
-    </details>
-
-    <details>
-      <summary>System prompt helper</summary>
-      <form class="helper-form" data-mutation="set_system_prompt">
-        <label>System prompt
-          <textarea name="system_prompt" rows="8" required placeholder="You are a helpful assistant."></textarea>
-        </label>
-        <button type="submit">Apply to YAML</button>
-      </form>
-    </details>
-
-    <details>
-      <summary>Add tool instance</summary>
-      <form class="helper-form" data-mutation="add_tool">
-        <label>Id <input name="id" id="helper-tool-id" pattern="[a-z][a-z0-9_-]{0,63}" required placeholder="clock"></label>
-        <label>Type
-          <select name="type" id="helper-tool-type" required>
-            {% for t in catalog.tool_types %}
-            <option value="{{ t.type }}" data-credential-type="{{ t.credential_type or '' }}">{{ t.type }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Credential ref
-          <select name="credential_ref" id="helper-tool-credential">
-            <option value="">(default)</option>
-          </select>
-        </label>
-        <div id="tool-allow-actions" class="tool-actions"></div>
-        <button type="submit">Add tool</button>
-      </form>
-    </details>
-
-    <details id="remove-tool-helper"{% if not spec_summary.tools %} hidden{% endif %}>
-      <summary>Remove tool instance</summary>
-      <form class="helper-form" data-mutation="remove_tool">
-        <label>Tool id
-          <select name="id" id="remove-tool-select" required>
-            {% for t in spec_summary.tools %}
-            <option value="{{ t.id }}">{{ t.id }} ({{ t.type }})</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit">Remove tool</button>
-      </form>
-    </details>
-
-    <details>
-      <summary>Add trigger</summary>
-      <form class="helper-form" data-mutation="add_trigger">
-        <label>Name <input name="name" required></label>
-        <label>Kind
-          <select name="kind">
-            {% for k in catalog.trigger_kinds %}
-            <option value="{{ k }}">{{ k }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Cron (schedule only) <input name="cron" placeholder="0 * * * *"></label>
-        <button type="submit">Add trigger</button>
-      </form>
-    </details>
-
-    <details id="remove-trigger-helper"{% if not spec_summary.triggers %} hidden{% endif %}>
-      <summary>Remove trigger</summary>
-      <form class="helper-form" data-mutation="remove_trigger">
-        <label>Trigger name
-          <select name="name" id="remove-trigger-select" required>
-            {% for t in spec_summary.triggers %}
-            <option value="{{ t.name }}">{{ t.name }} ({{ t.kind }})</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit">Remove trigger</button>
-      </form>
-    </details>
-
-    <details>
-      <summary>Add queue</summary>
-      <form class="helper-form" data-mutation="add_queue">
-        <label>Queue id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required></label>
-        <label>Max attempts <input name="max_attempts" type="number" value="3" min="1"></label>
-        <button type="submit">Add queue</button>
-      </form>
-    </details>
-
-    <details id="remove-queue-helper"{% if not spec_summary.queues %} hidden{% endif %}>
-      <summary>Remove queue</summary>
-      <form class="helper-form" data-mutation="remove_queue">
-        <label>Queue id
-          <select name="id" id="remove-queue-select" required>
-            {% for q in spec_summary.queues %}
-            <option value="{{ q.id }}">{{ q.id }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit">Remove queue</button>
-      </form>
-    </details>
-
-    <details id="add-source-helper"{% if not spec_summary.queues %} hidden{% endif %}>
-      <summary>Add queue source</summary>
-      <form class="helper-form" data-mutation="add_source">
-        <label>Queue
-          <select name="queue_id" id="add-source-queue-select" required>
-            {% for q in spec_summary.queues %}
-            <option value="{{ q.id }}">{{ q.id }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Source id <input name="id" pattern="[a-z][a-z0-9_-]{0,63}" required></label>
-        <label>Adapter type
-          <select name="type" id="helper-adapter-type" required>
-            {% for a in catalog.adapter_types %}
-            <option value="{{ a.type }}" data-credential-type="{{ a.credential_type or '' }}">{{ a.type }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Credential ref
-          <select name="credential_ref" id="helper-source-credential">
-            <option value="">(default)</option>
-          </select>
-        </label>
-        <div id="adapter-config-test" class="adapter-config-panel">
-          <label>Prefix <input name="config_prefix" value="test"></label>
-          <label>Batch size <input name="config_batch_size" type="number" value="1" min="1"></label>
-        </div>
-        <div id="adapter-config-json" class="adapter-config-panel" hidden>
-          <label>Adapter config (JSON)
-            <textarea name="config_json" rows="4" placeholder="{}">{}</textarea>
-          </label>
-        </div>
-        <button type="submit">Add source</button>
-      </form>
-    </details>
-  </section>
-
-  {% if not is_create %}
-  <section class="card history">
-    <h2>Revision history</h2>
-    {% if history %}
-    <table>
-      <thead><tr><th>Revision</th><th>When</th><th>Dirty</th><th></th></tr></thead>
-      <tbody>
-        {% for h in history %}
-        <tr>
-          <td><code>{{ h.source_rev[:40] }}{% if h.source_rev|length > 40 %}…{% endif %}</code></td>
-          <td class="muted">{{ h.fetched_at.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td>{% if h.dirty %}yes{% else %}—{% endif %}</td>
-          <td><a href="{{ url('agent_config_history', kwargs={'agent_id': agent.id, 'config_id': h.id}) }}" style="color:#9ec5ff;">View</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="empty">No revisions yet.</p>
-    {% endif %}
-  </section>
-  {% endif %}
 </div>
 
 <script id="config-page-data" type="application/json">{{ page_data_json|safe }}</script>

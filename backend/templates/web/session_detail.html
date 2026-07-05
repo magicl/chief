@@ -19,35 +19,45 @@
   </p>
 </div>
 <div class="frame-header-actions">
-  <div id="session-status">
-    {% include "web/partials/session_status.html" %}
-  </div>
-  <div class="control-buttons">
-    <form
-      hx-post="{{ url('session_pause', kwargs={'session_id': session.id}) }}"
-      hx-target="#session-status"
-      hx-swap="innerHTML"
-    >
-      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <button type="submit" class="frame-btn">Pause</button>
-    </form>
-    <form
-      hx-post="{{ url('session_resume', kwargs={'session_id': session.id}) }}"
-      hx-target="#session-status"
-      hx-swap="innerHTML"
-    >
-      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <button type="submit" class="frame-btn">Resume</button>
-    </form>
-    <form
-      hx-post="{{ url('session_abort', kwargs={'session_id': session.id}) }}"
-      hx-target="#session-status"
-      hx-swap="innerHTML"
-    >
-      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <button type="submit" class="frame-btn danger">Abort</button>
-    </form>
-  </div>
+  <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" class="frame-btn muted-btn" style="text-decoration:none;">Back to agent</a>
+  <form method="post" action="{{ url('start_agent_session', kwargs={'agent_id': agent.id}) }}">
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+    <button type="submit" class="frame-btn">New session</button>
+  </form>
+  <section class="session-control card" aria-label="Session controls">
+    <h3 class="session-control-title">Session</h3>
+    <div class="session-status-row">
+      <div id="session-status">
+        {% include "web/partials/session_status.html" %}
+      </div>
+    </div>
+    <div class="control-buttons">
+      <form
+        hx-post="{{ url('session_pause', kwargs={'session_id': session.id}) }}"
+        hx-target="#session-status"
+        hx-swap="innerHTML"
+      >
+        <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+        <button type="submit" class="frame-btn">Pause</button>
+      </form>
+      <form
+        hx-post="{{ url('session_resume', kwargs={'session_id': session.id}) }}"
+        hx-target="#session-status"
+        hx-swap="innerHTML"
+      >
+        <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+        <button type="submit" class="frame-btn">Resume</button>
+      </form>
+      <form
+        hx-post="{{ url('session_abort', kwargs={'session_id': session.id}) }}"
+        hx-target="#session-status"
+        hx-swap="innerHTML"
+      >
+        <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+        <button type="submit" class="frame-btn danger">Abort</button>
+      </form>
+    </div>
+  </section>
 </div>
 {% endblock %}
 

@@ -26,6 +26,15 @@ class TestSessionEventView(OTransactionTestCase):
         self.assertContains(response, 'Events')
         self.assertContains(response, 'Following')
 
+    def test_session_page_groups_controls_and_navigation(self) -> None:
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, 'session-control')
+        self.assertContains(response, 'Session status')
+        self.assertContains(response, 'Back to agent')
+        self.assertContains(response, 'New session')
+
     def test_session_page_includes_follow_and_stats_logic(self) -> None:
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),

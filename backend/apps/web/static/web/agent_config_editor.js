@@ -7,7 +7,7 @@
 /**
  * Agent config YAML editor (CodeMirror 6) with schema autocomplete and save/mutate.
  */
-import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine, ViewPlugin } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { yaml } from '@codemirror/lang-yaml';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
@@ -405,6 +405,74 @@ function initToolHelper(catalog, getYaml) {
   sync();
 }
 
+function initSidebarResize() {
+  const resizer = document.getElementById('config-sidebar-resizer');
+  const sidebar = document.getElementById('config-sidebar');
+  if (!resizer || !sidebar) return;
+
+  const storageKey = 'chief.configSidebarWidth';
+  const saved = localStorage.getItem(storageKey);
+  if (saved) {
+    sidebar.style.setProperty('--config-sidebar-width', saved);
+  }
+
+  let dragging = false;
+  const onMove = (event) => {
+    if (!dragging) return;
+    const workspace = sidebar.parentElement;
+    if (!workspace) return;
+    const rect = workspace.getBoundingClientRect();
+    const width = Math.min(Math.max(rect.right - event.clientX, 16 * 16), rect.width * 0.5);
+    const value = `${Math.round(width)}px`;
+    sidebar.style.setProperty('--config-sidebar-width', value);
+    localStorage.setItem(storageKey, value);
+  };
+  const stop = () => {
+    dragging = false;
+    resizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', stop);
+  };
+
+  resizer.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    dragging = true;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', stop);
+  });
+}
+
+/** Grow the editor with document content instead of using an inner scroll area. */
+const autoHeightTheme = EditorView.theme({
+  '&': { height: 'auto' },
+  '.cm-scroller': { overflow: 'visible' },
+  '.cm-content': { minHeight: '8rem' },
+});
+
+const autoHeightPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.updateHeight(view);
+    }
+
+    update(update) {
+      if (update.docChanged || update.geometryChanged) {
+        this.updateHeight(update.view);
+      }
+    }
+
+    /** Set the editor DOM height from CodeMirror's measured content height. */
+    updateHeight(view) {
+      view.dom.style.height = `${view.contentHeight}px`;
+    }
+  },
+);
+
 function init() {
   const data = readPageData();
   const urls = data.urls || {};
@@ -416,6 +484,7 @@ function init() {
 
   initCredentialPickers(data.catalog || {});
   initAdapterConfigPanels();
+  initSidebarResize();
 
   const schemaKeys = data.catalog?.schema_keys || [];
   const extensions = [
@@ -425,6 +494,8 @@ function init() {
     history(),
     yaml(),
     oneDark,
+    autoHeightTheme,
+    autoHeightPlugin,
     keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
     autocompletion({
       override: [(ctx) => schemaCompletions(ctx, schemaKeys)],
@@ -450,13 +521,9 @@ function init() {
   document.getElementById('save-config')?.addEventListener('click', async () => {
     const spec_yaml = getYaml();
     const body = { spec_yaml };
-    if (isCreate) {
-      const identifier = /** @type {HTMLInputElement | null} */ (
-        document.getElementById('create-identifier')
-      );
-      if (identifier?.value.trim()) {
-        body.identifier = identifier.value.trim();
-      }
+    const identifierEl = document.getElementById('agent-identifier');
+    if (identifierEl instanceof HTMLInputElement && identifierEl.value.trim()) {
+      body.identifier = identifierEl.value.trim();
     }
     const headers = isCreate ? { Accept: 'application/json' } : {};
     const { ok, json } = await postForm(urls.save, body, headers);
