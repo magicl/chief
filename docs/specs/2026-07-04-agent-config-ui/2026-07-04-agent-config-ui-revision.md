@@ -34,3 +34,5 @@
 - [x] in session view, have two additional buttons: "new session" and "back to agent"
 - [x] in agent configuration, let's also allow renaming the agent. i.e. changing its identifier
 - [x] in agent/create/edit.. let's try to have the helpers on the right side as a sidebar.. a resizeable sidebar. because we want the text-edit window to resize to fit all the text.. i.e. scroll the website, not scroll inside the text edit
+- [x] the config column in the agents view on the landing page doesn't make sense.. maybe show the description instead? also let's maybe show the agent name instead of the identifier? Or: I guess these are the same.. maybe we require a name to be given on agent creation.. for example agents we could propose one (as we suggested earlier clock, clock-1, clock-2 etc.)
+- [x] for agents, let's have a name and an identifier. by default when someone creates an agent, set the identifier to a normalized version of the name, e.g. "Bob agent" -> "bog-agent". Add -N suffix if a similar exists.. 

@@ -16,8 +16,6 @@ from django.db import transaction
 from libs.agent_spec import AGENT_CONFIG_SPEC_VERSION, AgentConfigSpec, ToolInstance
 from libs.tools.registry import get_tool
 
-from olib.py.utils.uuid7 import uuid7
-
 
 class IngestError(ValueError):
     """Spec or tool instance failed validation before persist."""
@@ -81,16 +79,15 @@ def create_agent_from_spec(
     user: AbstractBaseUser,
     spec: AgentConfigSpec,
     *,
-    identifier: str | None = None,
+    name: str,
+    identifier: str,
     config_source: str = 'ui',
     source_rev: str = 'ui:initial',
 ) -> Agent:
     """Create ``Agent`` and persist config from a validated spec."""
-    if identifier is None:
-        identifier = str(uuid7())
-
     agent = Agent.objects.create(
         user_id=user.pk,
+        name=name,
         identifier=identifier,
         config_source=config_source,
     )

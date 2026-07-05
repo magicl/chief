@@ -30,7 +30,7 @@ class TestMaterializeAgentConfig(OTestCase):
     def test_materialize_creates_triggers_and_queues(self) -> None:
         user = get_user_model().objects.create_user(username='mat-user', password='x')
 
-        agent = Agent.objects.create(user_id=user.pk, identifier='mat-agent')
+        agent = Agent.objects.create(user_id=user.pk, name='Mat agent', identifier='mat-agent')
         spec = AgentConfigSpec(
             llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
             system_prompt='hello',
@@ -53,7 +53,7 @@ class TestMaterializeAgentConfig(OTestCase):
     def test_materialize_queues_only_when_present(self) -> None:
         user = get_user_model().objects.create_user(username='mat-no-queue', password='x')
 
-        agent = Agent.objects.create(user_id=user.pk, identifier='mat-no-queue-agent')
+        agent = Agent.objects.create(user_id=user.pk, name='Mat no queue', identifier='mat-no-queue-agent')
         config = AgentConfig.objects.create(
             agent=agent,
             source_rev='bare',

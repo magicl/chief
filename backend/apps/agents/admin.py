@@ -22,8 +22,8 @@ class TriggerInline(admin.TabularInline):  # type: ignore[type-arg]
 
 @admin.register(Agent)
 class AgentAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
-    list_display = ('identifier', 'user', 'config_source', 'current_config')
-    search_fields = ('identifier',)
+    list_display = ('name', 'identifier', 'user', 'config_source', 'current_config')
+    search_fields = ('name', 'identifier')
     inlines = [AgentConfigInline, TriggerInline]
 
 

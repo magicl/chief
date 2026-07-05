@@ -81,7 +81,7 @@ class TestSpecMigrationRegistry(OTestCase):
 class TestAgentConfigGetSpec(OTestCase):
     def test_get_spec_upgrades_v0_row(self) -> None:
         user = get_user_model().objects.create_user(username='spec-v0', password='x')
-        agent = Agent.objects.create(user=user, identifier='v0-agent')
+        agent = Agent.objects.create(user=user, name='V0 agent', identifier='v0-agent')
         config = AgentConfig.objects.create(
             agent=agent,
             spec=dict(V0_CLOCK_SPEC),

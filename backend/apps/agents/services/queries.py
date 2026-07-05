@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.agents.models import Agent, AgentConfig
+from apps.agents.services.config_commands import suggest_identifier
 from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
 from apps.sessions.models import AgentSession
@@ -164,6 +165,14 @@ def get_create_editor_context(
         spec_summary = _spec_summary_from_spec(validate_agent_config_yaml(initial_yaml))
     except ConfigValidationError:
         pass
+    examples = list_examples()
+    example = next((item for item in examples if item.slug == active_example), None)
+    if active_example == 'minimal':
+        suggested_name = 'New agent'
+        suggested_identifier = suggest_identifier(user_id, 'agent')
+    else:
+        suggested_name = example.title if example else active_example.replace('-', ' ').title()
+        suggested_identifier = suggest_identifier(user_id, active_example)
     page_data = {
         'initialYaml': initial_yaml,
         'catalog': catalog,
@@ -174,7 +183,9 @@ def get_create_editor_context(
         'is_create': True,
         'agent': None,
         'active_example': active_example,
-        'examples': list_examples(),
+        'examples': examples,
+        'suggested_name': suggested_name,
+        'suggested_identifier': suggested_identifier,
         'import_errors': import_errors or [],
         'spec_summary': spec_summary,
         'catalog': catalog,

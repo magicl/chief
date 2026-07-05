@@ -1,6 +1,6 @@
 {% extends "web/base.html" %}
 
-{% block title %}{% if is_create %}Create agent{% else %}{{ agent.identifier }} config{% endif %} — Chief{% endblock %}
+{% block title %}{% if is_create %}Create agent{% else %}{{ agent.name }} config{% endif %} — Chief{% endblock %}
 
 {% block body_class %}config-page{% endblock %}
 
@@ -94,7 +94,7 @@ body.config-page main { max-width: none; }
 <div class="config-layout">
   <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:.5rem;">
     <h2 style="margin:0; text-transform:none; letter-spacing:0; color:#e6e6e6; font-size:1.1rem;">
-      {% if is_create %}Create agent{% else %}{{ agent.identifier }} — Configuration{% endif %}
+      {% if is_create %}Create agent{% else %}{{ agent.name }} — Configuration{% endif %}
     </h2>
     <div>
       {% if is_create %}
@@ -142,11 +142,16 @@ body.config-page main { max-width: none; }
     <div class="config-main">
       <div class="actions">
         <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
+          Name
+          <input type="text" id="agent-name" maxlength="255" required
+                 value="{% if is_create %}{{ suggested_name }}{% else %}{{ agent.name }}{% endif %}">
+        </label>
+        <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
           Identifier
           <input type="text" id="agent-identifier"
                  pattern="[a-zA-Z0-9._-]+"
-                 value="{% if not is_create %}{{ agent.identifier }}{% endif %}"
-                 placeholder="{% if is_create %}optional{% else %}required{% endif %}"
+                 value="{% if is_create %}{{ suggested_identifier }}{% else %}{{ agent.identifier }}{% endif %}"
+                 placeholder="auto from name"
                  {% if not is_create %}required{% endif %}>
         </label>
         <button type="button" id="save-config" class="primary">

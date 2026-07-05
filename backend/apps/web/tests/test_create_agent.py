@@ -44,7 +44,7 @@ class TestCreateAgentView(OTransactionTestCase):
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
         response = self.client.post(
             reverse('agent_create'),
-            {'spec_yaml': spec_yaml},
+            {'spec_yaml': spec_yaml, 'name': 'Clock assistant'},
             HTTP_ACCEPT='application/json',
         )
         self.assertEqual(response.status_code, 200)
@@ -71,6 +71,21 @@ class TestCreateAgentView(OTransactionTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id: clock')
         self.assertContains(response, 'Clock assistant')
+        self.assertContains(response, 'value="clock-assistant"')
+
+    def test_dashboard_shows_agent_description(self) -> None:
+        self.client.force_login(self.user)
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+        self.client.post(
+            reverse('agent_create'),
+            {'spec_yaml': spec_yaml, 'name': 'Dashboard agent'},
+            HTTP_ACCEPT='application/json',
+        )
+        response = self.client.get(reverse('dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Dashboard agent')
+        self.assertContains(response, 'Description')
+        self.assertContains(response, 'Clock assistant example')
 
     def test_dashboard_lists_example_links(self) -> None:
         self.client.force_login(self.user)
@@ -83,8 +98,8 @@ class TestCreateAgentView(OTransactionTestCase):
     def test_each_submit_creates_new_agent(self) -> None:
         self.client.force_login(self.user)
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
-        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml})
-        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml})
+        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml, 'name': 'Agent A'})
+        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml, 'name': 'Agent B'})
         agents = Agent.objects.filter(user=self.user)
         self.assertEqual(agents.count(), 2)
 
@@ -92,7 +107,7 @@ class TestCreateAgentView(OTransactionTestCase):
         create_from_example(self.other, 'clock-assistant', identifier='other-agent')
         self.client.force_login(self.user)
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
-        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml})
+        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml, 'name': 'My agent'})
         response = self.client.get(reverse('dashboard'))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'other-agent')
@@ -101,7 +116,7 @@ class TestCreateAgentView(OTransactionTestCase):
     def test_delete_agent_removes_own_agent(self) -> None:
         self.client.force_login(self.user)
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
-        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml})
+        self.client.post(reverse('agent_create'), {'spec_yaml': spec_yaml, 'name': 'My agent'})
         agent = Agent.objects.filter(user=self.user).first()
         assert agent is not None
         response = self.client.post(reverse('delete_agent', kwargs={'agent_id': agent.id}))

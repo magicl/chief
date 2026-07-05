@@ -16,7 +16,7 @@ from apps.agents.models import AgentConfig
 from apps.agents.services.config_commands import (
     ConfigCommandError,
     create_from_yaml,
-    rename_agent,
+    update_agent_profile,
 )
 from apps.agents.services.config_mutations import (
     ConfigMutationError,
@@ -104,11 +104,12 @@ def agent_create(request: HttpRequest) -> HttpResponse:
         return render(request, 'web/agent_config.html', context)
 
     spec_yaml = request.POST.get('spec_yaml', '').strip()
+    name = request.POST.get('name', '').strip()
     identifier = request.POST.get('identifier', '').strip() or None
     if not spec_yaml:
         return HttpResponseBadRequest('spec_yaml required')
     try:
-        agent = create_from_yaml(user, spec_yaml, identifier=identifier)
+        agent = create_from_yaml(user, spec_yaml, name=name, identifier=identifier)
     except ConfigValidationError as exc:
         if 'application/json' in request.headers.get('Accept', ''):
             return _validation_json_response(exc)
@@ -180,15 +181,21 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
         source_rev, dirty = compute_save_metadata(agent, spec_yaml)
     except ConfigValidationError as exc:
         return _validation_json_response(exc)
+    new_name = request.POST.get('name', '').strip()
     new_identifier = request.POST.get('identifier', '').strip()
-    if new_identifier and new_identifier != agent.identifier:
-        try:
-            rename_agent(agent, cast(AbstractBaseUser, request.user).pk, new_identifier)
-        except ConfigCommandError as exc:
-            return JsonResponse(
-                {'errors': [{'path': 'identifier', 'message': str(exc)}]},
-                status=400,
-            )
+    try:
+        update_agent_profile(
+            agent,
+            cast(AbstractBaseUser, request.user).pk,
+            name=new_name,
+            identifier=new_identifier,
+        )
+    except ConfigCommandError as exc:
+        path = 'identifier' if 'identifier' in str(exc) or 'already exists' in str(exc) else 'name'
+        return JsonResponse(
+            {'errors': [{'path': path, 'message': str(exc)}]},
+            status=400,
+        )
     persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty)
     if request.headers.get('Accept', '').find('application/json') >= 0:
         return JsonResponse({'ok': True, 'source_rev': source_rev, 'dirty': dirty})

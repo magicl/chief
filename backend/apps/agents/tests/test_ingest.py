@@ -66,7 +66,7 @@ class CreateAgentFromSpecTests(OTestCase):
             triggers=[TriggerSpec(name='manual', kind='manual')],
             tools=[ToolInstance(id='clock', type='clock', allow=['now'])],
         )
-        agent = create_agent_from_spec(user, spec, identifier='test-agent')
+        agent = create_agent_from_spec(user, spec, name='Test agent', identifier='test-agent')
 
         self.assertEqual(agent.identifier, 'test-agent')
         self.assertIsNotNone(agent.current_config_id)
@@ -76,7 +76,7 @@ class CreateAgentFromSpecTests(OTestCase):
     def test_create_writes_spec_version_one(self) -> None:
         user = get_user_model().objects.create_user(username='sv', password='x')
         spec = CLOCK_SPEC.model_copy()
-        agent = create_agent_from_spec(user, spec, identifier='sv-agent')
+        agent = create_agent_from_spec(user, spec, name='SV agent', identifier='sv-agent')
         config = agent.current_config
         self.assertIsNotNone(config)
         assert config is not None
@@ -91,7 +91,7 @@ class CreateAgentFromSpecTests(OTestCase):
     def test_persist_spec_with_queues_materializes_queue_rows(self) -> None:
         user = get_user_model().objects.create_user(username='ingest-queue', password='x')
 
-        agent = Agent.objects.create(user_id=user.pk, identifier='queue-ingest-agent')
+        agent = Agent.objects.create(user_id=user.pk, name='Queue ingest', identifier='queue-ingest-agent')
         spec = AgentConfigSpec(
             llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
             system_prompt='hello',

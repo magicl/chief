@@ -14,6 +14,7 @@ from olib.py.utils.uuid7 import uuid7
 class Agent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='agents')
+    name = models.CharField(max_length=255)
     identifier = models.CharField(max_length=255)
     config_source = models.CharField(max_length=255, default='ui')
     current_config = models.ForeignKey(
@@ -30,7 +31,7 @@ class Agent(models.Model):
         ]
 
     def __str__(self) -> str:
-        return self.identifier
+        return self.name
 
 
 class AgentConfig(models.Model):

@@ -22,7 +22,12 @@ class AgentConfigWebTests(OTestCase):
         self.client = Client()
         self.user = get_user_model().objects.create_user(username='cfg-ui', password='secret')
         self.client.login(username='cfg-ui', password='secret')
-        self.agent = create_from_example(self.user, 'clock-assistant', identifier='cfg-agent')
+        self.agent = create_from_example(
+            self.user,
+            'clock-assistant',
+            name='Cfg agent',
+            identifier='cfg-agent',
+        )
 
     def test_config_page_requires_login(self) -> None:
         anon = Client()
@@ -37,28 +42,44 @@ class AgentConfigWebTests(OTestCase):
         self.assertContains(response, 'config-editor')
         self.assertContains(response, 'id: clock')
         self.assertContains(response, 'config-sidebar')
+        self.assertContains(response, 'id="agent-name"')
         self.assertContains(response, 'id="agent-identifier"')
+        self.assertContains(response, 'value="Cfg agent"')
         self.assertContains(response, 'value="cfg-agent"')
 
-    def test_save_renames_agent_identifier(self) -> None:
+    def test_save_updates_agent_name_and_identifier(self) -> None:
         url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
         response = self.client.post(
             url,
-            {'spec_yaml': spec_yaml, 'identifier': 'renamed-agent'},
+            {
+                'spec_yaml': spec_yaml,
+                'name': 'Renamed agent',
+                'identifier': 'renamed-agent',
+            },
             HTTP_ACCEPT='application/json',
         )
         self.assertEqual(response.status_code, 200)
         self.agent.refresh_from_db()
+        self.assertEqual(self.agent.name, 'Renamed agent')
         self.assertEqual(self.agent.identifier, 'renamed-agent')
 
     def test_save_rejects_duplicate_identifier(self) -> None:
-        create_from_example(self.user, 'clock-assistant', identifier='taken-name')
+        create_from_example(
+            self.user,
+            'clock-assistant',
+            name='Taken',
+            identifier='taken-name',
+        )
         url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
         response = self.client.post(
             url,
-            {'spec_yaml': spec_yaml, 'identifier': 'taken-name'},
+            {
+                'spec_yaml': spec_yaml,
+                'name': 'Taken copy',
+                'identifier': 'taken-name',
+            },
             HTTP_ACCEPT='application/json',
         )
         self.assertEqual(response.status_code, 400)
@@ -92,7 +113,15 @@ class AgentConfigWebTests(OTestCase):
         url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
         spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
         before = Agent.objects.get(pk=self.agent.pk).current_config_id
-        response = self.client.post(url, {'spec_yaml': spec_yaml}, HTTP_ACCEPT='application/json')
+        response = self.client.post(
+            url,
+            {
+                'spec_yaml': spec_yaml,
+                'name': self.agent.name,
+                'identifier': self.agent.identifier,
+            },
+            HTTP_ACCEPT='application/json',
+        )
         self.assertEqual(response.status_code, 200)
         self.agent.refresh_from_db()
         self.assertNotEqual(self.agent.current_config_id, before)
@@ -118,10 +147,15 @@ class AgentConfigWebTests(OTestCase):
         spec_yaml = dump_agent_config_spec(load_example('queue-echo'))
         response = self.client.post(
             reverse('agent_create'),
-            {'spec_yaml': spec_yaml, 'identifier': 'queue-web'},
+            {
+                'spec_yaml': spec_yaml,
+                'name': 'Queue web',
+                'identifier': 'queue-web',
+            },
         )
         self.assertEqual(response.status_code, 302)
         agent = Agent.objects.get(identifier='queue-web')
+        self.assertEqual(agent.name, 'Queue web')
         config = agent.current_config
         assert config is not None
         self.assertEqual(len(config.get_spec().queues), 1)

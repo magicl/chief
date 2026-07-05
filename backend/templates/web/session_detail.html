@@ -9,7 +9,7 @@
 <div>
   <h2>
     <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" style="color: inherit; text-decoration: none;">
-      {{ agent.identifier }}
+      {{ agent.name }}
     </a>
     <span class="muted" style="font-weight: normal;">· <span x-text="displaySessionName">{{ session_display_name(session) }}</span></span>
   </h2>

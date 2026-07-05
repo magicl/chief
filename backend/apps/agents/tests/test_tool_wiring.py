@@ -85,6 +85,7 @@ class TestBuildBoundTools(OTestCase):
         agent = create_agent_from_spec(
             user,
             load_example('queue-echo'),
+            name='Queue wire',
             identifier='queue-wire-agent',
             config_source='ui',
             source_rev='test',

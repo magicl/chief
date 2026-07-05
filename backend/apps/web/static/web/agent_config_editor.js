@@ -521,6 +521,10 @@ function init() {
   document.getElementById('save-config')?.addEventListener('click', async () => {
     const spec_yaml = getYaml();
     const body = { spec_yaml };
+    const nameEl = document.getElementById('agent-name');
+    if (nameEl instanceof HTMLInputElement && nameEl.value.trim()) {
+      body.name = nameEl.value.trim();
+    }
     const identifierEl = document.getElementById('agent-identifier');
     if (identifierEl instanceof HTMLInputElement && identifierEl.value.trim()) {
       body.identifier = identifierEl.value.trim();
