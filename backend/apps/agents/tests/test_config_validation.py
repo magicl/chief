@@ -76,3 +76,21 @@ triggers:
         with self.assertRaises(ConfigValidationError) as ctx:
             validate_agent_config_yaml(raw)
         self.assertTrue(any('cron' in item.path for item in ctx.exception.errors))
+
+    def test_six_field_cron_rejected_in_yaml_validation(self) -> None:
+        raw = """
+schema_version: 1
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+system_prompt: hi
+triggers:
+  - name: sweep
+    kind: schedule
+    cron: "0 * * * * *"
+"""
+        with self.assertRaises(ConfigValidationError) as ctx:
+            validate_agent_config_yaml(raw)
+        cron_errors = [item for item in ctx.exception.errors if 'cron' in item.path]
+        self.assertEqual(len(cron_errors), 1)
+        self.assertIn('5 fields', cron_errors[0].message)

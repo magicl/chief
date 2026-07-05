@@ -52,7 +52,18 @@ def upsert_schedule_trigger_beat(trigger: Trigger) -> None:
         disable_schedule_trigger_beat(trigger.id)
         return
 
-    crontab = _crontab_for_expression(str(cron))
+    try:
+        crontab = _crontab_for_expression(str(cron))
+    except ValueError as exc:
+        logger.warning(
+            'schedule trigger %s has invalid cron %r: %s; disabling beat task',
+            trigger.pk,
+            cron,
+            exc,
+        )
+        disable_schedule_trigger_beat(trigger.id)
+        return
+
     PeriodicTask.objects.update_or_create(
         name=periodic_task_name(trigger.id),
         defaults={
