@@ -10,7 +10,7 @@ from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
-from libs.tools.queue import QueueTool
+from libs.tools.tools.queue import QueueTool
 
 from olib.py.django.test.cases import OTestCase
 
@@ -26,6 +26,21 @@ class TestQueueTool(OTestCase):
             session_id=self.session_id,
         )
 
+    @patch('apps.queues.services.queries.list_queues')
+    @patch('apps.agents.models.Agent.objects.get')
+    def test_list_returns_queue_ids(self, mock_agent_get: Any, mock_list_queues: Any) -> None:
+        mock_agent_get.return_value = object()
+        mock_list_queues.return_value = [
+            type('Queue', (), {'queue_id': 'inbox'})(),
+            type('Queue', (), {'queue_id': 'outbox'})(),
+        ]
+
+        result = self.invoke('list', {})
+
+        self.assertEqual(result, {'queues': ['inbox', 'outbox']})
+        mock_agent_get.assert_called_once_with(pk=self.agent_id)
+        mock_list_queues.assert_called_once()
+
     @patch('apps.queues.services.commands.put_item')
     @patch('apps.queues.services.queries.get_queue')
     @patch('apps.agents.models.Agent.objects.get')
@@ -38,14 +53,13 @@ class TestQueueTool(OTestCase):
         result = self.invoke(
             'put',
             {
-                'owner_agent': 'worker-a',
                 'queue': 'inbox',
                 'payload': {'hello': 'world'},
             },
         )
 
         self.assertEqual(result, {'item_id': str(item_id), 'created': True})
-        mock_agent_get.assert_called_once_with(user_id=1, identifier='worker-a')
+        mock_agent_get.assert_called_once_with(pk=self.agent_id)
         mock_put_item.assert_called_once()
 
     @patch('apps.queues.services.commands.take_item')
@@ -97,3 +111,11 @@ class TestQueueTool(OTestCase):
             session_id=self.session_id,
             reason='bad',
         )
+
+    def test_functions_include_list_and_put_without_owner_agent(self) -> None:
+        """Tool schema exposes list and agent-scoped put without cross-agent owner_agent."""
+        names = {fn.name for fn in self.tool.functions()}
+        self.assertEqual(names, {'list', 'put', 'take', 'complete', 'fail'})
+        put_fn = next(fn for fn in self.tool.functions() if fn.name == 'put')
+        self.assertEqual(put_fn.parameters['required'], ['queue', 'payload'])
+        self.assertNotIn('owner_agent', put_fn.parameters['properties'])

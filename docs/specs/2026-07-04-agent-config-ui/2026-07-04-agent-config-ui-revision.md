@@ -25,3 +25,9 @@
 - [x] Temperature. add a default value
 - [x] tool helper. put the tool type in "id" unless there is already another with that name, in htat case do {type}-n whre n is the lowest that works
 - [x] tool helper: when a tool is selected, show checkboxes for all the actions it can do. group them in two groups: read first, then write
+
+- [x] for the queue tool, let's describe the different parameters better, including the limits on them
+- [x] queue tool. let's have a "list" function that lists the names of the queues we have available to us
+- [x] queue tool. remove owner_agent from the put function. and for now, let's remove the capability of one agent adding something to another agent's queue
+- [x] the clock tool should be in a file called "clock.py" .. and let's put the tools themselves under a new folder under tools called tools.. right now tools are sitting next to utility functions, registries etc.. let's have a folder that just has tools
+

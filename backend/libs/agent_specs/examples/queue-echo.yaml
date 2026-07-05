@@ -19,6 +19,7 @@ tools:
   - id: queue
     type: queue
     allow:
+      - list
       - put
       - take
       - complete

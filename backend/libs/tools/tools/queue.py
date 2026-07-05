@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Queue tool for agent-scoped put/take/complete/fail operations."""
+"""Queue tool for agent-scoped list/put/take/complete/fail operations."""
 
 from __future__ import annotations
 
@@ -11,6 +11,25 @@ from typing import Any
 from uuid import UUID
 
 from libs.tools.base import Tool, ToolFunction
+
+_QUEUE_ID_DESC = (
+    'Queue id from this agent\'s config (``queues[].id``). Lowercase slug, max 64 characters.'
+)
+_EXTERNAL_ID_DESC = (
+    'Optional deduplication key when enqueueing from a source adapter; max 255 characters. '
+    'Omit for items enqueued directly in-session.'
+)
+_ITEM_ID_DESC = 'UUID string returned by ``take`` for the item this session currently holds.'
+
+
+def _payload_description() -> str:
+    """Describe payload size limits using the queue command constant."""
+    from apps.queues.services.commands import MAX_PAYLOAD_BYTES
+
+    return (
+        f'JSON object stored on the queue item. UTF-8 JSON encoding must be at most '
+        f'{MAX_PAYLOAD_BYTES} bytes.'
+    )
 
 
 class QueueTool(Tool):
@@ -24,12 +43,14 @@ class QueueTool(Tool):
         session_id: UUID | None,
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Return an invoke callable closed over session and agent context."""
+        del user_id  # reserved for future credential-backed queue ops
 
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
+            if function == 'list':
+                return self._list(agent_id=agent_id)
             if function == 'put':
                 return self._put(
-                    user_id=user_id,
-                    owner_agent=arguments.get('owner_agent'),
+                    agent_id=agent_id,
                     queue=arguments['queue'],
                     payload=arguments['payload'],
                     external_id=arguments.get('external_id'),
@@ -59,28 +80,34 @@ class QueueTool(Tool):
         """LLM-visible queue tool definitions (handlers require ``bind``)."""
         return [
             ToolFunction(
+                name='list',
+                description='List queue ids configured on this agent (from ``queues[]`` in the agent spec).',
+                parameters={'type': 'object', 'properties': {}, 'required': []},
+                handler=self._list_unbound,
+                readonly=True,
+            ),
+            ToolFunction(
                 name='put',
-                description='Enqueue a payload on a queue owned by an agent.',
+                description='Enqueue a payload on one of this agent\'s own queues.',
                 parameters={
                     'type': 'object',
                     'properties': {
-                        'owner_agent': {'type': 'string'},
-                        'queue': {'type': 'string'},
-                        'payload': {'type': 'object'},
-                        'external_id': {'type': 'string'},
+                        'queue': {'type': 'string', 'description': _QUEUE_ID_DESC},
+                        'payload': {'type': 'object', 'description': _payload_description()},
+                        'external_id': {'type': 'string', 'description': _EXTERNAL_ID_DESC},
                     },
-                    'required': ['owner_agent', 'queue', 'payload'],
+                    'required': ['queue', 'payload'],
                 },
                 handler=self._put_unbound,
                 readonly=False,
             ),
             ToolFunction(
                 name='take',
-                description='Claim the next available item from a queue on the session agent.',
+                description='Claim the next available item from a queue on this agent.',
                 parameters={
                     'type': 'object',
                     'properties': {
-                        'queue': {'type': 'string'},
+                        'queue': {'type': 'string', 'description': _QUEUE_ID_DESC},
                     },
                     'required': ['queue'],
                 },
@@ -93,7 +120,7 @@ class QueueTool(Tool):
                 parameters={
                     'type': 'object',
                     'properties': {
-                        'item_id': {'type': 'string'},
+                        'item_id': {'type': 'string', 'description': _ITEM_ID_DESC},
                     },
                     'required': ['item_id'],
                 },
@@ -106,8 +133,11 @@ class QueueTool(Tool):
                 parameters={
                     'type': 'object',
                     'properties': {
-                        'item_id': {'type': 'string'},
-                        'reason': {'type': 'string'},
+                        'item_id': {'type': 'string', 'description': _ITEM_ID_DESC},
+                        'reason': {
+                            'type': 'string',
+                            'description': 'Optional human-readable failure reason stored on the attempt.',
+                        },
                     },
                     'required': ['item_id'],
                 },
@@ -115,6 +145,10 @@ class QueueTool(Tool):
                 readonly=False,
             ),
         ]
+
+    @staticmethod
+    def _list_unbound(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError('queue.list requires session binding')
 
     @staticmethod
     def _put_unbound(**_kwargs: Any) -> dict[str, Any]:
@@ -133,26 +167,32 @@ class QueueTool(Tool):
         raise RuntimeError('queue.fail requires session binding')
 
     @staticmethod
+    def _list(*, agent_id: UUID | None) -> dict[str, Any]:
+        """Return queue ids materialized for the session agent."""
+        from apps.agents.models import Agent
+        from apps.queues.services import queries
+
+        if agent_id is None:
+            raise ValueError('session context required')
+        agent = Agent.objects.get(pk=agent_id)
+        queues = queries.list_queues(agent=agent)
+        return {'queues': [q.queue_id for q in queues]}
+
+    @staticmethod
     def _put(
         *,
-        user_id: int | None,
-        owner_agent: str | None,
+        agent_id: UUID | None,
         queue: str,
         payload: dict[str, Any],
         external_id: str | None = None,
     ) -> dict[str, Any]:
-        """Enqueue on another agent's queue (same user scope)."""
+        """Enqueue on a queue owned by the session agent."""
         from apps.agents.models import Agent
         from apps.queues.services import commands, queries
 
-        if user_id is None:
-            raise ValueError('user context required')
-        if owner_agent is None:
-            raise ValueError('owner_agent is required')
-        try:
-            agent = Agent.objects.get(user_id=user_id, identifier=owner_agent)
-        except Agent.DoesNotExist as exc:
-            raise ValueError(f'unknown agent {owner_agent!r}') from exc
+        if agent_id is None:
+            raise ValueError('session context required')
+        agent = Agent.objects.get(pk=agent_id)
         target_queue = queries.get_queue(agent=agent, queue_id=queue)
         if target_queue is None:
             raise ValueError(f'unknown queue {queue!r}')

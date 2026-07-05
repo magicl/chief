@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Built-in tools for v0.1."""
+"""Clock tool — read-only UTC time for demos and smoke tests."""
 
 from datetime import UTC, datetime
 
@@ -13,6 +13,7 @@ class ClockTool(Tool):
     name = 'clock'
 
     def functions(self) -> list[ToolFunction]:
+        """Return the clock tool's LLM-visible sub-functions."""
         return [
             ToolFunction(
                 name='now',
@@ -25,4 +26,5 @@ class ClockTool(Tool):
 
     @staticmethod
     def _now() -> str:
+        """Return the current UTC timestamp in ISO-8601 form."""
         return datetime.now(UTC).isoformat()
