@@ -8,9 +8,13 @@ from __future__ import annotations
 
 
 def wire_tools() -> None:
-    from libs.tools.tools.clock import ClockTool
-    from libs.tools.tools.queue import QueueTool
     from libs.tools.registry import register_tool
+    from libs.tools.tools.clickup import ClickUpTool
+    from libs.tools.tools.clock import ClockTool
+    from libs.tools.tools.gmail import GmailTool
+    from libs.tools.tools.queue import QueueTool
 
     register_tool('clock', ClockTool())
+    register_tool('gmail', GmailTool())
+    register_tool('clickup', ClickUpTool())
     register_tool('queue', QueueTool())

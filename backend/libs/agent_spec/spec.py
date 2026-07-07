@@ -65,6 +65,7 @@ class ToolInstance(BaseModel):
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
     type: str
     credential_ref: str | None = None
+    config: dict[str, Any] = {}  # non-secret per-instance addressing
     allow: list[str] = ['*']
     deny: list[str] = []
 
@@ -75,7 +76,7 @@ class SourceSpec(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
-    adapter_type: str = Field(validation_alias='type')
+    adapter_type: str = Field(validation_alias='type', serialization_alias='type')
     credential_ref: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 

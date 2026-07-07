@@ -20,3 +20,50 @@ class ConfigMutationTests(OTestCase):
         )
         self.assertIn('id: queue', updated)
         self.assertIn('type: queue', updated)
+
+    def test_add_schedule_trigger_includes_prompt(self) -> None:
+        raw = dump_agent_config_spec(load_example('clock-assistant'))
+        updated = apply_config_mutation(
+            raw,
+            {
+                'action': 'add_trigger',
+                'name': 'sweep',
+                'kind': 'schedule',
+                'cron': '0 * * * *',
+                'prompt': 'Run the hourly sweep.',
+            },
+        )
+        self.assertIn('name: sweep', updated)
+        self.assertIn('prompt: Run the hourly sweep.', updated)
+
+    def test_add_schedule_trigger_uses_default_prompt_when_omitted(self) -> None:
+        raw = dump_agent_config_spec(load_example('clock-assistant'))
+        updated = apply_config_mutation(
+            raw,
+            {
+                'action': 'add_trigger',
+                'name': 'sweep',
+                'kind': 'schedule',
+                'cron': '0 * * * *',
+            },
+        )
+        self.assertIn('Scheduled run started. Execute your configured tasks.', updated)
+
+    def test_mutation_preserves_existing_comments(self) -> None:
+        raw = """# keep me
+schema_version: 2
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+system_prompt: |
+  Clock.
+tools: []
+triggers: []
+queues: []
+"""
+        updated = apply_config_mutation(
+            raw,
+            {'action': 'add_tool', 'id': 'queue', 'type': 'queue', 'allow': ['take']},
+        )
+        self.assertIn('# keep me', updated)
+        self.assertIn('id: queue', updated)

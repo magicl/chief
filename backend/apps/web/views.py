@@ -17,6 +17,7 @@ from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
 from apps.agents.models import Agent
 from apps.agents.services.config_sync import config_source_label
 from apps.bus.client import async_client, key_prefix
+from apps.keys.credential_guides import credential_guides_for_ui
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
 from apps.keys.services import commands
 from apps.keys.services.queries import list_user_credentials
@@ -304,6 +305,10 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
         {
             'named_keys': list_user_credentials(user.pk),
             'service_types': sorted(SERVICE_TYPES),
+            'credential_guides_json': json.dumps(credential_guides_for_ui())
+            .replace('<', '\\u003c')
+            .replace('>', '\\u003e')
+            .replace('&', '\\u0026'),
         },
     )
 
@@ -318,22 +323,6 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
     user = cast(AbstractBaseUser, request.user)
     try:
         commands.upsert_user_named(user.pk, name, type_name, secret)
-    except KeyValidationError as exc:
-        return HttpResponseBadRequest(str(exc))
-    return redirect('settings_keys')
-
-
-@login_required(login_url='/admin/login/')
-@csrf_protect
-@require_POST
-def settings_keys_update_named(request: HttpRequest, name: str) -> HttpResponse:
-    secret = request.POST.get('secret', '')
-    user = cast(AbstractBaseUser, request.user)
-    meta = next((row for row in list_user_credentials(user.pk) if row.name == name), None)
-    if meta is None:
-        raise Http404('Key not found')
-    try:
-        commands.upsert_user_named(user.pk, name, meta.type, secret)
     except KeyValidationError as exc:
         return HttpResponseBadRequest(str(exc))
     return redirect('settings_keys')

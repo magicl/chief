@@ -27,7 +27,20 @@ class TestKeysPage(OTransactionTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Set', response.content)
         self.assertNotIn(b'sk-hidden', response.content)
-        self.assertNotIn(b'name="secret" value="', response.content)
+        self.assertNotIn(b'Replace', response.content)
+
+    def test_add_form_requires_type_before_secret_fields(self) -> None:
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('settings_keys'))
+        self.assertIn(b'Select a credential type', response.content)
+        self.assertIn(b'Choose a type above', response.content)
+        self.assertIn(b'credential-guides-data', response.content)
+
+    def test_shows_gmail_setup_instructions_in_page_data(self) -> None:
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('settings_keys'))
+        self.assertIn(b'domain-wide delegation', response.content)
+        self.assertIn(b'gmail.modify', response.content)
 
     def test_post_add_named(self) -> None:
         self.client.force_login(self.user)
@@ -39,6 +52,20 @@ class TestKeysPage(OTransactionTestCase):
         response = self.client.get(reverse('settings_keys'))
         self.assertIn(b'gmail-personal', response.content)
 
+    def test_post_add_multiline_gmail_json(self) -> None:
+        self.client.force_login(self.user)
+        secret = '{\n  "type": "service_account",\n  "client_email": "sa@example.com"\n}\n'
+        response = self.client.post(
+            reverse('settings_keys_add_named'),
+            {'name': 'gmail-sa', 'type': 'gmail', 'secret': secret},
+        )
+        self.assertEqual(response.status_code, 302)
+        from apps.keys.services.queries import resolve_secret
+
+        stored = resolve_secret(self.user.pk, 'gmail-sa', expected_type='gmail')
+        self.assertIn('\n', stored)
+        self.assertIn('service_account', stored)
+
     def test_post_delete_named(self) -> None:
         self.client.force_login(self.user)
         commands.upsert_user_named(self.user.pk, 'clickup', 'clickup', 'tok')
@@ -46,3 +73,9 @@ class TestKeysPage(OTransactionTestCase):
         self.assertEqual(response.status_code, 302)
         response = self.client.get(reverse('settings_keys'))
         self.assertNotIn(b'<code>clickup</code>', response.content)
+
+    def test_update_endpoint_removed(self) -> None:
+        self.client.force_login(self.user)
+        commands.upsert_user_named(self.user.pk, 'openai-work', 'openai', 'sk-old')
+        response = self.client.post('/settings/keys/named/openai-work/', {'secret': 'sk-new'})
+        self.assertEqual(response.status_code, 404)

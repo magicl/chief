@@ -22,13 +22,13 @@ from apps.keys.types import (
 
 
 def _validate_secret(secret: str) -> str:
-    """Strip and validate secret length for storage."""
-    stripped = secret.strip()
-    if not stripped:
+    """Strip outer whitespace and validate secret length for storage."""
+    normalized = secret.strip('\r\n\t ')
+    if not normalized:
         raise KeyValidationError('secret must not be empty')
-    if len(stripped.encode('utf-8')) > MAX_SECRET_BYTES:
+    if len(normalized.encode('utf-8')) > MAX_SECRET_BYTES:
         raise KeyValidationError('secret exceeds maximum length')
-    return stripped
+    return normalized
 
 
 def _validate_named_name(name: str, *, user_id: int | None = None) -> str:

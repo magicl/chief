@@ -10,11 +10,12 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from apps.queues.models import Source, SourceStatus
+from apps.queues.models import QueueItem, Source, SourceStatus
 from apps.queues.services import commands as queue_commands
 from celery import shared_task
 from django.utils import timezone
 from libs.sources.base import PutItemResult
+from libs.sources.dedup import dedupe_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,17 @@ def poll_source(source_pk: str) -> None:
             )
             return PutItemResult(item_id=result.item_id, created=result.created)
 
+        known_external_ids: frozenset[str] | None = None
+        if dedupe_enabled(source.config):
+            known_external_ids = frozenset(
+                QueueItem.objects.filter(source=source).values_list('external_id', flat=True),
+            )
+
         adapter.poll(
             config=source.config,
             put_item=put_item,
             credential_supplier=credential_supplier,
+            known_external_ids=known_external_ids,
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.exception('poll_source failed for source %s', source.pk)

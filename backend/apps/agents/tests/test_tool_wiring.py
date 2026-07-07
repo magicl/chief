@@ -4,7 +4,7 @@
 # ~
 from collections.abc import Callable
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from apps.agents.ingest import create_agent_from_spec, persist_agent_config
 from apps.agents.tool_wiring import build_bound_tools
@@ -48,12 +48,16 @@ class _EchoCredTool(Tool):
         self,
         *,
         token_supplier: Callable[[], str | None],
+        config: dict[str, Any] | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
+        """Echo whether a token resolved and surface the injected config."""
+        cfg = config or {}
+
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
             if function != 'ping':
                 raise ValueError(function)
             token = token_supplier()
-            return {'token_set': token is not None}
+            return {'token_set': token is not None, 'subject': cfg.get('subject')}
 
         return invoke
 
@@ -78,7 +82,61 @@ class TestBuildBoundTools(OTestCase):
         with patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: 'tok'):
             bound = build_bound_tools(instances, user_id=1)
         out = bound['gmail-a'].invoke('ping', {})
-        self.assertEqual(out, {'token_set': True})
+        self.assertEqual(out, {'token_set': True, 'subject': None})
+
+    def test_clickup_tool_wires_with_config_and_credential(self) -> None:
+        instances = [
+            ToolInstance(
+                id='clickup',
+                type='clickup',
+                credential_ref='clickup',
+                allow=['list_tasks'],
+                config={'team_id': '9'},
+            ),
+        ]
+        fake_client = MagicMock()
+        fake_client.list_tasks.return_value = {'tasks': [{'id': 't1'}], 'last_page': True}
+        with (
+            patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: 'pk_test'),
+            patch('libs.tools.tools.clickup.ClickUpClient', return_value=fake_client),
+        ):
+            bound = build_bound_tools(instances, user_id=1)
+            out = bound['clickup'].invoke('list_tasks', {'list_id': '901'})
+        self.assertEqual(out['tasks'], [{'id': 't1'}])
+
+    def test_gmail_tool_wires_with_config_and_credential(self) -> None:
+        instances = [
+            ToolInstance(
+                id='gmail-personal',
+                type='gmail',
+                credential_ref='gmail-personal',
+                allow=['list'],
+                config={'subject': 'me@example.com'},
+            ),
+        ]
+        fake_client = MagicMock()
+        fake_client.list_messages.return_value = {'message_ids': ['m1'], 'next_page_token': None}
+        with (
+            patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: '{"sa": true}'),
+            patch('libs.tools.tools.gmail.GmailClient', return_value=fake_client),
+        ):
+            bound = build_bound_tools(instances, user_id=1)
+            out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
+        self.assertEqual(out['message_ids'], ['m1'])
+
+    def test_credential_tool_receives_instance_config(self) -> None:
+        instances = [
+            ToolInstance(
+                id='gmail-a',
+                type='echo_cred',
+                allow=['ping'],
+                config={'subject': 'me@example.com'},
+            ),
+        ]
+        with patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: 'tok'):
+            bound = build_bound_tools(instances, user_id=1)
+        out = bound['gmail-a'].invoke('ping', {})
+        self.assertEqual(out, {'token_set': True, 'subject': 'me@example.com'})
 
     def test_queue_tool_round_trip_take_and_complete(self) -> None:
         user = get_user_model().objects.create_user(username='queue-wire-user', password='x')

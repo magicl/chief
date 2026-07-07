@@ -26,6 +26,20 @@ class AgentSpecsTests(OTestCase):
         self.assertEqual(len(spec.queues), 1)
         self.assertEqual(spec.queues[0].id, 'inbox')
 
+    def test_gmail_triage_example_validates(self) -> None:
+        spec = load_example('gmail-triage')
+        validate_spec_tools(spec)
+        self.assertEqual(spec.tools[0].type, 'gmail')
+        self.assertEqual(spec.tools[0].config['subject'], 'me@example.com')
+        self.assertEqual(spec.queues[0].sources[0].adapter_type, 'gmail')
+
+    def test_clickup_inbox_example_validates(self) -> None:
+        spec = load_example('clickup-inbox')
+        validate_spec_tools(spec)
+        self.assertEqual(spec.tools[0].type, 'clickup')
+        self.assertEqual(spec.tools[0].config['team_id'], '9000000')
+        self.assertEqual(spec.queues[0].sources[0].adapter_type, 'clickup')
+
     def test_load_example_rejects_path_traversal(self) -> None:
         from libs.agent_specs import load_example_text
 

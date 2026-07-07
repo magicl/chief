@@ -46,7 +46,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
-from libs.agent_spec.yaml_dump import dump_agent_config_spec
 from libs.agent_specs import load_example_text
 
 
@@ -196,7 +195,7 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
             {'errors': [{'path': path, 'message': str(exc)}]},
             status=400,
         )
-    persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty)
+    persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty, raw_yaml=spec_yaml)
     if request.headers.get('Accept', '').find('application/json') >= 0:
         return JsonResponse({'ok': True, 'source_rev': source_rev, 'dirty': dirty})
     return redirect('agent_config', agent_id=agent.id)
@@ -227,7 +226,7 @@ def agent_config_history(request: HttpRequest, agent_id: UUID, config_id: UUID) 
     """Show a read-only historical config revision with restore-to-editor action."""
     agent = _owned_agent(request, agent_id)
     config = get_object_or_404(AgentConfig, pk=config_id, agent=agent)
-    spec_yaml = dump_agent_config_spec(config.get_spec())
+    spec_yaml = config.display_yaml()
     return render(
         request,
         'web/agent_config_history.html',

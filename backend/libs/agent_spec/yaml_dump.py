@@ -25,7 +25,7 @@ _AgentSpecDumper.add_representer(str, _str_representer)
 
 def dump_agent_config_spec(spec: AgentConfigSpec) -> str:
     """Dump spec to YAML with block style for multiline strings."""
-    data = spec.model_dump(mode='json', exclude_none=True)
+    data = spec.model_dump(mode='json', exclude_none=True, by_alias=True)
     return yaml.dump(
         data,
         Dumper=_AgentSpecDumper,

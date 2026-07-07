@@ -173,3 +173,47 @@ Architectural rules (all features must follow):
 **Import boundary:** `apps.web` uses metadata queries + commands only (no `resolve_*`).
 `apps.runner`, `apps.agents`, and tasks use `resolve_*` / `make_secret_supplier`.
 `apps.keys` is a leaf (Django, stdlib, `cryptography` only).
+
+---
+
+## External integrations
+
+**Spec detail:** [Gmail](specs/2026-07-06-gmail-integration/2026-07-06-gmail-integration-design.md) · [ClickUp](specs/2026-07-06-clickup-integration/2026-07-06-clickup-integration-design.md)
+
+Each external service follows the same three-component anatomy:
+
+| Layer | Package | Role |
+|-------|---------|------|
+| **Client** | `libs/clients/<service>/` | Low-level API wrapper; credentials injected at call time |
+| **Source adapter** | `libs/sources/adapters/` | Polls external items → enqueues queue payloads |
+| **Tool** | `libs/tools/tools/` | Agent-callable functions gated by `allow` / `deny` |
+
+**`ToolInstance.config`** holds non-secret addressing (mailbox, team id, query filters).
+Secrets stay in `apps.keys`; YAML references them via **`credential_ref`** only.
+
+**Queue payload envelope:** source adapters enqueue `{data, ref}` — `data` is the
+session-facing summary; `ref` carries stable ids and fetch hints so tools can re-read
+full content (e.g. attachments) without bloating the queue item.
+
+**Source dedupe (`config.dedupe`, default `true`):** each adapter maps an upstream item
+to a queue **`external_id`** (Gmail message id, ClickUp task id). With dedupe on,
+`put_item` is idempotent on `(source, external_id)` — the same item is never enqueued
+twice, including after it reaches a terminal state (`done` / `failed`). Poll prefetches
+known ids per source so adapters can skip expensive fetches. Set **`dedupe: false`** to
+derive `external_id` from a change token (Gmail `historyId`, ClickUp `date_updated`) so
+updates can re-enter the queue.
+
+**Gmail (service account + domain-wide delegation):** store the SA JSON as a
+`type=gmail` credential; set **`config.subject`** on both the tool and source to
+select the impersonated mailbox. Operators must create a Google Cloud service account,
+enable the Gmail API, grant **domain-wide delegation** on that SA, and authorize the
+client scopes (`gmail.modify`, `gmail.send`) in the Google Workspace admin console for
+the SA's client id. Example:
+[`backend/libs/agent_specs/examples/gmail-triage.yaml`](../backend/libs/agent_specs/examples/gmail-triage.yaml).
+
+**ClickUp (personal API token):** store the token as a `type=clickup` credential;
+set **`config.team_id`** on the tool (and source) for workspace addressing. The
+`libs/clients/clickup` client wraps the REST API via **`httpx`**; the source adapter
+polls a configured **`list_id`** (with optional status filters) into the queue.
+Example:
+[`backend/libs/agent_specs/examples/clickup-inbox.yaml`](../backend/libs/agent_specs/examples/clickup-inbox.yaml).

@@ -53,11 +53,14 @@ def persist_agent_config(
     *,
     source_rev: str,
     dirty: bool = False,
+    raw_yaml: str | None = None,
 ) -> AgentConfig:
     """Validate spec and persist ``AgentConfig`` plus derived trigger rows."""
     validate_spec_tools(spec)
     if spec.schema_version != AGENT_CONFIG_SPEC_VERSION:
         raise IngestError('spec schema_version mismatch')
+
+    from libs.agent_spec.yaml_dump import dump_agent_config_spec
 
     config = AgentConfig.objects.create(
         agent=agent,
@@ -65,6 +68,7 @@ def persist_agent_config(
         dirty=dirty,
         spec_version=AGENT_CONFIG_SPEC_VERSION,
         spec=spec.model_dump(mode='json'),
+        spec_yaml=raw_yaml if raw_yaml is not None else dump_agent_config_spec(spec),
     )
 
     materialize_agent_config(agent, config, spec)
@@ -83,6 +87,7 @@ def create_agent_from_spec(
     identifier: str,
     config_source: str = 'ui',
     source_rev: str = 'ui:initial',
+    raw_yaml: str | None = None,
 ) -> Agent:
     """Create ``Agent`` and persist config from a validated spec."""
     agent = Agent.objects.create(
@@ -91,5 +96,5 @@ def create_agent_from_spec(
         identifier=identifier,
         config_source=config_source,
     )
-    persist_agent_config(agent, spec, source_rev=source_rev)
+    persist_agent_config(agent, spec, source_rev=source_rev, raw_yaml=raw_yaml)
     return agent

@@ -1,0 +1,35 @@
+# title: Gmail triage
+# description: Illustrative Gmail triage agent with gated tool and inbox source (full agent is spec 9).
+schema_version: 2
+description: Illustrative Gmail triage agent (full agent is spec 9)
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+system_prompt: |
+  Triage one email per session using the gmail tool.
+tools:
+  - id: gmail-personal
+    type: gmail
+    credential_ref: gmail-personal
+    config:
+      subject: me@example.com
+    allow: [list, read, list_labels, get_attachment, label, archive, mark_spam]
+    deny: [send, trash]
+queues:
+  - id: inbox
+    sources:
+      - id: gmail-main
+        type: gmail
+        credential_ref: gmail-personal
+        config:
+          subject: me@example.com
+          query: "in:inbox -label:x-act -label:x-read -label:x-spam -label:x-unimp"
+          max_results: 25
+triggers:
+  - name: inbox-worker
+    kind: queue
+    queue: inbox
+    prompt: Triage this email.
+    max_sessions: 2
+  - name: manual
+    kind: manual

@@ -8,130 +8,184 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.agents.services.config_validation import (
-    validate_agent_config_spec,
-    validate_agent_config_yaml,
+from apps.agents.services.config_validation import validate_agent_config_spec
+from libs.agent_spec import load_spec
+from libs.agent_spec.trigger_prompts import default_trigger_prompt
+from libs.agent_spec.yaml_roundtrip import (
+    dump_yaml_document,
+    load_yaml_document,
+    plain_dict,
 )
-from libs.agent_spec import (
-    LLMSpec,
-    QueueSpec,
-    SourceSpec,
-    ToolInstance,
-    TriggerSpec,
-)
-from libs.agent_spec.yaml_dump import dump_agent_config_spec
+from ruamel.yaml.comments import CommentedMap
 
 
 class ConfigMutationError(ValueError):
     """Helper mutation could not be applied."""
 
 
-def apply_config_mutation(raw: str, mutation: dict[str, Any]) -> str:
-    """Parse *raw*, apply *mutation*, re-dump YAML (no persist)."""
-    spec = validate_agent_config_yaml(raw)
+def _tool_entry(mutation: dict[str, Any]) -> CommentedMap:
+    """Build a tool-instance mapping for helper insertions."""
+    entry: CommentedMap = CommentedMap()
+    entry['id'] = mutation['id']
+    entry['type'] = mutation['type']
+    if mutation.get('credential_ref'):
+        entry['credential_ref'] = mutation['credential_ref']
+    allow = mutation.get('allow') or ['*']
+    entry['allow'] = list(allow)
+    deny = mutation.get('deny') or []
+    if deny:
+        entry['deny'] = list(deny)
+    return entry
+
+
+def _trigger_entry(mutation: dict[str, Any]) -> CommentedMap:
+    """Build a trigger mapping for helper insertions."""
+    kind = mutation['kind']
+    prompt = mutation.get('prompt')
+    if kind != 'manual' and not (prompt and str(prompt).strip()):
+        prompt = default_trigger_prompt(kind)
+    entry: CommentedMap = CommentedMap()
+    entry['name'] = mutation['name']
+    entry['kind'] = kind
+    if mutation.get('cron'):
+        entry['cron'] = mutation['cron']
+    if mutation.get('queue'):
+        entry['queue'] = mutation['queue']
+    if prompt:
+        entry['prompt'] = prompt
+    max_sessions = mutation.get('max_sessions')
+    if max_sessions is not None:
+        entry['max_sessions'] = int(max_sessions)
+    return entry
+
+
+def _queue_entry(mutation: dict[str, Any]) -> CommentedMap:
+    """Build a queue mapping for helper insertions."""
+    entry: CommentedMap = CommentedMap()
+    entry['id'] = mutation['id']
+    entry['max_attempts'] = mutation.get('max_attempts', 3)
+    entry['min_hold_seconds'] = mutation.get('min_hold_seconds', 60)
+    entry['early_release_seconds'] = mutation.get('early_release_seconds', 300)
+    entry['long_hold_seconds'] = mutation.get('long_hold_seconds', 3600)
+    return entry
+
+
+def _source_entry(mutation: dict[str, Any]) -> CommentedMap:
+    """Build a source mapping for helper insertions."""
+    entry: CommentedMap = CommentedMap()
+    entry['id'] = mutation['id']
+    entry['type'] = mutation['type']
+    if mutation.get('credential_ref'):
+        entry['credential_ref'] = mutation['credential_ref']
+    config = mutation.get('config') or {}
+    if config:
+        entry['config'] = CommentedMap(config)
+    return entry
+
+
+def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
+    """Apply one helper mutation to an in-memory YAML document."""
     action = mutation.get('action')
     if not action:
         raise ConfigMutationError('action required')
 
     if action == 'set_llm':
-        spec = spec.model_copy(
-            update={
-                'llm': LLMSpec(
-                    provider=mutation['provider'],
-                    model=mutation['model'],
-                    temperature=mutation.get('temperature'),
-                    credential_ref=mutation.get('credential_ref') or None,
-                ),
-            },
-        )
-    elif action == 'set_system_prompt':
-        spec = spec.model_copy(update={'system_prompt': mutation['system_prompt']})
-    elif action == 'add_tool':
-        inst = ToolInstance(
-            id=mutation['id'],
-            type=mutation['type'],
-            credential_ref=mutation.get('credential_ref') or None,
-            allow=mutation.get('allow') or ['*'],
-            deny=mutation.get('deny') or [],
-        )
-        spec = spec.model_copy(update={'tools': [*spec.tools, inst]})
-    elif action == 'remove_tool':
+        llm: CommentedMap = CommentedMap()
+        llm['provider'] = mutation['provider']
+        llm['model'] = mutation['model']
+        if mutation.get('temperature') is not None:
+            llm['temperature'] = mutation['temperature']
+        if mutation.get('credential_ref'):
+            llm['credential_ref'] = mutation['credential_ref']
+        doc['llm'] = llm
+        return
+
+    if action == 'set_system_prompt':
+        doc['system_prompt'] = mutation['system_prompt']
+        return
+
+    if action == 'add_tool':
+        tools = doc.setdefault('tools', [])
+        tools.append(_tool_entry(mutation))
+        return
+
+    if action == 'remove_tool':
         tool_id = mutation['id']
-        tools = [t for t in spec.tools if t.id != tool_id]
-        if len(tools) == len(spec.tools):
+        tools = doc.get('tools', [])
+        filtered = [item for item in tools if item.get('id') != tool_id]
+        if len(filtered) == len(tools):
             raise ConfigMutationError(f'Unknown tool instance {tool_id!r}')
-        spec = spec.model_copy(update={'tools': tools})
-    elif action == 'add_trigger':
-        max_sessions = mutation.get('max_sessions')
-        trig = TriggerSpec(
-            name=mutation['name'],
-            kind=mutation['kind'],
-            cron=mutation.get('cron'),
-            queue=mutation.get('queue'),
-            prompt=mutation.get('prompt'),
-            max_sessions=int(max_sessions) if max_sessions is not None else None,
-        )
-        spec = spec.model_copy(update={'triggers': [*spec.triggers, trig]})
-    elif action == 'remove_trigger':
+        doc['tools'] = filtered
+        return
+
+    if action == 'add_trigger':
+        triggers = doc.setdefault('triggers', [])
+        triggers.append(_trigger_entry(mutation))
+        return
+
+    if action == 'remove_trigger':
         name = mutation['name']
-        triggers = [t for t in spec.triggers if t.name != name]
-        if len(triggers) == len(spec.triggers):
+        triggers = doc.get('triggers', [])
+        filtered = [item for item in triggers if item.get('name') != name]
+        if len(filtered) == len(triggers):
             raise ConfigMutationError(f'Unknown trigger {name!r}')
-        spec = spec.model_copy(update={'triggers': triggers})
-    elif action == 'add_queue':
-        queue = QueueSpec(
-            id=mutation['id'],
-            max_attempts=mutation.get('max_attempts', 3),
-            min_hold_seconds=mutation.get('min_hold_seconds', 60),
-            early_release_seconds=mutation.get('early_release_seconds', 300),
-            long_hold_seconds=mutation.get('long_hold_seconds', 3600),
-            sources=[],
-        )
-        spec = spec.model_copy(update={'queues': [*spec.queues, queue]})
-    elif action == 'remove_queue':
+        doc['triggers'] = filtered
+        return
+
+    if action == 'add_queue':
+        queues = doc.setdefault('queues', [])
+        queues.append(_queue_entry(mutation))
+        return
+
+    if action == 'remove_queue':
         queue_id = mutation['id']
-        queues = [q for q in spec.queues if q.id != queue_id]
-        if len(queues) == len(spec.queues):
+        queues = doc.get('queues', [])
+        filtered = [item for item in queues if item.get('id') != queue_id]
+        if len(filtered) == len(queues):
             raise ConfigMutationError(f'Unknown queue {queue_id!r}')
-        spec = spec.model_copy(update={'queues': queues})
-    elif action == 'add_source':
+        doc['queues'] = filtered
+        return
+
+    if action == 'add_source':
         queue_id = mutation['queue_id']
-        source = SourceSpec(
-            id=mutation['id'],
-            adapter_type=mutation['type'],
-            credential_ref=mutation.get('credential_ref') or None,
-            config=mutation.get('config') or {},
-        )
-        queues = []
+        queues = doc.get('queues', [])
         found = False
-        for queue in spec.queues:
-            if queue.id == queue_id:
-                queues.append(queue.model_copy(update={'sources': [*queue.sources, source]}))
+        for queue in queues:
+            if queue.get('id') == queue_id:
+                sources = queue.setdefault('sources', [])
+                sources.append(_source_entry(mutation))
                 found = True
-            else:
-                queues.append(queue)
+                break
         if not found:
             raise ConfigMutationError(f'Unknown queue {queue_id!r}')
-        spec = spec.model_copy(update={'queues': queues})
-    elif action == 'remove_source':
+        return
+
+    if action == 'remove_source':
         queue_id = mutation['queue_id']
         source_id = mutation['id']
-        queues = []
+        queues = doc.get('queues', [])
         found = False
-        for queue in spec.queues:
-            if queue.id == queue_id:
-                sources = [s for s in queue.sources if s.id != source_id]
-                if len(sources) == len(queue.sources):
-                    raise ConfigMutationError(f'Unknown source {source_id!r} in queue {queue_id!r}')
-                queues.append(queue.model_copy(update={'sources': sources}))
-                found = True
-            else:
-                queues.append(queue)
+        for queue in queues:
+            if queue.get('id') != queue_id:
+                continue
+            sources = queue.get('sources', [])
+            filtered = [item for item in sources if item.get('id') != source_id]
+            if len(filtered) == len(sources):
+                raise ConfigMutationError(f'Unknown source {source_id!r} in queue {queue_id!r}')
+            queue['sources'] = filtered
+            found = True
+            break
         if not found:
             raise ConfigMutationError(f'Unknown queue {queue_id!r}')
-        spec = spec.model_copy(update={'queues': queues})
-    else:
-        raise ConfigMutationError(f'Unknown action {action!r}')
+        return
 
+    raise ConfigMutationError(f'Unknown action {action!r}')
+
+
+def apply_config_mutation(raw: str, mutation: dict[str, Any]) -> str:
+    """Parse *raw*, apply *mutation*, and return YAML preserving comments."""
+    doc = load_yaml_document(raw)
+    _apply_mutation_to_doc(doc, mutation)
+    spec = load_spec(plain_dict(doc))
     validate_agent_config_spec(spec)
-    return dump_agent_config_spec(spec)
+    return dump_yaml_document(doc)

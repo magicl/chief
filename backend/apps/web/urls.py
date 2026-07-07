@@ -31,6 +31,5 @@ urlpatterns = [
     path('sessions/<uuid:session_id>/abort/', views.session_abort, name='session_abort'),
     path('settings/keys/', views.settings_keys, name='settings_keys'),
     path('settings/keys/named/', views.settings_keys_add_named, name='settings_keys_add_named'),
-    path('settings/keys/named/<str:name>/', views.settings_keys_update_named, name='settings_keys_update_named'),
     path('settings/keys/named/<str:name>/delete/', views.settings_keys_delete_named, name='settings_keys_delete_named'),
 ]

@@ -275,13 +275,17 @@ body.config-page main { max-width: none; }
           <form class="helper-form" data-mutation="add_trigger">
             <label>Name <input name="name" required></label>
             <label>Kind
-              <select name="kind">
+              <select name="kind" id="helper-trigger-kind">
                 {% for k in catalog.trigger_kinds %}
                 <option value="{{ k }}">{{ k }}</option>
                 {% endfor %}
               </select>
             </label>
-            <label>Cron (schedule only) <input name="cron" placeholder="0 * * * *"></label>
+            <label id="helper-trigger-prompt-row">
+              Prompt
+              <textarea name="prompt" id="helper-trigger-prompt" rows="3"></textarea>
+            </label>
+            <label id="helper-trigger-cron-row">Cron (schedule only) <input name="cron" placeholder="0 * * * *"></label>
             <button type="submit">Add trigger</button>
           </form>
         </details>

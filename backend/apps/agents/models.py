@@ -41,10 +41,19 @@ class AgentConfig(models.Model):
     dirty = models.BooleanField(default=False)
     fetched_at = models.DateTimeField(auto_now_add=True)
     spec = models.JSONField()
+    spec_yaml = models.TextField(blank=True, default='')
     spec_version = models.PositiveSmallIntegerField(default=0)
 
     def get_spec(self) -> AgentConfigSpec:
         return load_spec(self.spec, stored_version=self.spec_version)
+
+    def display_yaml(self) -> str:
+        """Return editor YAML, preferring the stored round-trip text when present."""
+        if self.spec_yaml:
+            return self.spec_yaml
+        from libs.agent_spec.yaml_dump import dump_agent_config_spec
+
+        return dump_agent_config_spec(self.get_spec())
 
     def __str__(self) -> str:
         return f'{self.agent.identifier}@{self.source_rev}'

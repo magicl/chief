@@ -106,6 +106,7 @@ def create_from_example(
         identifier=cleaned_id,
         config_source='ui',
         source_rev=f'example:{slug}',
+        raw_yaml=raw,
     )
 
 
@@ -126,6 +127,7 @@ def create_from_yaml(
         identifier=cleaned_id,
         config_source='ui',
         source_rev=spec_content_hash(raw_yaml),
+        raw_yaml=raw_yaml,
     )
 
 

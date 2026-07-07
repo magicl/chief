@@ -31,11 +31,12 @@ def bind_tool_invoke(
     tool: Tool,
     *,
     token_supplier: Callable[[], str | None] | None,
+    config: dict[str, Any] | None = None,
     user_id: int | None = None,
     agent_id: UUID | None = None,
     session_id: UUID | None = None,
 ) -> Callable[[str, dict[str, Any]], Any]:
-    """Return a bound invoke for *tool*, injecting credentials or queue session context."""
+    """Return a bound invoke for *tool*, injecting credentials/config or queue session context."""
     bind = getattr(tool, 'bind', None)
     if bind is not None:
         if tool.name == 'queue':
@@ -46,7 +47,7 @@ def bind_tool_invoke(
         if token_supplier is not None:
             return cast(
                 Callable[[str, dict[str, Any]], Any],
-                bind(token_supplier=token_supplier),
+                bind(token_supplier=token_supplier, config=config),
             )
     return tool.invoke
 
@@ -71,6 +72,7 @@ def build_bound_tools(
         invoke = bind_tool_invoke(
             tool,
             token_supplier=supplier,
+            config=inst.config,
             user_id=user_id,
             agent_id=agent_id,
             session_id=session_id,

@@ -4,11 +4,11 @@
 
 {% block content %}
 <h2>Named keys</h2>
-<p class="muted">Credentials you own, referenced by name in agent config. System-wide defaults are managed by staff in Django admin.</p>
+<p class="muted">Credentials you own, referenced by name in agent config. To change a secret, delete the key and add it again. System-wide defaults are managed by staff in Django admin.</p>
 <div class="card">
   <table>
     <thead>
-      <tr><th>Name</th><th>Type</th><th>Status</th><th>Updated</th><th>Actions</th></tr>
+      <tr><th>Name</th><th>Type</th><th>Status</th><th>Updated</th><th></th></tr>
     </thead>
     <tbody>
       {% for key in named_keys %}
@@ -17,12 +17,7 @@
         <td>{{ key.type }}</td>
         <td>{% if key.is_set %}<span class="pill succeeded">Set</span>{% else %}<span class="pill waiting">Not set</span>{% endif %}</td>
         <td class="muted">{% if key.updated_at %}{{ key.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
-        <td style="display:flex; gap:.5rem; flex-wrap:wrap;">
-          <form method="post" action="{{ url('settings_keys_update_named', kwargs={'name': key.name}) }}" style="display:flex; gap:.35rem; align-items:center;">
-            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-            <input type="password" name="secret" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" placeholder="Replace secret" style="padding:.3rem .5rem;">
-            <button type="submit" style="padding:.3rem .6rem;">Replace</button>
-          </form>
+        <td>
           <form method="post" action="{{ url('settings_keys_delete_named', kwargs={'name': key.name}) }}">
             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <button type="submit" style="padding:.3rem .6rem;">Delete</button>
@@ -36,18 +31,66 @@
   </table>
 
   <h3 style="font-size:.85rem; margin-top:1.25rem; color:#8b93a7;">Add key</h3>
-  <form method="post" action="{{ url('settings_keys_add_named') }}" style="display:grid; gap:.5rem; max-width:480px; margin-top:.5rem;">
-    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-    <label>Name <input type="text" name="name" pattern="[a-z][a-z0-9_-]{0,63}" required autocomplete="off" style="width:100%; padding:.35rem .5rem;"></label>
-    <label>Type
-      <select name="type" required style="width:100%; padding:.35rem .5rem;">
-        {% for t in service_types %}
-        <option value="{{ t }}">{{ t }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Secret <input type="password" name="secret" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" required style="width:100%; padding:.35rem .5rem;"></label>
-    <button type="submit" style="padding:.4rem .75rem; width:fit-content;">Save</button>
-  </form>
+  <script id="credential-guides-data" type="application/json">{{ credential_guides_json|safe }}</script>
+  <div
+    x-data="{
+      type: '',
+      guides: JSON.parse(document.getElementById('credential-guides-data').textContent),
+      get guide() { return this.type ? this.guides[this.type] : null; }
+    }"
+    style="max-width:640px; margin-top:.5rem;"
+  >
+    <form method="post" action="{{ url('settings_keys_add_named') }}" style="display:grid; gap:.75rem;">
+      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <label>Type
+        <select name="type" x-model="type" required style="width:100%; padding:.35rem .5rem;">
+          <option value="" disabled selected>Select a credential type…</option>
+          {% for t in service_types %}
+          <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <template x-if="guide">
+        <div style="display:grid; gap:.75rem;">
+          <div class="card" style="padding:.75rem 1rem; background:#12151c;">
+            <p style="margin:0 0 .5rem; font-size:.85rem; color:#9ec5ff;" x-text="guide.label + ' setup'"></p>
+            <ol style="margin:0; padding-left:1.25rem; font-size:.85rem; color:#b8c0d0;">
+              <template x-for="step in guide.find_steps" :key="step">
+                <li x-text="step" style="margin-bottom:.35rem;"></li>
+              </template>
+            </ol>
+            <template x-if="guide.scopes">
+              <p style="margin:.75rem 0 0; font-size:.8rem; color:#8b93a7;">
+                <strong style="color:#c5cdd9;">Scopes:</strong>
+                <span x-text="guide.scopes"></span>
+              </p>
+            </template>
+          </div>
+
+          <label>Name
+            <input type="text" name="name" pattern="[a-z][a-z0-9_-]{0,63}" required autocomplete="off" style="width:100%; padding:.35rem .5rem;">
+          </label>
+          <label>
+            <span x-text="guide.input_label"></span>
+            <textarea
+              name="secret"
+              rows="8"
+              required
+              autocomplete="off"
+              data-lpignore="true"
+              data-1p-ignore
+              data-form-type="other"
+              :placeholder="guide.input_placeholder"
+              style="width:100%; padding:.35rem .5rem; font-family:ui-monospace, monospace; font-size:.85rem; margin-top:.25rem;"
+            ></textarea>
+          </label>
+          <button type="submit" style="padding:.4rem .75rem; width:fit-content;">Save</button>
+        </div>
+      </template>
+
+      <p x-show="!type" class="muted" style="font-size:.85rem; margin:0;">Choose a type above to see setup instructions and enter the secret.</p>
+    </form>
+  </div>
 </div>
 {% endblock %}

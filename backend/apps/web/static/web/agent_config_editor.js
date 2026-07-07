@@ -388,6 +388,33 @@ function initCredentialPickers(catalog) {
   syncSourceCreds();
 }
 
+function initTriggerHelper(catalog) {
+  const kindSelect = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById('helper-trigger-kind')
+  );
+  const promptRow = document.getElementById('helper-trigger-prompt-row');
+  const promptInput = /** @type {HTMLTextAreaElement | null} */ (
+    document.getElementById('helper-trigger-prompt')
+  );
+  const cronRow = document.getElementById('helper-trigger-cron-row');
+  const defaults = catalog.trigger_prompt_defaults || {};
+
+  /** Show prompt/cron fields appropriate for the selected trigger kind. */
+  const sync = () => {
+    const kind = kindSelect?.value || 'manual';
+    const isManual = kind === 'manual';
+    if (promptRow) promptRow.hidden = isManual;
+    if (cronRow) cronRow.hidden = kind !== 'schedule';
+    if (promptInput) {
+      promptInput.required = !isManual;
+      promptInput.placeholder = defaults[kind] || '';
+    }
+  };
+
+  kindSelect?.addEventListener('change', sync);
+  sync();
+}
+
 function initToolHelper(catalog, getYaml) {
   const toolType = /** @type {HTMLSelectElement | null} */ (
     document.getElementById('helper-tool-type')
@@ -484,6 +511,7 @@ function init() {
 
   initCredentialPickers(data.catalog || {});
   initAdapterConfigPanels();
+  initTriggerHelper(data.catalog || {});
   initSidebarResize();
 
   const schemaKeys = data.catalog?.schema_keys || [];

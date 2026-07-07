@@ -17,8 +17,8 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 - [x] 3. Sources and queues — [spec](../specs/2026-07-04-sources-and-queues/) · [plan](../specs/2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-plan.md)
 - [x] 4. Agent configuration UI — [spec](../specs/2026-07-04-agent-config-ui/)
 - [ ] 5. Agent scheduling
-- [ ] 6. Gmail library and tool
-- [ ] 7. ClickUp library and tool
+- [ ] 6. Gmail library and tool — [spec](../specs/2026-07-06-gmail-integration/2026-07-06-gmail-integration-design.md)
+- [ ] 7. ClickUp library and tool — [spec](../specs/2026-07-06-clickup-integration/2026-07-06-clickup-integration-design.md)
 - [ ] 8. Obsidian library and tool
 - [ ] 9. Inbox triage agent
 

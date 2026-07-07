@@ -18,9 +18,15 @@ class SystemCredentialAdminForm(forms.ModelForm):  # type: ignore[type-arg]
     """Write-only secret field for staff; never displays stored plaintext."""
 
     secret = forms.CharField(
-        widget=forms.PasswordInput(render_value=False),
+        widget=forms.Textarea(
+            attrs={
+                'rows': 8,
+                'style': 'font-family: ui-monospace, monospace; width: 100%;',
+                'autocomplete': 'off',
+            },
+        ),
         required=False,
-        help_text='Write-only. Blank on a default row clears it; on edit otherwise keeps existing value.',
+        help_text='Write-only plaintext. Paste multiline JSON for Gmail. Blank on edit keeps the existing value.',
     )
 
     class Meta:

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 from unittest.mock import patch
 
 from apps.queues.models import QueueItem, QueueItemStatus
@@ -51,6 +52,37 @@ class TestPollSourceTask(OTransactionTestCase):
         self.assertIn('unknown adapter type', source.last_error or '')
         self.assertIsNotNone(source.last_error_at)
         self.assertEqual(QueueItem.objects.filter(queue=queue).count(), 0)
+
+    def test_poll_source_passes_known_external_ids_when_dedupe_enabled(self) -> None:
+        queue, _session = make_test_queue(identifier='poll-known-agent')
+        source = make_test_source(queue, source_id='known-src')
+        source.config = {'prefix': 'x', 'batch_size': 1}
+        source.save(update_fields=['config'])
+        commands.put_item(queue=queue, source=source, payload={'old': True}, external_id='existing-1')
+        captured: dict[str, frozenset[str] | None] = {}
+
+        class _CapturingAdapter:
+            adapter_type = 'test'
+            credential_type = None
+
+            def poll(
+                self,
+                *,
+                config: dict[str, Any],
+                put_item: Any,
+                credential_supplier: Any,
+                known_external_ids: frozenset[str] | None = None,
+            ) -> Any:
+                del config, put_item, credential_supplier
+                captured['known'] = known_external_ids
+                from libs.sources.base import PollResult
+
+                return PollResult(items_seen=0, items_enqueued=0)
+
+        with patch('libs.sources.registry.get_adapter', return_value=_CapturingAdapter()):
+            poll_source(str(source.pk))
+
+        self.assertEqual(captured['known'], frozenset({'existing-1'}))
 
 
 class TestPollActiveSourcesTask(OTransactionTestCase):

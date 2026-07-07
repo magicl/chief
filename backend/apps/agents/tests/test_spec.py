@@ -221,3 +221,14 @@ class TestTriggerSpec(OTestCase):
             }
         )
         self.assertEqual(spec.triggers[0].max_sessions, 1)
+
+
+class TestToolInstanceConfig(OTestCase):
+    def test_config_defaults_to_empty_dict(self) -> None:
+        inst = ToolInstance(id='gmail-a', type='gmail')
+        self.assertEqual(inst.config, {})
+
+    def test_config_round_trips(self) -> None:
+        inst = ToolInstance(id='gmail-a', type='gmail', config={'subject': 'me@example.com'})
+        self.assertEqual(inst.config, {'subject': 'me@example.com'})
+        self.assertEqual(inst.model_dump()['config'], {'subject': 'me@example.com'})

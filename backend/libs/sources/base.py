@@ -52,5 +52,7 @@ class SourceAdapter(ABC):
         config: dict[str, Any],
         put_item: PutItemCallback,
         credential_supplier: SecretSupplier | None,
+        known_external_ids: frozenset[str] | None = None,
     ) -> PollResult:
+        """Poll upstream items; *known_external_ids* avoids re-fetch when ``dedupe`` is on."""
         raise NotImplementedError

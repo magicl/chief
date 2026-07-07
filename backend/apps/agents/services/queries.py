@@ -14,7 +14,11 @@ from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
 from apps.sessions.models import AgentSession
 from django.urls import reverse
-from libs.agent_spec.yaml_dump import dump_agent_config_spec
+from libs.agent_spec.trigger_prompts import (
+    DEFAULT_AGENT_TRIGGER_PROMPT,
+    DEFAULT_QUEUE_TRIGGER_PROMPT,
+    DEFAULT_SCHEDULE_TRIGGER_PROMPT,
+)
 from libs.agent_specs import list_examples
 from libs.providers.anthropic_provider import AnthropicProvider
 from libs.providers.local_openai_provider import LocalOpenAIProvider
@@ -76,7 +80,7 @@ SCHEMA_KEYS = [
     'queues[].sources',
     'queues[].sources[]',
     'queues[].sources[].id',
-    'queues[].sources[].adapter_type',
+    'queues[].sources[].type',
     'queues[].sources[].credential_ref',
     'queues[].sources[].config',
 ]
@@ -138,6 +142,11 @@ def build_config_catalog(user_id: int) -> dict[str, Any]:
         'tool_types': _tool_catalog(),
         'adapter_types': _adapter_catalog(),
         'trigger_kinds': TRIGGER_KINDS,
+        'trigger_prompt_defaults': {
+            'schedule': DEFAULT_SCHEDULE_TRIGGER_PROMPT,
+            'queue': DEFAULT_QUEUE_TRIGGER_PROMPT,
+            'agent': DEFAULT_AGENT_TRIGGER_PROMPT,
+        },
         'schema_keys': SCHEMA_KEYS,
         'credentials': by_type,
         'examples': [{'slug': ex.slug, 'title': ex.title, 'description': ex.description} for ex in list_examples()],
@@ -206,7 +215,7 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     source_rev = '—'
     dirty = False
     if config is not None:
-        spec_yaml = dump_agent_config_spec(config.get_spec())
+        spec_yaml = config.display_yaml()
         spec_version = config.spec_version
         source_rev = config.source_rev
         dirty = config.dirty
