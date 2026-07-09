@@ -15,4 +15,4 @@ Each spec in an epic still gets its own Superpowers folder under `docs/specs/`.
 
 | Epic | Status |
 |------|--------|
-| [Inbox cleanup (U1)](2026-07-03-inbox-cleanup.md) | planning |
+| [Inbox cleanup (U1)](2026-07-03-inbox-cleanup.md) | in progress |

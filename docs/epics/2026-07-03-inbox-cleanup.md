@@ -16,16 +16,16 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 - [x] 2. Agent config schema extensions — [spec](../specs/2026-07-03-agent-config-schema/) · [plan](../specs/2026-07-03-agent-config-schema/2026-07-03-agent-config-schema-plan.md)
 - [x] 3. Sources and queues — [spec](../specs/2026-07-04-sources-and-queues/) · [plan](../specs/2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-plan.md)
 - [x] 4. Agent configuration UI — [spec](../specs/2026-07-04-agent-config-ui/)
-- [ ] 5. Agent scheduling
-- [ ] 6. Gmail library and tool — [spec](../specs/2026-07-06-gmail-integration/2026-07-06-gmail-integration-design.md)
-- [ ] 7. ClickUp library and tool — [spec](../specs/2026-07-06-clickup-integration/2026-07-06-clickup-integration-design.md)
-- [ ] 8. Obsidian library and tool
+- [x] 5. Agent scheduling — [spec](../specs/2026-07-05-agent-scheduling/)
+- [x] 6. Gmail library and tool — [spec](../specs/2026-07-06-gmail-integration/)
+- [x] 7. ClickUp library and tool — [spec](../specs/2026-07-06-clickup-integration/)
+- ~~8. Obsidian library and tool~~ — **cancelled** (out of U1; no spec folder)
 - [ ] 9. Inbox triage agent
 
-Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7v0 → 8 → 9**
+Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 9** (spec 8 cancelled)
 
-Phasing: step **7** validates Gmail-only triage; steps **8–9** add ClickUp/Obsidian
-and full U1 routing.
+Phasing: Gmail + ClickUp integrations are done; remaining work is **inbox triage
+agent (spec 9)**. Obsidian routing was dropped from U1.
 
 ---
 
@@ -39,9 +39,9 @@ and full U1 routing.
 | 4 | 4 | YAML-first config UI (everything editable in YAML; UI stays in sync) |
 | 5 | 5 | Multiple triggers per agent (cron + queue bindings); idle when done |
 | 6 | 6 | Gmail lib + tool + source adapter → queue |
-| 7 | 9 (v0) | Inbox triage: Gmail tag/archive/spam only |
-| 8 | 7, 8 | ClickUp + Obsidian libs and tools |
-| 9 | 9 (v1) | Full triage routing (ClickUp INBOX, Obsidian notes) |
+| 7 | 7 | ClickUp lib + tool + source adapter |
+| 8 | 9 | Inbox triage agent (Gmail tag/archive/spam + ClickUp INBOX routing) |
+| — | 8 | ~~Obsidian~~ — **cancelled** |
 
 ---
 
@@ -142,16 +142,17 @@ a label/tag filter for “not yet tagged `x-*`”, not hardcoded adapter logic.
 `libs/clickup` + gated tool: create task, list spaces/lists. Personal API token
 likely sufficient. API vs MCP decision in spec.
 
-### 8. Obsidian library and tool
+### 8. Obsidian library and tool — **cancelled**
 
-`libs/obsidian` + tool to append dated notes to a vault inbox path. REST plugin
-vs file-based — decide in spec.
+Dropped from U1. No `libs/obsidian` / vault tool in this epic. Self-notes that
+would have gone to Obsidian route to **ClickUp INBOX** instead (via spec 7).
 
 ### 9. Inbox triage agent
 
-Product spec on top of 1–8. Tagging taxonomy (`#x-act`, `#x-read`, `#x-spam`,
-`#x-unimp`, …), routing rules, system prompt, tool instance bindings. Gmail source
-uses a **configured filter** (exclude `x-*` labels) → queue; queue trigger(s).
+Product spec on top of 1–7 (spec 8 cancelled). Tagging taxonomy (`#x-act`,
+`#x-read`, `#x-spam`, `#x-unimp`, …), routing rules, system prompt, tool instance
+bindings. Gmail source uses a **configured filter** (exclude `x-*` labels) →
+queue; queue trigger(s).
 
 | Outcome | Action |
 |---------|--------|
@@ -160,7 +161,7 @@ uses a **configured filter** (exclude `x-*` labels) → queue; queue trigger(s).
 | Spam | `#x-spam`, move to spam |
 | Unimportant | `#x-unimp`, Gmail organize |
 | Todo | ClickUp task → INBOX list |
-| Self-note | Obsidian dated log or ClickUp INBOX |
+| Self-note | ClickUp INBOX (Obsidian cancelled) |
 
 Session completes triage → session goes **idle**; agent calls `queue.complete`.
 Does not re-design platform specs.
