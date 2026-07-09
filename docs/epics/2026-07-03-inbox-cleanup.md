@@ -21,11 +21,13 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 - [x] 7. ClickUp library and tool — [spec](../specs/2026-07-06-clickup-integration/)
 - ~~8. Obsidian library and tool~~ — **cancelled** (out of U1; no spec folder)
 - [ ] 9. Inbox triage agent
+- [ ] 10. Local disk providers (keys + agent configs) — [spec](../specs/2026-07-09-local-disk-providers/)
 
-Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 9** (spec 8 cancelled)
+Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 10 → 9** (spec 8 cancelled)
 
-Phasing: Gmail + ClickUp integrations are done; remaining work is **inbox triage
-agent (spec 9)**. Obsidian routing was dropped from U1.
+Phasing: Gmail + ClickUp integrations are done. Next is **local disk providers
+(spec 10)** so oagent/host can edit keys and agent YAML on disk with live reload,
+then **inbox triage agent (spec 9)**. Obsidian routing was dropped from U1.
 
 ---
 
@@ -40,7 +42,8 @@ agent (spec 9)**. Obsidian routing was dropped from U1.
 | 5 | 5 | Multiple triggers per agent (cron + queue bindings); idle when done |
 | 6 | 6 | Gmail lib + tool + source adapter → queue |
 | 7 | 7 | ClickUp lib + tool + source adapter |
-| 8 | 9 | Inbox triage agent (Gmail tag/archive/spam + ClickUp INBOX routing) |
+| 8 | 10 | Local disk root + providers: load/watch keys and agent configs |
+| 9 | 9 | Inbox triage agent (Gmail tag/archive/spam + ClickUp INBOX routing) |
 | — | 8 | ~~Obsidian~~ — **cancelled** |
 
 ---
@@ -149,10 +152,11 @@ would have gone to Obsidian route to **ClickUp INBOX** instead (via spec 7).
 
 ### 9. Inbox triage agent
 
-Product spec on top of 1–7 (spec 8 cancelled). Tagging taxonomy (`#x-act`,
+Product spec on top of 1–7 and 10 (spec 8 cancelled). Tagging taxonomy (`#x-act`,
 `#x-read`, `#x-spam`, `#x-unimp`, …), routing rules, system prompt, tool instance
 bindings. Gmail source uses a **configured filter** (exclude `x-*` labels) →
-queue; queue trigger(s).
+queue; queue trigger(s). May load keys/agent YAML from the local disk provider
+(spec 10) during oagent/host development.
 
 | Outcome | Action |
 |---------|--------|
@@ -166,6 +170,16 @@ queue; queue trigger(s).
 Session completes triage → session goes **idle**; agent calls `queue.complete`.
 Does not re-design platform specs.
 
+### 10. Local disk providers (keys + agent configs)
+
+Multi-provider storage for **user credentials** and **agent configs**. Providers:
+**disk** and **db** now; **GitHub** later for configs only. One env root
+`CHIEF_LOCAL_DIR` (`.env` / `.env.local`) with `keys/` + `agents/` (more
+subdirs later). Disk files load on server start and are **watched live**; DB
+remains runtime SoT — disk-sourced items re-ingest as new DB revisions when
+files change. Disk-sourced items are **read-only in the UI**. Required `owner`
+on each key file. Soft-disable when a watched file disappears.
+
 ---
 
 ## Constraints
@@ -176,6 +190,8 @@ Does not re-design platform specs.
 - **Atomic queue take** — no double-claim; only taker may complete/fail.
 - **Queue failure modes** — explicit `failed` (agent) vs terminal `exhausted` (max attempts).
 - **ClickUp INBOX** — routed tasks land in an INBOX list, not project backlogs.
+- **DB runtime SoT** — disk/GitHub providers ingest into DB; runners resolve from DB only.
+- **Disk UI read-only** — items with `config_source` / key source `disk` are not editable in the UI (v1).
 
 ---
 
