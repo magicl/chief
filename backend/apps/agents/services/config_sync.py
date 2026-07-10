@@ -33,4 +33,6 @@ def config_source_label(config_source: str) -> str:
     """Human-readable label for the config source badge."""
     if config_source == 'ui':
         return 'UI'
+    if config_source == 'disk':
+        return 'Disk'
     return 'Legacy'
