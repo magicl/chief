@@ -15,6 +15,6 @@ class RunnerConfig(AppConfig):
         # Workers normally consume the web watcher's DB updates; this supports
         # deployments that run a worker without a web process.
         if getattr(settings, 'CHIEF_LOCAL_WATCH', False):
-            from apps.local_disk.bootstrap import maybe_start_local_disk
+            from apps.web.local_bootstrap import maybe_start_local_disk
 
             maybe_start_local_disk()

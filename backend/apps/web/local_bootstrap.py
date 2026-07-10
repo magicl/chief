@@ -2,12 +2,14 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Poll and debounce changes to local credential and agent YAML files."""
+"""Bootstrap and watch configured local disk providers from Django processes."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -15,10 +17,50 @@ from pathlib import Path
 
 from apps.agents.services.disk_sync import sync_agents_dir
 from apps.keys.services.disk_sync import SyncReport, sync_keys_dir
+from django.conf import settings
+from django.db import close_old_connections
 
 logger = logging.getLogger(__name__)
 
 Fingerprint = tuple[int, int, str]
+_ORM_UNSAFE_COMMANDS = frozenset({'migrate', 'makemigrations', 'collectstatic'})
+
+
+def resolve_local_root() -> Path | None:
+    """Return the configured absolute local root, or None when unset."""
+    raw = str(getattr(settings, 'CHIEF_LOCAL_DIR', '') or '').strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser().resolve()
+
+
+def keys_dir() -> Path | None:
+    """Return the configured keys directory when local providers are enabled."""
+    root = resolve_local_root()
+    return None if root is None else root / 'keys'
+
+
+def agents_dir() -> Path | None:
+    """Return the configured agents directory when local providers are enabled."""
+    root = resolve_local_root()
+    return None if root is None else root / 'agents'
+
+
+def sync_all() -> SyncReport:
+    """Ingest keys before agents when the configured local root exists."""
+    root = resolve_local_root()
+    if root is None or not root.is_dir():
+        return SyncReport()
+
+    # Agent materialization may reference credentials, so preserve this order.
+    (root / 'keys').mkdir(exist_ok=True)
+    (root / 'agents').mkdir(exist_ok=True)
+    key_report = sync_keys_dir(root=root)
+    agent_report = sync_agents_dir(root=root)
+    return SyncReport(
+        items=[*key_report.items, *agent_report.items],
+        disabled=key_report.disabled + agent_report.disabled,
+    )
 
 
 def sync_path(path: Path, *, root: Path) -> SyncReport:
@@ -58,7 +100,7 @@ class PollingWatcher:
         self._thread: threading.Thread | None = None
 
     def _scan(self) -> dict[Path, Fingerprint]:
-        """Return content-aware fingerprints for all provider YAML files."""
+        """Return content-aware fingerprints for provider YAML files."""
         snapshot: dict[Path, Fingerprint] = {}
         for directory_name in ('keys', 'agents'):
             directory = self.root / directory_name
@@ -101,8 +143,9 @@ class PollingWatcher:
                 logger.error('Local disk path sync failed for %s (%s)', path, type(exc).__name__)
 
     def run(self) -> None:
-        """Poll until stopped while containing failures to the watcher thread."""
+        """Poll until stopped while refreshing thread-local DB connections."""
         while not self._stopped.wait(self.interval):
+            close_old_connections()
             try:
                 self.poll_once()
                 self.flush_pending()
@@ -140,3 +183,65 @@ def start_watcher(root: Path) -> PollingWatcher:
         watcher.start()
         _watcher_state[:] = [watcher]
         return watcher
+
+
+_bootstrap_lock = threading.Lock()
+_synced_roots: set[Path] = set()
+
+
+def _is_orm_unsafe_command() -> bool:
+    """Return whether argv names a command that must defer ORM synchronization."""
+    return any(argument in _ORM_UNSAFE_COMMANDS for argument in sys.argv)
+
+
+def _is_runserver_parent() -> bool:
+    """Return whether this is Django's autoreloader parent process."""
+    return 'runserver' in sys.argv and os.environ.get('RUN_MAIN') != 'true'
+
+
+def _sync_root_once(root: Path) -> None:
+    """Synchronize one root at most once after a successful process-local attempt."""
+    with _bootstrap_lock:
+        if root in _synced_roots:
+            return
+        try:
+            sync_all()
+        # Startup must continue when the database is unavailable or not migrated.
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error('Local disk boot sync failed (%s)', type(exc).__name__)
+            return
+        _synced_roots.add(root)
+
+
+def maybe_start_local_disk(*, force_watch: bool | None = None) -> None:
+    """Sync local providers and optionally watch them without risking startup.
+
+    Web processes pass ``force_watch=True`` and therefore start a watcher whenever
+    a root is set. Multi-worker web deployments may run one watcher per worker;
+    provider synchronization is idempotent. Worker processes watch only when
+    ``CHIEF_LOCAL_WATCH`` is enabled.
+    """
+    root = resolve_local_root()
+    if root is None:
+        return
+    if not root.is_dir():
+        logger.warning('Configured local disk root is missing: %s', root)
+        return
+    if _is_orm_unsafe_command() or _is_runserver_parent():
+        return
+
+    _sync_root_once(root)
+    should_watch = bool(getattr(settings, 'CHIEF_LOCAL_WATCH', False))
+    if force_watch is not None:
+        should_watch = force_watch
+    if should_watch:
+        start_watcher(root)
+
+
+def sync_after_migrate(sender: object, **kwargs: object) -> None:
+    """Run the deferred local provider sync after migrations have completed."""
+    del sender, kwargs
+    root = resolve_local_root()
+    if root is None or not root.is_dir():
+        return
+    _sync_root_once(root)

@@ -29,15 +29,15 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 1 | | `backend/apps/web/apps.py`, `apps/local_disk/bootstrap.py` / `key_sync.py` | `WebConfig.ready()` runs `sync_all()` (ORM writes) before migrations; with `CHIEF_LOCAL_DIR` set this can abort `migrate` / boot when new columns are missing | Skip migrate/makemigrations argv, use `post_migrate`, and/or wrap boot sync so it never kills process startup |
+| 1 | Fixed | `backend/apps/web/apps.py`, `apps/web/local_bootstrap.py` | `WebConfig.ready()` runs `sync_all()` (ORM writes) before migrations; with `CHIEF_LOCAL_DIR` set this can abort `migrate` / boot when new columns are missing | Skips ORM-unsafe commands, defers via `post_migrate`, and contains boot sync failures |
 
 ### Important
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
 | 2 | | `backend/apps/local_disk/agent_sync.py` | Delete → re-add **unchanged** agent file sets `status=active` but skips `persist_agent_config` when `source_rev` unchanged → schedule beat stays disabled | Call `sync_agent_schedule_triggers` on disabled→active; add regression test |
-| 3 | | `backend/apps/local_disk/watch.py` | Long-lived watcher thread never calls `close_old_connections()`; stale DB connections can fail forever after reconnect | Call at top of each poll loop |
-| 4 | | `backend/apps/web/apps.py` | Multi-worker web starts N watchers / N boot syncs; design preferred one watcher | Document or guard single-watcher |
+| 3 | Fixed | `backend/apps/web/local_bootstrap.py` | Long-lived watcher thread never calls `close_old_connections()`; stale DB connections can fail forever after reconnect | Calls `close_old_connections()` at the top of each poll loop |
+| 4 | Fixed | `backend/apps/web/local_bootstrap.py` | Multi-worker web starts N watchers / N boot syncs; design preferred one watcher | Documents one idempotent watcher per web worker and guards process-local duplicate starts |
 
 ### Minor
 

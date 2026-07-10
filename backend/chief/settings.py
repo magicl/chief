@@ -23,7 +23,6 @@ INSTALLED_APPS += [  # noqa: F405
     'apps.runner',
     'apps.web',
     'apps.keys',
-    'apps.local_disk',
     'django_extensions',
     'django_celery_beat',
 ]
