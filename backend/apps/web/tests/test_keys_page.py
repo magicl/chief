@@ -94,6 +94,23 @@ class TestKeysPage(OTransactionTestCase):
             reverse('settings_keys_delete_named', kwargs={'name': 'disk-openai'}),
         )
 
+    def test_disabled_disk_key_shows_disabled_status(self) -> None:
+        """Render disabled metadata instead of treating encrypted content as set."""
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-openai',
+            'openai',
+            'sk-disk',
+            source_path='keys/disk-openai.yaml',
+            source_rev='sha256:disk',
+        )
+        self.user.credentials.filter(name='disk-openai').update(status='disabled')
+
+        response = self.client.get(reverse('settings_keys'))
+
+        self.assertContains(response, '<span class="pill waiting">Disabled</span>', html=True)
+
     def test_post_add_cannot_replace_disk_key(self) -> None:
         self.client.force_login(self.user)
         commands.upsert_user_named_from_disk(

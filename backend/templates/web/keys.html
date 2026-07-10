@@ -18,7 +18,7 @@
         <td>
           {% if key.source == 'disk' %}<span class="pill monitor">Disk</span>{% else %}<span class="pill routine">UI</span>{% endif %}
         </td>
-        <td>{% if key.is_set %}<span class="pill succeeded">Set</span>{% else %}<span class="pill waiting">Not set</span>{% endif %}</td>
+        <td>{% if key.status == 'disabled' %}<span class="pill waiting">Disabled</span>{% elif key.is_set %}<span class="pill succeeded">Set</span>{% else %}<span class="pill waiting">Not set</span>{% endif %}</td>
         <td class="muted">{% if key.updated_at %}{{ key.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
         <td>
           {% if key.source != 'disk' %}

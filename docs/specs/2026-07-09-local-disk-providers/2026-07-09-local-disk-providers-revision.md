@@ -9,4 +9,7 @@
 
 ## Items to address
 
-- [ ]   <!-- Implementer: mark [x] only when this item is done. Do not edit other sections. -->
+- [x] local_disk should not be a separate app.. rather probably put them under lib.. maybe we have lib/providers/llm/... for llms, lib/providers/key/... for key providers, lib/providers/data for data providers for now..
+- [x] we should probably separate the concepts of key providers and "data providers", where data providers can provide agents and other resources (later we'll add static data sources here as well)
+- [x] general file utils should be extracted into lib/file/... or something .. i.e. for hashing etc.
+- [x] also, let's fix all the review fixes in the review.md file associated with the spec.

@@ -35,7 +35,7 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 2 | | `backend/apps/local_disk/agent_sync.py` | Delete → re-add **unchanged** agent file sets `status=active` but skips `persist_agent_config` when `source_rev` unchanged → schedule beat stays disabled | Call `sync_agent_schedule_triggers` on disabled→active; add regression test |
+| 2 | Fixed | `backend/apps/local_disk/agent_sync.py` | Delete → re-add **unchanged** agent file sets `status=active` but skips `persist_agent_config` when `source_rev` unchanged → schedule beat stays disabled | Call `sync_agent_schedule_triggers` on disabled→active; add regression test |
 | 3 | Fixed | `backend/apps/web/local_bootstrap.py` | Long-lived watcher thread never calls `close_old_connections()`; stale DB connections can fail forever after reconnect | Calls `close_old_connections()` at the top of each poll loop |
 | 4 | Fixed | `backend/apps/web/local_bootstrap.py` | Multi-worker web starts N watchers / N boot syncs; design preferred one watcher | Documents one idempotent watcher per web worker and guards process-local duplicate starts |
 
@@ -43,9 +43,9 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 5 | | `backend/apps/keys/services/commands.py` | UI `upsert_user_named` can overwrite disk rows if called outside the view guard | Defense-in-depth: refuse overwrite when `source=disk` |
-| 6 | | `backend/apps/web/templates/web/keys.html` | Soft-disabled disk keys still show as “Set”; `KeyMetadata.status` unused | Surface disabled status |
-| 7 | | `key_sync.py` / `agent_sync.py` / `watch.py` | One-level `glob('*.yaml')` vs design “recursive watch” | Document v1 non-recursive |
+| 5 | Fixed | `backend/apps/keys/services/commands.py` | UI `upsert_user_named` can overwrite disk rows if called outside the view guard | Defense-in-depth: refuse overwrite when `source=disk` |
+| 6 | Fixed | `backend/apps/web/templates/web/keys.html` | Soft-disabled disk keys still show as “Set”; `KeyMetadata.status` unused | Surface disabled status |
+| 7 | Fixed | `key_sync.py` / `agent_sync.py` / `watch.py` | One-level `glob('*.yaml')` vs design “recursive watch” | Document v1 non-recursive |
 | 8 | | sync | Duplicate `(owner, name)` across two disk files is last-wins | Optional conflict report |
 | 9 | | `agent_parse.py` | Envelope-only edits still bump `source_rev` / may create redundant config revision | Harmless |
 

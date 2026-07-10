@@ -63,18 +63,22 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
     validated_secret = _validate_secret(secret)
-    row, _ = UserCredential.objects.update_or_create(
-        user_id=user_id,
-        name=validated_name,
-        defaults={
-            'type': type_name,
-            'encrypted_value': crypto.encrypt(validated_secret),
-            'source': CredentialSource.DB,
-            'source_path': '',
-            'source_rev': '',
-            'status': CredentialStatus.ACTIVE,
-        },
-    )
+    with transaction.atomic():
+        existing = UserCredential.objects.select_for_update().filter(user_id=user_id, name=validated_name).first()
+        if existing is not None and existing.source == CredentialSource.DISK:
+            raise KeyValidationError(f'disk-sourced credential is read-only: {validated_name}')
+        row, _ = UserCredential.objects.update_or_create(
+            user_id=user_id,
+            name=validated_name,
+            defaults={
+                'type': type_name,
+                'encrypted_value': crypto.encrypt(validated_secret),
+                'source': CredentialSource.DB,
+                'source_path': '',
+                'source_rev': '',
+                'status': CredentialStatus.ACTIVE,
+            },
+        )
     return _user_metadata(row)
 
 

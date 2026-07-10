@@ -37,13 +37,18 @@ Each app exposes **`services/queries.py`** (read) and **`services/commands.py`**
 | Package | Role |
 |---------|------|
 | `libs/agent_spec` | Pydantic `AgentConfigSpec`, load-time spec migrations (Django-free) |
-| `libs/providers` | LLM provider implementations |
+| `libs/providers/llm` | LLM provider implementations |
+| `libs/providers/key` | Key-provider protocols + disk credential parsing |
+| `libs/providers/data` | Data-provider protocols + disk agent parsing |
+| `libs/file` | Shared file normalization + content hashing |
 | `libs/tools` | Tool definitions + registry |
 | `libs/sources` | Source adapter protocol + registry |
 | `libs/algorithms` | Reusable algorithms (may call providers) |
 
 Libs stay Django-free. When a lib needs credentials, the **app boundary injects**
 callables (`token_supplier`, `secret_supplier`) — libs do not import `apps.keys`.
+Disk parsers in `providers/key` and `providers/data` depend on `libs/file`; Django
+apps own user lookup, ORM ingest, and boot/watch orchestration.
 
 `libs/agent_spec` holds the **config language** only (types, validation, dict
 upgrades). It does not touch the database or call other apps. Today this package
@@ -64,7 +69,13 @@ Local disk providers ingest user credentials from
 `$CHIEF_LOCAL_DIR/keys/*.yaml` and agent configs from
 `$CHIEF_LOCAL_DIR/agents/*.yaml` into Postgres. The database remains the runtime
 source of truth, and disk-sourced items are read-only in the UI; update their YAML
-files instead.
+files instead. Both globs are **non-recursive** in v1: nested directories under
+`keys/` and `agents/` are not scanned.
+
+When `CHIEF_LOCAL_DIR` is configured, the web process performs a best-effort boot
+sync (keys first, then agents) and starts the local watcher. Boot sync failures are
+logged without aborting startup, and ORM sync is skipped for migration/static
+management commands. Celery workers watch only when `CHIEF_LOCAL_WATCH=true`.
 
 ### Schema evolution
 

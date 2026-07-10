@@ -22,7 +22,8 @@ class TestCredentialCommands(OTransactionTestCase):
         row = UserCredential.objects.get(user_id=user.pk, name='openai-work')
         self.assertNotEqual(row.encrypted_value, b'sk-user-key')
 
-    def test_upsert_named_restores_database_provenance(self) -> None:
+    def test_upsert_named_refuses_to_replace_disk_credential(self) -> None:
+        """Keep disk-owned credential content and provenance immutable to UI writes."""
         user = get_user_model().objects.create_user(username='cmd-user-provenance', password='x')
         UserCredential.objects.create(
             user=user,
@@ -35,13 +36,15 @@ class TestCredentialCommands(OTransactionTestCase):
             status='disabled',
         )
 
-        commands.upsert_user_named(user.pk, 'openai-work', 'openai', 'sk-user-key')
+        with self.assertRaises(KeyValidationError):
+            commands.upsert_user_named(user.pk, 'openai-work', 'openai', 'sk-user-key')
 
         row = UserCredential.objects.get(user_id=user.pk, name='openai-work')
-        self.assertEqual(row.source, 'db')
-        self.assertEqual(row.source_path, '')
-        self.assertEqual(row.source_rev, '')
-        self.assertEqual(row.status, 'active')
+        self.assertEqual(row.encrypted_value, b'old')
+        self.assertEqual(row.source, 'disk')
+        self.assertEqual(row.source_path, 'keys/openai-work.yaml')
+        self.assertEqual(row.source_rev, 'sha256:old')
+        self.assertEqual(row.status, 'disabled')
 
     def test_upsert_named_rejects_reserved_prefix(self) -> None:
         user = get_user_model().objects.create_user(username='cmd-user2', password='x')
