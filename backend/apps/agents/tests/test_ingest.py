@@ -58,6 +58,30 @@ class ValidateSpecToolsTests(OTestCase):
 
 
 class CreateAgentFromSpecTests(OTestCase):
+    def test_create_defaults_to_active_with_blank_source_path(self) -> None:
+        user = get_user_model().objects.create_user(username='ingest-defaults', password='x')
+        agent = create_agent_from_spec(
+            user,
+            CLOCK_SPEC.model_copy(),
+            name='Default agent',
+            identifier='default-agent',
+        )
+
+        self.assertEqual(getattr(agent, 'status', None), 'active')
+        self.assertEqual(getattr(agent, 'source_path', None), '')
+
+    def test_create_sets_source_path(self) -> None:
+        user = get_user_model().objects.create_user(username='ingest-disk', password='x')
+        agent = create_agent_from_spec(
+            user,
+            CLOCK_SPEC.model_copy(),
+            name='Disk agent',
+            identifier='disk-agent',
+            source_path='agents/disk-agent.yaml',
+        )
+
+        self.assertEqual(getattr(agent, 'source_path', None), 'agents/disk-agent.yaml')
+
     def test_creates_agent_config_and_triggers(self) -> None:
         user = get_user_model().objects.create_user(username='ingest', password='x')
         spec = AgentConfigSpec(

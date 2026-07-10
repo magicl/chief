@@ -6,14 +6,17 @@
 
 from __future__ import annotations
 
-from apps.agents.models import Agent, Trigger, TriggerKind, TriggerStatus
+from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.runner.session_start import StartSessionError, start_trigger_session
 from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.utils import timezone
 
 
 def start_manual_session(agent: Agent, *, initial_message: str = '') -> AgentSession:
-    """Create and queue a session from the agent's active manual trigger."""
+    """Create and queue a session from an active agent's manual trigger."""
+    if agent.status != AgentStatus.ACTIVE:
+        raise StartSessionError(f'Agent {agent.identifier!r} is disabled')
+
     if agent.current_config is None:
         raise StartSessionError(f'Agent {agent.identifier!r} has no current config')
 

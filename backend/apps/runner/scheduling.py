@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from apps.agents.models import Trigger, TriggerKind, TriggerStatus
+from apps.agents.models import AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue
 from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.db import transaction
@@ -83,33 +83,27 @@ def trigger_prompt(trigger: Trigger) -> str:
 def queue_item_bootstrap_message(*, prompt: str, item_id: UUID, payload: dict[str, object]) -> str:
     """Format the bootstrap user message for a queue-trigger session."""
     payload_json = json.dumps(payload, indent=2, sort_keys=True)
-    return (
-        f'{prompt.rstrip()}\n'
-        '\n'
-        f'item_id: {item_id}\n'
-        '\n'
-        f'payload:\n{payload_json}'
-    )
+    return f'{prompt.rstrip()}\n' '\n' f'item_id: {item_id}\n' '\n' f'payload:\n{payload_json}'
 
 
 def _active_triggers(*, kind: str) -> list[Trigger]:
-    """Return active triggers of *kind* on each agent's current config revision."""
+    """Return active triggers of *kind* on active agents' current config revisions."""
     return list(
         Trigger.objects.filter(
             kind=kind,
             status=TriggerStatus.ACTIVE,
+            agent__status=AgentStatus.ACTIVE,
             agent__current_config_id=F('agent_config_id'),
         ).select_related('agent', 'agent_config')
     )
 
 
 def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = None) -> bool:
-    """Start a session for one schedule trigger when its Celery beat task fires."""
-    from django.utils import timezone
-
+    """Start a session when an active agent's schedule trigger beat task fires."""
     from apps.agents.services.schedule_beat import disable_schedule_trigger_beat
     from apps.runner.dispatch import push_chat_and_dispatch
     from apps.runner.session_start import start_trigger_session
+    from django.utils import timezone
 
     if now is None:
         now = timezone.now()
@@ -125,7 +119,11 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
         logger.warning('dispatch_schedule_trigger: trigger %s is not schedule kind', trigger.pk)
         return False
 
-    if trigger.agent_config_id != agent.current_config_id or trigger.status != TriggerStatus.ACTIVE:
+    if (
+        agent.status != AgentStatus.ACTIVE
+        or trigger.agent_config_id != agent.current_config_id
+        or trigger.status != TriggerStatus.ACTIVE
+    ):
         disable_schedule_trigger_beat(trigger.id)
         return False
 
@@ -221,7 +219,7 @@ def dispatch_queue_triggers() -> DispatchStats:
 
 
 def dispatch_queue_triggers_for_queue(*, queue_pk: str) -> DispatchStats:
-    """Fill queue trigger slots only for triggers bound to the queue identified by *queue_pk*."""
+    """Fill active-agent trigger slots bound to the queue identified by *queue_pk*."""
     try:
         queue = Queue.objects.select_related('agent').get(pk=queue_pk)
     except Queue.DoesNotExist:
@@ -235,6 +233,7 @@ def dispatch_queue_triggers_for_queue(*, queue_pk: str) -> DispatchStats:
         kind=TriggerKind.QUEUE,
         status=TriggerStatus.ACTIVE,
         agent_id=queue.agent_id,
+        agent__status=AgentStatus.ACTIVE,
         agent__current_config_id=F('agent_config_id'),
         spec__queue=queue_id,
     ).select_related('agent', 'agent_config')

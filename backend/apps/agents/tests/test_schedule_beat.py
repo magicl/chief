@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from apps.agents.ingest import persist_agent_config
-from apps.agents.models import Agent, Trigger, TriggerStatus
+from apps.agents.models import Agent, AgentStatus, Trigger, TriggerStatus
 from apps.agents.services.schedule_beat import (
     SCHEDULE_DISPATCH_TASK,
     periodic_task_name,
@@ -116,6 +116,16 @@ class TestScheduleBeatSync(OTestCase):
         _agent, trigger = self._agent_with_schedule()
         trigger.status = TriggerStatus.DISABLED
         trigger.save(update_fields=['status'])
+
+        sync_schedule_trigger(trigger.id)
+
+        task = PeriodicTask.objects.get(name=periodic_task_name(trigger.id))
+        self.assertFalse(task.enabled)
+
+    def test_disabled_agent_disables_periodic_task(self) -> None:
+        agent, trigger = self._agent_with_schedule()
+        agent.status = AgentStatus.DISABLED
+        agent.save(update_fields=['status'])
 
         sync_schedule_trigger(trigger.id)
 
