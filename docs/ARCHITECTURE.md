@@ -60,6 +60,12 @@ The **`AgentConfigSpec`** (YAML/JSON) is the declarative definition of an agent.
 Postgres holds an immutable **`AgentConfig`** row per revision plus **derived runtime
 rows** (triggers, queues, sources, …) that Celery and tools operate on.
 
+Local disk providers ingest user credentials from
+`$CHIEF_LOCAL_DIR/keys/*.yaml` and agent configs from
+`$CHIEF_LOCAL_DIR/agents/*.yaml` into Postgres. The database remains the runtime
+source of truth, and disk-sourced items are read-only in the UI; update their YAML
+files instead.
+
 ### Schema evolution
 
 - **`schema_version`** in JSON mirrors **`AgentConfig.spec_version`** on save.
