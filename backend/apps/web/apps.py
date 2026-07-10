@@ -8,3 +8,9 @@ from django.apps import AppConfig
 class WebConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.web'
+
+    def ready(self) -> None:
+        """Synchronize and watch configured local disk providers in web processes."""
+        from apps.local_disk.bootstrap import maybe_start_local_disk
+
+        maybe_start_local_disk(force_watch=True)
