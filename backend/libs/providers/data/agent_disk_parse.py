@@ -49,6 +49,8 @@ def parse_agent_file(path: Path, *, root: Path) -> AgentDiskFile:
     body = {key: value for key, value in loaded.items() if key not in _ENVELOPE_FIELDS}
     body_yaml = yaml.safe_dump(body, sort_keys=False, allow_unicode=True)
     source_path = path.resolve().relative_to(root.resolve()).as_posix()
+    # Hash the config body only so envelope-only edits (display name) do not
+    # create redundant AgentConfig revisions or rematerialize beat.
     return AgentDiskFile(
         owner=owner,
         identifier=identifier,
@@ -56,5 +58,5 @@ def parse_agent_file(path: Path, *, root: Path) -> AgentDiskFile:
         body=body,
         body_yaml=body_yaml,
         source_path=source_path,
-        source_rev=content_hash(raw),
+        source_rev=content_hash(body_yaml),
     )

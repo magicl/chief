@@ -12,7 +12,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from apps.agents.ingest import persist_agent_config
-from apps.agents.models import Agent, AgentConfig
+from apps.agents.models import Agent, AgentConfig, AgentConfigSource
 from apps.agents.services.config_commands import (
     ConfigCommandError,
     create_from_yaml,
@@ -52,7 +52,7 @@ from libs.agent_specs import load_example_text
 
 def _agent_write_denied(agent: Agent) -> HttpResponseForbidden | None:
     """Return a clear forbidden response when disk owns the agent configuration."""
-    if agent.config_source == 'disk':
+    if agent.config_source == AgentConfigSource.DISK:
         return HttpResponseForbidden('disk-sourced agent is read-only; edit the source file instead')
     return None
 

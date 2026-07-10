@@ -16,12 +16,23 @@ class AgentStatus(models.TextChoices):
     DISABLED = 'disabled', 'Disabled'
 
 
+class AgentConfigSource(models.TextChoices):
+    """Identify which provider last wrote an agent's config."""
+
+    UI = 'ui', 'UI'
+    DISK = 'disk', 'Disk'
+
+
 class Agent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='agents')
     name = models.CharField(max_length=255)
     identifier = models.CharField(max_length=255)
-    config_source = models.CharField(max_length=255, default='ui')
+    config_source = models.CharField(
+        max_length=255,
+        choices=AgentConfigSource.choices,
+        default=AgentConfigSource.UI,
+    )
     source_path = models.CharField(max_length=512, blank=True, default='')
     status = models.CharField(max_length=16, choices=AgentStatus.choices, default=AgentStatus.ACTIVE)
     current_config = models.ForeignKey(

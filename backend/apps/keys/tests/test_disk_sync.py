@@ -170,3 +170,21 @@ class TestKeyDiskSync(OTestCase):
         row = UserCredential.objects.get(user=self.user, name='work-openai')
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
         self.assertNotIn('ultra-secret', '\n'.join(captured.output))
+
+    def test_duplicate_identity_across_files_reports_conflict(self) -> None:
+        """Keep the first file's value and report later duplicates as failures."""
+        self.write_key('a-first.yaml', name='shared-key', value='sk-first')
+        self.write_key('b-second.yaml', name='shared-key', value='sk-second')
+
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR'):
+            report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 1)
+        self.assertEqual(
+            {item.detail for item in report.items if not item.success},
+            {'duplicate identity'},
+        )
+        row = UserCredential.objects.get(user=self.user, name='shared-key')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-first')
+        self.assertEqual(row.source_path, 'keys/a-first.yaml')

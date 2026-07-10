@@ -15,9 +15,9 @@
 
 ### Assessment
 
-**Ready to merge?** Yes (with optional follow-ups)
+**Ready to merge?** Yes
 
-**Reasoning:** Target layout landed (`libs/providers/{llm,key,data}`, `libs/file`, app ingest, `apps.web.local_bootstrap`; `apps.local_disk` removed). Prior Critical/Important/Minor #1–#7 verified Fixed with tests. No new Critical issues. One Important follow-up (boot sync failure leaves files unloaded until edit/restart).
+**Reasoning:** Target layout landed (`libs/providers/{llm,key,data}`, `libs/file`, app ingest, `apps.web.local_bootstrap`; `apps.local_disk` removed). Prior Critical/Important/Minor #1–#7 verified Fixed with tests. Follow-ups #10–#15 Fixed (boot retry + periodic full resync; IntegrityError containment; body-only `source_rev`; `AgentConfigSource`; no boot mkdir; duplicate key identity reported).
 
 ### Strengths
 
@@ -38,22 +38,21 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 10 | | `apps/web/local_bootstrap.py` | If initial `sync_all` fails (e.g. DB not ready), root is not marked synced and watcher only reacts to *changes* — existing files stay unloaded until edit/restart | Bounded retry or periodic full resync |
+| 10 | Fixed | `apps/web/local_bootstrap.py` | If initial `sync_all` fails (e.g. DB not ready), root is not marked synced and watcher only reacts to *changes* — existing files stay unloaded until edit/restart | Bounded boot retries + periodic full resync in watcher |
 
 #### Minor
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 11 | | `disk_sync.py` (keys/agents) | Per-file `except` omits `IntegrityError` — one unique-constraint race can truncate the rest of a directory batch | Add to caught tuple |
-| 12 | | `libs/providers/data/agent_disk_parse.py` | `source_rev` hashes full file including envelope → envelope-only edits create config revisions | Hash body only (was prior #9) |
-| 13 | | agents `config_source` | Bare `'disk'`/`'ui'` strings vs keys’ enum | Optional TextChoices |
-| 14 | | `local_bootstrap.py` | Boot `mkdir` of `keys/`/`agents/` writes into operator dir | Drop or document |
-| 15 | | key sync | Duplicate `(owner,name)` across two files is last-wins | Was prior #8; optional |
+| 11 | Fixed | `disk_sync.py` (keys/agents) | Per-file `except` omits `IntegrityError` — one unique-constraint race can truncate the rest of a directory batch | Add to caught tuple |
+| 12 | Fixed | `libs/providers/data/agent_disk_parse.py` | `source_rev` hashes full file including envelope → envelope-only edits create config revisions | Hash body only (was prior #9) |
+| 13 | Fixed | agents `config_source` | Bare `'disk'`/`'ui'` strings vs keys’ enum | Optional TextChoices |
+| 14 | Fixed | `local_bootstrap.py` | Boot `mkdir` of `keys/`/`agents/` writes into operator dir | Drop or document |
+| 15 | Fixed | key sync | Duplicate `(owner,name)` across two files is last-wins | Was prior #8; optional |
 
 ### Recommendations
 
-- Track #10 for compose start-order robustness
-- Fast-follow #11–#12 if cheap
+- None outstanding from this review
 
 ---
 
@@ -88,5 +87,5 @@
 | 5 | Fixed | `upsert_user_named` | Could overwrite disk | Refuses `source=disk` |
 | 6 | Fixed | `keys.html` | Disabled not shown | Disabled pill |
 | 7 | Fixed | globs | Non-recursive vs design | Documented |
-| 8 | | sync | Duplicate names last-wins | See follow-up #15 |
-| 9 | | agent parse | Envelope bumps rev | See follow-up #12 |
+| 8 | Fixed | sync | Duplicate names last-wins | See follow-up #15 |
+| 9 | Fixed | agent parse | Envelope bumps rev | See follow-up #12 |

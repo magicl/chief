@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 Fingerprint = tuple[int, int, str]
 _ORM_UNSAFE_COMMANDS = frozenset({'migrate', 'makemigrations', 'collectstatic'})
+_DEFAULT_BOOT_SYNC_ATTEMPTS = 3
+_DEFAULT_BOOT_SYNC_DELAY_S = 0.5
+_DEFAULT_FULL_RESYNC_INTERVAL_S = 30.0
 
 
 def resolve_local_root() -> Path | None:
@@ -47,14 +50,16 @@ def agents_dir() -> Path | None:
 
 
 def sync_all() -> SyncReport:
-    """Ingest keys before agents when the configured local root exists."""
+    """Ingest keys before agents when the configured local root exists.
+
+    Does not create ``keys/`` or ``agents/`` — operators own the tree layout.
+    Missing provider directories are treated as empty by the sync helpers.
+    """
     root = resolve_local_root()
     if root is None or not root.is_dir():
         return SyncReport()
 
     # Agent materialization may reference credentials, so preserve this order.
-    (root / 'keys').mkdir(exist_ok=True)
-    (root / 'agents').mkdir(exist_ok=True)
     key_report = sync_keys_dir(root=root)
     agent_report = sync_agents_dir(root=root)
     return SyncReport(
@@ -87,17 +92,22 @@ class PollingWatcher:
         *,
         interval: float = 1.0,
         debounce: float = 0.3,
+        full_resync_interval: float = _DEFAULT_FULL_RESYNC_INTERVAL_S,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """Capture the initial tree state and configure polling timings."""
         self.root = root.resolve()
         self.interval = interval
         self.debounce = debounce
+        self.full_resync_interval = full_resync_interval
         self.clock = clock
         self._pending: dict[Path, float] = {}
         self._snapshot = self._scan()
         self._stopped = threading.Event()
         self._thread: threading.Thread | None = None
+        # Schedule the first full resync after one interval so boot sync can
+        # finish first; a failed boot still recovers without waiting for edits.
+        self._next_full_resync = self.clock() + self.full_resync_interval
 
     def _scan(self) -> dict[Path, Fingerprint]:
         """Return content-aware fingerprints for provider YAML files."""
@@ -142,6 +152,21 @@ class PollingWatcher:
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error('Local disk path sync failed for %s (%s)', path, type(exc).__name__)
 
+    def maybe_full_resync(self) -> None:
+        """Run a full provider sync when the periodic deadline has elapsed."""
+        if self.full_resync_interval <= 0:
+            return
+        now = self.clock()
+        if now < self._next_full_resync:
+            return
+        self._next_full_resync = now + self.full_resync_interval
+        try:
+            sync_all()
+            _mark_root_synced(self.root)
+        # Periodic resync must not stop change detection on transient failures.
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error('Local disk full resync failed (%s)', type(exc).__name__)
+
     def run(self) -> None:
         """Poll until stopped while refreshing thread-local DB connections."""
         while not self._stopped.wait(self.interval):
@@ -149,6 +174,7 @@ class PollingWatcher:
             try:
                 self.poll_once()
                 self.flush_pending()
+                self.maybe_full_resync()
             # Preserve future polling after an unexpected scan failure.
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error('Local disk watcher poll failed (%s)', type(exc).__name__)
@@ -189,6 +215,12 @@ _bootstrap_lock = threading.Lock()
 _synced_roots: set[Path] = set()
 
 
+def _mark_root_synced(root: Path) -> None:
+    """Record that one root completed a successful process-local sync."""
+    with _bootstrap_lock:
+        _synced_roots.add(root.resolve())
+
+
 def _is_orm_unsafe_command() -> bool:
     """Return whether argv names a command that must defer ORM synchronization."""
     return any(argument in _ORM_UNSAFE_COMMANDS for argument in sys.argv)
@@ -199,18 +231,35 @@ def _is_runserver_parent() -> bool:
     return 'runserver' in sys.argv and os.environ.get('RUN_MAIN') != 'true'
 
 
-def _sync_root_once(root: Path) -> None:
-    """Synchronize one root at most once after a successful process-local attempt."""
+def _sync_root_once(
+    root: Path,
+    *,
+    attempts: int = _DEFAULT_BOOT_SYNC_ATTEMPTS,
+    delay_s: float = _DEFAULT_BOOT_SYNC_DELAY_S,
+) -> None:
+    """Synchronize one root at most once after a successful process-local attempt.
+
+    Retries a bounded number of times so a briefly unavailable database during
+    compose start does not leave existing files unloaded until an edit or restart.
+    """
+    resolved = root.resolve()
     with _bootstrap_lock:
-        if root in _synced_roots:
+        if resolved in _synced_roots:
             return
+    last_exc_name = 'Exception'
+    for attempt in range(max(attempts, 1)):
         try:
             sync_all()
         # Startup must continue when the database is unavailable or not migrated.
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error('Local disk boot sync failed (%s)', type(exc).__name__)
-            return
-        _synced_roots.add(root)
+            last_exc_name = type(exc).__name__
+            if attempt + 1 >= attempts:
+                logger.error('Local disk boot sync failed (%s)', last_exc_name)
+                return
+            time.sleep(delay_s)
+            continue
+        _mark_root_synced(resolved)
+        return
 
 
 def maybe_start_local_disk(*, force_watch: bool | None = None) -> None:

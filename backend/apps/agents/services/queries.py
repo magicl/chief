@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.agents.models import Agent, AgentConfig
+from apps.agents.models import Agent, AgentConfig, AgentConfigSource
 from apps.agents.services.config_commands import suggest_identifier
 from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
@@ -210,7 +210,7 @@ def get_create_editor_context(
 def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     """Template context for the config editor page."""
     config = agent.current_config
-    read_only = agent.config_source == 'disk'
+    read_only = agent.config_source == AgentConfigSource.DISK
     spec_yaml = ''
     spec_version = 0
     source_rev = '—'

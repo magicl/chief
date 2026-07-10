@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 from apps.agents.ingest import IngestError, create_agent_from_spec, persist_agent_config
-from apps.agents.models import Agent, AgentStatus
+from apps.agents.models import Agent, AgentConfigSource, AgentStatus
 from apps.agents.services.config_validation import (
     ConfigValidationError,
     validate_agent_config_yaml,
@@ -20,7 +20,7 @@ from apps.agents.services.schedule_beat import sync_agent_schedule_triggers
 from apps.keys.services.disk_sync import SyncItemResult, SyncReport
 from apps.keys.services.owner import resolve_owner
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from libs.providers.data.agent_disk_parse import AgentDiskFile, parse_agent_file
 
 logger = logging.getLogger(__name__)
@@ -55,13 +55,13 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
             spec,
             name=parsed.name,
             identifier=parsed.identifier,
-            config_source='disk',
+            config_source=AgentConfigSource.DISK,
             source_path=parsed.source_path,
             source_rev=parsed.source_rev,
             raw_yaml=parsed.body_yaml,
         )
         return
-    if agent.config_source != 'disk':
+    if agent.config_source != AgentConfigSource.DISK:
         raise ValueError('agent is owned by another config source')
 
     was_disabled = agent.status == AgentStatus.DISABLED
@@ -98,7 +98,15 @@ def sync_agent_path(path: Path, *, root: Path) -> SyncItemResult:
     try:
         parsed = parse_agent_file(path, root=root)
         _persist_parsed_agent(parsed)
-    except (OSError, UnicodeError, yaml.YAMLError, ConfigValidationError, IngestError, ValueError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        yaml.YAMLError,
+        ConfigValidationError,
+        IngestError,
+        ValueError,
+        IntegrityError,
+    ) as exc:
         # Parser details can quote YAML source lines, so logs include only safe metadata.
         logger.error('Agent file sync failed for %s (%s)', source_path, type(exc).__name__)
         return SyncItemResult(source_path=source_path, success=False, detail=type(exc).__name__)
@@ -109,7 +117,7 @@ def soft_disable_missing_disk_agents(*, present_paths: set[str]) -> int:
     """Disable active disk agents whose bound files are no longer present."""
     missing_ids = list(
         Agent.objects.filter(
-            config_source='disk',
+            config_source=AgentConfigSource.DISK,
             status=AgentStatus.ACTIVE,
         )
         .exclude(source_path__in=present_paths)

@@ -98,3 +98,25 @@ class TestAgentDiskParse(OTestCase):
 
             with self.assertRaises(YAMLError):
                 parse_agent_file(path, root=root)
+
+    def test_envelope_only_edit_keeps_source_rev(self) -> None:
+        """Hash only the config body so envelope-only edits do not bump revisions."""
+        with TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            path = root / 'agents' / 'file.yaml'
+            path.parent.mkdir()
+            path.write_text(
+                'owner: alice\nidentifier: inbox\nname: Inbox\nschema_version: 2\nsystem_prompt: Help.\n',
+                encoding='utf-8',
+            )
+            first = parse_agent_file(path, root=root)
+            path.write_text(
+                'owner: bob\nidentifier: inbox\nname: Renamed\nschema_version: 2\nsystem_prompt: Help.\n',
+                encoding='utf-8',
+            )
+            second = parse_agent_file(path, root=root)
+
+        self.assertEqual(first.body_yaml, second.body_yaml)
+        self.assertEqual(first.source_rev, second.source_rev)
+        self.assertEqual(second.owner, 'bob')
+        self.assertEqual(second.name, 'Renamed')

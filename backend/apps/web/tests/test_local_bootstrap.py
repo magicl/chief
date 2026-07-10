@@ -109,8 +109,9 @@ class TestSyncAll(OTestCase):
             ):
                 report = sync_all()
 
-            self.assertTrue((Path(root) / 'keys').is_dir())
-            self.assertTrue((Path(root) / 'agents').is_dir())
+            # Operators own the tree; boot sync must not mkdir provider dirs.
+            self.assertFalse((Path(root) / 'keys').exists())
+            self.assertFalse((Path(root) / 'agents').exists())
 
         self.assertEqual(calls, ['keys', 'agents'])
         self.assertEqual(report.items, key_report.items + agent_report.items)
@@ -171,7 +172,7 @@ class TestPollingWatcher(OTestCase):
         """Refresh database connections before each watcher polling batch."""
         calls: list[str] = []
         with TemporaryDirectory() as root:
-            watcher = PollingWatcher(Path(root), interval=0.0)
+            watcher = PollingWatcher(Path(root), interval=0.0, full_resync_interval=0.0)
 
             def poll_once() -> None:
                 """Record one poll and stop the watcher after this iteration."""
@@ -189,6 +190,29 @@ class TestPollingWatcher(OTestCase):
                 watcher.run()
 
         self.assertEqual(calls, ['close', 'poll', 'flush'])
+
+    def test_periodic_full_resync_runs_after_interval(self) -> None:
+        """Recover unloaded files by periodically re-running a full provider sync."""
+        clock = FakeClock()
+        with TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            watcher = PollingWatcher(root, full_resync_interval=10.0, clock=clock)
+
+            with patch('apps.web.local_bootstrap.sync_all') as sync_all_mock:
+                watcher.maybe_full_resync()
+                sync_all_mock.assert_not_called()
+
+                clock.advance(10.0)
+                watcher.maybe_full_resync()
+                sync_all_mock.assert_called_once_with()
+
+                watcher.maybe_full_resync()
+                sync_all_mock.assert_called_once_with()
+
+                clock.advance(10.0)
+                watcher.maybe_full_resync()
+
+        self.assertEqual(sync_all_mock.call_count, 2)
 
 
 class TestLocalDiskBootstrap(OTestCase):
@@ -250,13 +274,40 @@ class TestLocalDiskBootstrap(OTestCase):
         with TemporaryDirectory() as root:
             with (
                 override_settings(CHIEF_LOCAL_DIR=root),
-                patch('apps.web.local_bootstrap.sync_all', side_effect=RuntimeError('database unavailable')),
+                patch(
+                    'apps.web.local_bootstrap.sync_all',
+                    side_effect=RuntimeError('database unavailable'),
+                ),
+                patch('apps.web.local_bootstrap.time.sleep'),
                 patch('apps.web.local_bootstrap.start_watcher') as start_watcher,
                 patch('apps.web.local_bootstrap.logger'),
             ):
                 maybe_start_local_disk(force_watch=True)
 
         start_watcher.assert_called_once_with(Path(root).resolve())
+
+    def test_boot_sync_retries_transient_failure(self) -> None:
+        """Retry boot sync a bounded number of times before giving up."""
+        attempts = {'count': 0}
+
+        def flaky_sync() -> SyncReport:
+            """Fail twice, then succeed, to exercise bounded boot retries."""
+            attempts['count'] += 1
+            if attempts['count'] < 3:
+                raise RuntimeError('database unavailable')
+            return SyncReport()
+
+        with TemporaryDirectory() as root:
+            with (
+                override_settings(CHIEF_LOCAL_DIR=root),
+                patch('apps.web.local_bootstrap.sync_all', side_effect=flaky_sync),
+                patch('apps.web.local_bootstrap.time.sleep') as sleep_mock,
+                patch('apps.web.local_bootstrap.start_watcher'),
+            ):
+                maybe_start_local_disk(force_watch=True)
+
+        self.assertEqual(attempts['count'], 3)
+        self.assertEqual(sleep_mock.call_count, 2)
 
     def test_post_migrate_sync_uses_safe_path(self) -> None:
         """Run the deferred sync after migrations even under migrate argv."""

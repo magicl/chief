@@ -16,6 +16,7 @@ from apps.keys.services.commands import upsert_user_named_from_disk
 from apps.keys.services.owner import resolve_owner
 from apps.keys.types import validate_type
 from django.conf import settings
+from django.db import IntegrityError
 from libs.providers.key.disk_parse import parse_key_file
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,12 @@ def _relative_path(path: Path, root: Path) -> str:
         return path.name
 
 
-def sync_key_path(path: Path, *, root: Path) -> SyncItemResult:
+def sync_key_path(
+    path: Path,
+    *,
+    root: Path,
+    seen_identities: set[tuple[int, str]] | None = None,
+) -> SyncItemResult:
     """Parse and synchronize one credential file while containing file-level failures."""
     source_path = _relative_path(path, root)
     try:
@@ -72,6 +78,15 @@ def sync_key_path(path: Path, *, root: Path) -> SyncItemResult:
         if owner is None:
             logger.error('Credential owner not found for %s (owner=%s)', source_path, parsed.owner)
             return SyncItemResult(source_path=source_path, success=False, detail='owner not found')
+        identity = (int(owner.pk), parsed.name)
+        if seen_identities is not None and identity in seen_identities:
+            logger.error(
+                'Duplicate credential identity for %s (owner=%s name=%s)',
+                source_path,
+                parsed.owner,
+                parsed.name,
+            )
+            return SyncItemResult(source_path=source_path, success=False, detail='duplicate identity')
         upsert_user_named_from_disk(
             owner.pk,
             parsed.name,
@@ -80,7 +95,9 @@ def sync_key_path(path: Path, *, root: Path) -> SyncItemResult:
             source_path=parsed.source_path,
             source_rev=parsed.source_rev,
         )
-    except (OSError, UnicodeError, yaml.YAMLError, ValueError) as exc:
+        if seen_identities is not None:
+            seen_identities.add(identity)
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError, IntegrityError) as exc:
         # YAML parser messages can quote source lines, including credential values.
         logger.error('Credential file sync failed for %s (%s)', source_path, type(exc).__name__)
         return SyncItemResult(source_path=source_path, success=False, detail=type(exc).__name__)
@@ -109,6 +126,9 @@ def sync_keys_dir(*, root: Path | None = None) -> SyncReport:
         paths.update(directory.glob('*.yml'))
 
     present_paths = {_relative_path(path, resolved_root) for path in paths}
-    report = SyncReport(items=[sync_key_path(path, root=resolved_root) for path in sorted(paths)])
+    seen_identities: set[tuple[int, str]] = set()
+    report = SyncReport(
+        items=[sync_key_path(path, root=resolved_root, seen_identities=seen_identities) for path in sorted(paths)],
+    )
     report.disabled = soft_disable_missing_disk_keys(present_paths=present_paths)
     return report
