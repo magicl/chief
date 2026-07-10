@@ -9,6 +9,20 @@ from django.db.models import Q
 from olib.py.utils.uuid7 import uuid7
 
 
+class CredentialSource(models.TextChoices):
+    """Identify the provider that last wrote a user credential."""
+
+    DB = 'db', 'Database'
+    DISK = 'disk', 'Disk'
+
+
+class CredentialStatus(models.TextChoices):
+    """Describe whether a user credential is available for resolution."""
+
+    ACTIVE = 'active', 'Active'
+    DISABLED = 'disabled', 'Disabled'
+
+
 class SystemCredential(models.Model):
     """Platform-scoped named credential; at most one per type may be marked default."""
 
@@ -43,6 +57,10 @@ class UserCredential(models.Model):
     name = models.CharField(max_length=64)
     type = models.CharField(max_length=32)
     encrypted_value = models.BinaryField()
+    source = models.CharField(max_length=16, choices=CredentialSource.choices, default=CredentialSource.DB)
+    source_path = models.CharField(max_length=512, blank=True, default='')
+    source_rev = models.CharField(max_length=128, blank=True, default='')
+    status = models.CharField(max_length=16, choices=CredentialStatus.choices, default=CredentialStatus.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

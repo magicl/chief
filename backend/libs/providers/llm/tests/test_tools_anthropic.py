@@ -10,7 +10,7 @@ from apps.runner.tool_definitions import build_tool_definitions
 # isort: split
 
 from libs.agent_spec import ToolInstance
-from libs.providers.anthropic_provider import AnthropicProvider
+from libs.providers.llm.anthropic_provider import AnthropicProvider
 from pydantic import TypeAdapter
 
 from olib.py.django.test.cases import OTestCase

@@ -132,10 +132,16 @@ body.config-page main { max-width: none; }
   {% else %}
   <div class="meta-bar card" style="padding:.75rem 1rem;">
     <span>Source: <strong>{{ source_label }}</strong></span>
+    {% if source_path %}<span>Path: <code>{{ source_path }}</code></span>{% endif %}
     <span>Revision: <code>{{ source_rev[:48] }}{% if source_rev|length > 48 %}…{% endif %}</code></span>
     <span>Schema v{{ spec_version }}</span>
     {% if pinned_sessions %}<span>{{ pinned_sessions }} active session(s) on older config</span>{% endif %}
   </div>
+  {% if read_only %}
+  <div class="card" style="border-color:#4a3a1f; color:#f0e29b;">
+    <strong>Read-only disk configuration.</strong> Edit <code>{{ source_path }}</code> and let the disk watcher reload it.
+  </div>
+  {% endif %}
   {% endif %}
 
   <div class="config-workspace">
@@ -144,7 +150,8 @@ body.config-page main { max-width: none; }
         <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
           Name
           <input type="text" id="agent-name" maxlength="255" required
-                 value="{% if is_create %}{{ suggested_name }}{% else %}{{ agent.name }}{% endif %}">
+                 value="{% if is_create %}{{ suggested_name }}{% else %}{{ agent.name }}{% endif %}"
+                 {% if read_only %}disabled{% endif %}>
         </label>
         <label style="font-size:.85rem; display:flex; align-items:center; gap:.35rem;">
           Identifier
@@ -152,9 +159,10 @@ body.config-page main { max-width: none; }
                  pattern="[a-zA-Z0-9._-]+"
                  value="{% if is_create %}{{ suggested_identifier }}{% else %}{{ agent.identifier }}{% endif %}"
                  placeholder="auto from name"
-                 {% if not is_create %}required{% endif %}>
+                 {% if not is_create %}required{% endif %}
+                 {% if read_only %}disabled{% endif %}>
         </label>
-        <button type="button" id="save-config" class="primary">
+        <button type="button" id="save-config" class="primary"{% if read_only %} disabled{% endif %}>
           {% if is_create %}Create agent{% else %}Save{% endif %}
         </button>
       </div>
@@ -189,6 +197,7 @@ body.config-page main { max-width: none; }
       {% endif %}
     </div>
 
+    {% if not read_only %}
     <div class="config-resizer" id="config-sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize helpers sidebar"></div>
 
     <aside class="config-sidebar" id="config-sidebar">
@@ -364,6 +373,7 @@ body.config-page main { max-width: none; }
         </details>
       </section>
     </aside>
+    {% endif %}
   </div>
 </div>
 

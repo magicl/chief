@@ -12,6 +12,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { yaml } from '@codemirror/lang-yaml';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { EditorState } from '@codemirror/state';
 
 function readPageData() {
   const el = document.getElementById('config-page-data');
@@ -504,7 +505,7 @@ function init() {
   const data = readPageData();
   const urls = data.urls || {};
   const restored = sessionStorage.getItem('agentConfigRestoreYaml');
-  if (restored) {
+  if (restored && !data.readOnly) {
     sessionStorage.removeItem('agentConfigRestoreYaml');
     data.initialYaml = restored;
   }
@@ -529,6 +530,8 @@ function init() {
       override: [(ctx) => schemaCompletions(ctx, schemaKeys)],
     }),
     EditorView.lineWrapping,
+    EditorState.readOnly.of(Boolean(data.readOnly)),
+    EditorView.editable.of(!data.readOnly),
   ];
 
   const parent = document.getElementById('config-editor');

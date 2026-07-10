@@ -30,9 +30,9 @@ from django.utils import timezone
 # isort: split
 
 from libs.agent_spec import AgentConfigSpec, ToolInstance
-from libs.providers.base import LLMProvider, ProviderError, StreamResult
-from libs.providers.errors import ProviderConfigurationError
-from libs.providers.registry import make_provider
+from libs.providers.llm.base import LLMProvider, ProviderError, StreamResult
+from libs.providers.llm.errors import ProviderConfigurationError
+from libs.providers.llm.registry import make_provider
 from libs.tools.base import parse_qualified_tool_name
 
 logger = logging.getLogger(__name__)

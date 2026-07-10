@@ -4,6 +4,7 @@
 # ~
 import logging
 
+from apps.agents.models import AgentStatus
 from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession
 from django.contrib.auth import get_user_model
@@ -42,6 +43,17 @@ class TestStartAgentSessionView(OTransactionTestCase):
         self.assertEqual(response['Location'], reverse('session_detail', kwargs={'session_id': session.id}))
         page = self.client.get(response['Location'])
         self.assertEqual(page.status_code, 200)
+
+    def test_disabled_agent_returns_clear_failure(self) -> None:
+        self.client.force_login(self.user)
+        self.agent.status = AgentStatus.DISABLED
+        self.agent.save(update_fields=['status'])
+
+        response = self.client.post(reverse('start_agent_session', kwargs={'agent_id': self.agent.id}))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'is disabled', response.content)
+        self.assertFalse(AgentSession.objects.filter(agent=self.agent).exists())
 
     @expectLogItems(
         [ExpectLogItem('django.request', logging.WARNING, r'Not Found: /agents/[0-9a-f-]+/start/', count=1)]

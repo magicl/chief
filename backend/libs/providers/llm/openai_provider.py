@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from libs.providers.base import (
+from libs.providers.llm.base import (
     Delta,
     LLMProvider,
     ModelPricing,
@@ -21,9 +21,12 @@ from libs.providers.base import (
     StreamResult,
     Usage,
 )
-from libs.providers.errors import MissingOpenAICredentials, ProviderConfigurationError
-from libs.providers.spec import OpenAIProviderConfig
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.errors import (
+    MissingOpenAICredentials,
+    ProviderConfigurationError,
+)
+from libs.providers.llm.spec import OpenAIProviderConfig
+from libs.providers.llm.types import ProviderLLMConfig
 from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
 from libs.tools.schema import ToolDefinition
 from openai import OpenAI

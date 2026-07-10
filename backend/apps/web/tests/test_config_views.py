@@ -8,6 +8,7 @@ import json
 
 from apps.agents.models import Agent
 from apps.agents.services.config_commands import create_from_example
+from apps.agents.services.queries import get_config_editor_context
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
@@ -135,6 +136,59 @@ class AgentConfigWebTests(OTestCase):
         payload = json.loads(response.content)
         self.assertIn('yaml', payload)
         self.assertIn('id: queue', payload['yaml'])
+
+    def test_disk_config_page_is_read_only_with_source_path(self) -> None:
+        self.agent.config_source = 'disk'
+        self.agent.source_path = 'agents/cfg-agent.yaml'
+        self.agent.save(update_fields=['config_source', 'source_path'])
+
+        context = get_config_editor_context(self.agent, self.user.pk)
+        response = self.client.get(reverse('agent_config', kwargs={'agent_id': self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(context['read_only'])
+        self.assertEqual(context['source_label'], 'Disk')
+        self.assertEqual(context['source_path'], 'agents/cfg-agent.yaml')
+        self.assertContains(response, 'Read-only disk configuration')
+        self.assertContains(response, 'agents/cfg-agent.yaml')
+        self.assertContains(response, 'id="save-config" class="primary" disabled')
+
+    def test_disk_config_save_rejects_yaml_and_profile_changes(self) -> None:
+        self.agent.config_source = 'disk'
+        self.agent.source_path = 'agents/cfg-agent.yaml'
+        self.agent.save(update_fields=['config_source', 'source_path'])
+        before_config_id = self.agent.current_config_id
+
+        response = self.client.post(
+            reverse('agent_config_save', kwargs={'agent_id': self.agent.id}),
+            {
+                'spec_yaml': dump_agent_config_spec(load_example('clock-assistant')),
+                'name': 'Changed name',
+                'identifier': 'changed-identifier',
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b'disk-sourced agent is read-only', response.content)
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.name, 'Cfg agent')
+        self.assertEqual(self.agent.identifier, 'cfg-agent')
+        self.assertEqual(self.agent.current_config_id, before_config_id)
+
+    def test_disk_config_mutate_is_rejected(self) -> None:
+        self.agent.config_source = 'disk'
+        self.agent.save(update_fields=['config_source'])
+
+        response = self.client.post(
+            reverse('agent_config_mutate', kwargs={'agent_id': self.agent.id}),
+            {
+                'spec_yaml': dump_agent_config_spec(load_example('clock-assistant')),
+                'mutation': json.dumps({'action': 'add_tool', 'id': 'queue', 'type': 'queue'}),
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b'disk-sourced agent is read-only', response.content)
 
     def test_config_page_404_for_other_user(self) -> None:
         other = get_user_model().objects.create_user(username='other', password='secret')

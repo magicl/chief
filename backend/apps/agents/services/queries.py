@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.agents.models import Agent, AgentConfig
+from apps.agents.models import Agent, AgentConfig, AgentConfigSource
 from apps.agents.services.config_commands import suggest_identifier
 from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
@@ -20,10 +20,10 @@ from libs.agent_spec.trigger_prompts import (
     DEFAULT_SCHEDULE_TRIGGER_PROMPT,
 )
 from libs.agent_specs import list_examples
-from libs.providers.anthropic_provider import AnthropicProvider
-from libs.providers.local_openai_provider import LocalOpenAIProvider
-from libs.providers.openai_provider import OpenAIProvider
-from libs.providers.registry import PROVIDERS
+from libs.providers.llm.anthropic_provider import AnthropicProvider
+from libs.providers.llm.local_openai_provider import LocalOpenAIProvider
+from libs.providers.llm.openai_provider import OpenAIProvider
+from libs.providers.llm.registry import PROVIDERS
 from libs.sources.registry import all_adapters
 from libs.tools.registry import all_tools
 
@@ -210,6 +210,7 @@ def get_create_editor_context(
 def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     """Template context for the config editor page."""
     config = agent.current_config
+    read_only = agent.config_source == AgentConfigSource.DISK
     spec_yaml = ''
     spec_version = 0
     source_rev = '—'
@@ -233,6 +234,7 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'initialYaml': spec_yaml,
         'catalog': catalog,
         'mode': 'edit',
+        'readOnly': read_only,
         'urls': {},
     }
     return {
@@ -243,7 +245,9 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'spec_version': spec_version,
         'source_rev': source_rev,
         'dirty': dirty,
+        'read_only': read_only,
         'source_label': config_source_label(agent.config_source),
+        'source_path': agent.source_path,
         'history': list_config_history(agent),
         'pinned_sessions': pinned_sessions,
         'catalog': catalog,

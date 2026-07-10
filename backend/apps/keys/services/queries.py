@@ -14,7 +14,7 @@ from typing import Literal
 
 from apps.keys import crypto
 from apps.keys.exceptions import KeyNotFoundError, KeyTypeMismatchError
-from apps.keys.models import SystemCredential, UserCredential
+from apps.keys.models import CredentialStatus, SystemCredential, UserCredential
 from apps.keys.types import LLM_ENV_FALLBACK, validate_type
 
 
@@ -28,6 +28,8 @@ class KeyMetadata:
     is_default: bool
     is_set: bool
     updated_at: datetime | None
+    source: str = 'db'
+    status: str = 'active'
 
 
 def _is_set(encrypted_value: bytes | memoryview) -> bool:
@@ -52,6 +54,7 @@ def _system_metadata(row: SystemCredential) -> KeyMetadata:
 
 
 def _user_metadata(row: UserCredential) -> KeyMetadata:
+    """Build UI-safe metadata including user credential provenance and status."""
     return KeyMetadata(
         name=row.name,
         scope='user',
@@ -59,6 +62,8 @@ def _user_metadata(row: UserCredential) -> KeyMetadata:
         is_default=False,
         is_set=_is_set(row.encrypted_value),
         updated_at=row.updated_at,
+        source=row.source,
+        status=row.status,
     )
 
 
@@ -121,12 +126,16 @@ def resolve_default_secret(user_id: int, type_name: str) -> str | None:
 
 
 def resolve_secret(user_id: int, name: str, *, expected_type: str) -> str:
-    """Resolve by name (user scope first, then system). Validates type match.
+    """Resolve by name, skipping disabled user rows before the system fallback.
 
-    Raises KeyNotFoundError or KeyTypeMismatchError.
+    Validates type match and raises KeyNotFoundError or KeyTypeMismatchError.
     """
     validate_type(expected_type)
-    user_row = UserCredential.objects.filter(user_id=user_id, name=name).first()
+    user_row = UserCredential.objects.filter(
+        user_id=user_id,
+        name=name,
+        status=CredentialStatus.ACTIVE,
+    ).first()
     if user_row is not None:
         if user_row.type != expected_type:
             raise KeyTypeMismatchError(f"key_ref '{name}' is type {user_row.type}, expected {expected_type}")

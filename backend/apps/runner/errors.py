@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from libs.providers.base import ProviderError
-from libs.providers.errors import ProviderConfigurationError
+from libs.providers.llm.base import ProviderError
+from libs.providers.llm.errors import ProviderConfigurationError
 
 
 class SessionFailure(Exception):

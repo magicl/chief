@@ -17,7 +17,7 @@ from django.test import override_settings
 
 from libs.agent_spec import LLMSpec
 from libs.agent_specs import load_example
-from libs.providers.errors import CredentialStorageMisconfigured
+from libs.providers.llm.errors import CredentialStorageMisconfigured
 
 from olib.py.django.test.cases import OTransactionTestCase
 from olib.py.utils.logexpect import ExpectLogItem, expectLogItems

@@ -10,6 +10,20 @@ from olib.py.django.test.cases import OTransactionTestCase
 
 
 class TestCredentialModels(OTransactionTestCase):
+    def test_user_credential_provenance_defaults(self) -> None:
+        user = get_user_model().objects.create_user(username='defaults-user', password='x')
+        row = UserCredential.objects.create(
+            user=user,
+            name='openai-defaults',
+            type='openai',
+            encrypted_value=b'x',
+        )
+
+        self.assertEqual(row.source, 'db')
+        self.assertEqual(row.source_path, '')
+        self.assertEqual(row.source_rev, '')
+        self.assertEqual(row.status, 'active')
+
     def test_system_default_flag_is_unique_per_type(self) -> None:
         SystemCredential.objects.create(
             name='default:openai',

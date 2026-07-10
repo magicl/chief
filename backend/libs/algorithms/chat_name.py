@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 import re
 
-from libs.providers.registry import make_provider
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.registry import make_provider
+from libs.providers.llm.types import ProviderLLMConfig
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

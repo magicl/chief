@@ -74,6 +74,84 @@ class TestKeysPage(OTransactionTestCase):
         response = self.client.get(reverse('settings_keys'))
         self.assertNotIn(b'<code>clickup</code>', response.content)
 
+    def test_disk_key_shows_source_without_delete_control(self) -> None:
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-openai',
+            'openai',
+            'sk-disk',
+            source_path='keys/disk-openai.yaml',
+            source_rev='sha256:disk',
+        )
+
+        response = self.client.get(reverse('settings_keys'))
+
+        self.assertContains(response, '<code>disk-openai</code>', html=True)
+        self.assertContains(response, 'Disk')
+        self.assertNotContains(
+            response,
+            reverse('settings_keys_delete_named', kwargs={'name': 'disk-openai'}),
+        )
+
+    def test_disabled_disk_key_shows_disabled_status(self) -> None:
+        """Render disabled metadata instead of treating encrypted content as set."""
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-openai',
+            'openai',
+            'sk-disk',
+            source_path='keys/disk-openai.yaml',
+            source_rev='sha256:disk',
+        )
+        self.user.credentials.filter(name='disk-openai').update(status='disabled')
+
+        response = self.client.get(reverse('settings_keys'))
+
+        self.assertContains(response, '<span class="pill waiting">Disabled</span>', html=True)
+
+    def test_post_add_cannot_replace_disk_key(self) -> None:
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-openai',
+            'openai',
+            'sk-disk',
+            source_path='keys/disk-openai.yaml',
+            source_rev='sha256:disk',
+        )
+
+        response = self.client.post(
+            reverse('settings_keys_add_named'),
+            {'name': 'disk-openai', 'type': 'openai', 'secret': 'sk-ui'},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'disk-sourced credential is read-only', response.content)
+        row = self.user.credentials.get(name='disk-openai')
+        self.assertEqual(row.source, 'disk')
+        self.assertEqual(row.source_path, 'keys/disk-openai.yaml')
+
+    def test_post_delete_cannot_remove_disk_key(self) -> None:
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-openai',
+            'openai',
+            'sk-disk',
+            source_path='keys/disk-openai.yaml',
+            source_rev='sha256:disk',
+        )
+
+        response = self.client.post(
+            reverse('settings_keys_delete_named', kwargs={'name': 'disk-openai'}),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'disk-sourced credential is read-only', response.content)
+        self.assertTrue(self.user.credentials.filter(name='disk-openai').exists())
+
     def test_update_endpoint_removed(self) -> None:
         self.client.force_login(self.user)
         commands.upsert_user_named(self.user.pk, 'openai-work', 'openai', 'sk-old')
