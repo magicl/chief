@@ -17,8 +17,31 @@ class TestCredentialCommands(OTransactionTestCase):
         self.assertTrue(meta.is_set)
         self.assertEqual(meta.name, 'openai-work')
         self.assertEqual(meta.scope, 'user')
+        self.assertEqual(meta.source, 'db')
+        self.assertEqual(meta.status, 'active')
         row = UserCredential.objects.get(user_id=user.pk, name='openai-work')
         self.assertNotEqual(row.encrypted_value, b'sk-user-key')
+
+    def test_upsert_named_restores_database_provenance(self) -> None:
+        user = get_user_model().objects.create_user(username='cmd-user-provenance', password='x')
+        UserCredential.objects.create(
+            user=user,
+            name='openai-work',
+            type='openai',
+            encrypted_value=b'old',
+            source='disk',
+            source_path='keys/openai-work.yaml',
+            source_rev='sha256:old',
+            status='disabled',
+        )
+
+        commands.upsert_user_named(user.pk, 'openai-work', 'openai', 'sk-user-key')
+
+        row = UserCredential.objects.get(user_id=user.pk, name='openai-work')
+        self.assertEqual(row.source, 'db')
+        self.assertEqual(row.source_path, '')
+        self.assertEqual(row.source_rev, '')
+        self.assertEqual(row.status, 'active')
 
     def test_upsert_named_rejects_reserved_prefix(self) -> None:
         user = get_user_model().objects.create_user(username='cmd-user2', password='x')

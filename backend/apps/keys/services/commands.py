@@ -10,7 +10,12 @@ import uuid
 
 from apps.keys import crypto
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
-from apps.keys.models import SystemCredential, UserCredential
+from apps.keys.models import (
+    CredentialSource,
+    CredentialStatus,
+    SystemCredential,
+    UserCredential,
+)
 from apps.keys.services.queries import KeyMetadata, _system_metadata, _user_metadata
 from apps.keys.types import (
     MAX_SECRET_BYTES,
@@ -53,7 +58,7 @@ def _unset_system_default_flag(type_name: str, *, except_pk: uuid.UUID | None = 
 
 
 def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> KeyMetadata:
-    """Create or replace a named user credential. Returns metadata only."""
+    """Create or replace a database-owned active user credential and return metadata."""
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
     validated_secret = _validate_secret(secret)
@@ -63,6 +68,10 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
         defaults={
             'type': type_name,
             'encrypted_value': crypto.encrypt(validated_secret),
+            'source': CredentialSource.DB,
+            'source_path': '',
+            'source_rev': '',
+            'status': CredentialStatus.ACTIVE,
         },
     )
     return _user_metadata(row)
