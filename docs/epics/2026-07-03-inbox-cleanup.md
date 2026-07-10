@@ -172,13 +172,14 @@ Does not re-design platform specs.
 
 ### 10. Local disk providers (keys + agent configs)
 
-Multi-provider storage for **user credentials** and **agent configs**. Providers:
-**disk** and **db** now; **GitHub** later for configs only. One env root
-`CHIEF_LOCAL_DIR` (`.env` / `.env.local`) with `keys/` + `agents/` (more
-subdirs later). Disk files load on server start and are **watched live**; DB
-remains runtime SoT — disk-sourced items re-ingest as new DB revisions when
-files change. Disk-sourced items are **read-only in the UI**. Required `owner`
-on each key file. Soft-disable when a watched file disappears.
+**Key providers** (credentials) and **data providers** (agents now; static
+resources later) under `libs/providers/{key,data}` (+ LLM under
+`libs/providers/llm`); shared hashing in `libs/file`. Django apps own ORM
+ingest + boot/watch — **no** `apps.local_disk`. Disk + db now; **GitHub** later
+for data. One env root `CHIEF_LOCAL_DIR` with `keys/` + `agents/`. Disk loads at
+start and is **watched live**; DB is runtime SoT. Disk-sourced items are
+**read-only in the UI**. Required `owner` on key/agent files. Soft-disable when
+a watched file disappears.
 
 ---
 
