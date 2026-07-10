@@ -12,7 +12,7 @@ from apps.sessions.events import append_event, events_for
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
 from apps.sessions.tests.base import make_test_session
 from libs.agent_spec import AgentConfigSpec, LLMSpec, TriggerSpec
-from libs.providers.base import StreamResult
+from libs.providers.llm.base import StreamResult
 
 from olib.py.django.test.cases import OTransactionTestCase
 

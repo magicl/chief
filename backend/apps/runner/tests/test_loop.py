@@ -12,8 +12,8 @@ from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
 
 from libs.agent_spec import LLMSpec
 from libs.agent_specs import load_example
-from libs.providers.base import ProviderError, StreamResult
-from libs.providers.fake_provider import FakeProvider
+from libs.providers.llm.base import ProviderError, StreamResult
+from libs.providers.llm.fake_provider import FakeProvider
 
 from olib.py.django.test.cases import OTestCase
 

@@ -13,7 +13,7 @@ from decimal import Decimal
 from functools import partial
 from typing import Any, ClassVar
 
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.types import ProviderLLMConfig
 from libs.tools.schema import ToolDefinition
 from pydantic import BaseModel
 

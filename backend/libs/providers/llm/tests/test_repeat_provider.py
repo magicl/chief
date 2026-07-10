@@ -2,8 +2,8 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from libs.providers.registry import make_provider
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.registry import make_provider
+from libs.providers.llm.types import ProviderLLMConfig
 
 from olib.py.django.test.cases import OTestCase
 

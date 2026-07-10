@@ -20,10 +20,10 @@ from libs.agent_spec.trigger_prompts import (
     DEFAULT_SCHEDULE_TRIGGER_PROMPT,
 )
 from libs.agent_specs import list_examples
-from libs.providers.anthropic_provider import AnthropicProvider
-from libs.providers.local_openai_provider import LocalOpenAIProvider
-from libs.providers.openai_provider import OpenAIProvider
-from libs.providers.registry import PROVIDERS
+from libs.providers.llm.anthropic_provider import AnthropicProvider
+from libs.providers.llm.local_openai_provider import LocalOpenAIProvider
+from libs.providers.llm.openai_provider import OpenAIProvider
+from libs.providers.llm.registry import PROVIDERS
 from libs.sources.registry import all_adapters
 from libs.tools.registry import all_tools
 

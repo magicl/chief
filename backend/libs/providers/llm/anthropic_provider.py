@@ -19,20 +19,20 @@ from anthropic.types.input_json_delta import InputJSONDelta
 from anthropic.types.message_delta_usage import MessageDeltaUsage
 from anthropic.types.text_delta import TextDelta
 from anthropic.types.tool_use_block import ToolUseBlock
-from libs.providers.base import (
+from libs.providers.llm.base import (
     Delta,
     LLMProvider,
     ModelPricing,
     ProviderError,
     StreamResult,
 )
-from libs.providers.base import Usage as ChiefUsage
-from libs.providers.errors import (
+from libs.providers.llm.base import Usage as ChiefUsage
+from libs.providers.llm.errors import (
     MissingAnthropicCredentials,
     ProviderConfigurationError,
 )
-from libs.providers.spec import AnthropicProviderConfig
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.spec import AnthropicProviderConfig
+from libs.providers.llm.types import ProviderLLMConfig
 from libs.tools.base import qualified_tool_name_from_wire, wire_tool_name
 from libs.tools.schema import ToolDefinition
 from pydantic import BaseModel
