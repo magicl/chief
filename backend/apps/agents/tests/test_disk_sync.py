@@ -2,8 +2,6 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Tests for synchronizing local agent YAML files."""
-
 from __future__ import annotations
 
 import shutil
@@ -11,8 +9,8 @@ from pathlib import Path
 from tempfile import mkdtemp
 
 from apps.agents.models import Agent, AgentConfig, AgentStatus, Trigger
+from apps.agents.services.disk_sync import sync_agents_dir
 from apps.agents.services.schedule_beat import periodic_task_name
-from apps.local_disk.agent_sync import sync_agents_dir
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django_celery_beat.models import PeriodicTask
@@ -20,7 +18,9 @@ from django_celery_beat.models import PeriodicTask
 from olib.py.django.test.cases import OTestCase
 
 
-class TestAgentSync(OTestCase):
+class TestAgentDiskSync(OTestCase):
+    """Verify synchronization of disk-backed agent data."""
+
     def setUp(self) -> None:
         """Create an isolated configured local root and agent owner."""
         super().setUp()
@@ -30,12 +30,8 @@ class TestAgentSync(OTestCase):
         self.agents_path.mkdir()
         self.settings_override = override_settings(CHIEF_LOCAL_DIR=str(self.root))
         self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
         self.user = get_user_model().objects.create_user(username='alice', email='alice@example.com')
-
-    def tearDown(self) -> None:
-        """Restore settings and remove the isolated local root."""
-        self.settings_override.disable()
-        super().tearDown()
 
     def write_agent(
         self,
@@ -74,6 +70,7 @@ queues: []
         return path
 
     def test_create_sets_disk_provenance_and_revision(self) -> None:
+        """Create a disk-backed agent with a clean hashed revision."""
         self.write_agent()
 
         report = sync_agents_dir()
@@ -91,6 +88,7 @@ queues: []
         self.assertNotIn('owner:', config.spec_yaml)
 
     def test_content_change_creates_revision_and_rematerializes(self) -> None:
+        """Persist changed content as a new materialized config revision."""
         path = self.write_agent(prompt='First prompt.', cron='0 * * * *')
         with self.captureOnCommitCallbacks(execute=True):
             sync_agents_dir()
@@ -111,6 +109,7 @@ queues: []
         self.assertEqual(agent.current_config.get_spec().system_prompt, 'Second prompt.')
 
     def test_unchanged_content_does_not_create_revision(self) -> None:
+        """Avoid duplicate revisions when disk content is unchanged."""
         self.write_agent()
         sync_agents_dir()
 
@@ -121,6 +120,7 @@ queues: []
         self.assertEqual(AgentConfig.objects.filter(agent=agent).count(), 1)
 
     def test_database_owned_conflict_records_failure_without_change(self) -> None:
+        """Contain ownership conflicts without changing database-owned agents."""
         agent = Agent.objects.create(
             user=self.user,
             identifier='daily-helper',
@@ -129,7 +129,7 @@ queues: []
         )
         self.write_agent()
 
-        with self.assertLogs('apps.local_disk.agent_sync', level='ERROR'):
+        with self.assertLogs('apps.agents.services.disk_sync', level='ERROR'):
             report = sync_agents_dir()
 
         self.assertEqual(report.succeeded, 0)
@@ -140,6 +140,7 @@ queues: []
         self.assertIsNone(agent.current_config)
 
     def test_removed_file_soft_disables_agent_and_schedule_beat(self) -> None:
+        """Disable an absent disk agent and its schedule beat task."""
         path = self.write_agent(cron='0 * * * *')
         with self.captureOnCommitCallbacks(execute=True):
             sync_agents_dir()
@@ -156,14 +157,37 @@ queues: []
         self.assertEqual(agent.status, AgentStatus.DISABLED)
         self.assertFalse(PeriodicTask.objects.get(name=task_name).enabled)
 
+    def test_readded_unchanged_file_reactivates_agent_and_schedule_beat(self) -> None:
+        """Re-enable beat when an unchanged file restores a disabled agent."""
+        path = self.write_agent(cron='0 * * * *')
+        unchanged_content = path.read_text(encoding='utf-8')
+        with self.captureOnCommitCallbacks(execute=True):
+            sync_agents_dir()
+        agent = Agent.objects.get(user=self.user, identifier='daily-helper')
+        trigger = Trigger.objects.get(agent=agent, agent_config=agent.current_config)
+        task_name = periodic_task_name(trigger.id)
+        path.unlink()
+        sync_agents_dir()
+        self.assertFalse(PeriodicTask.objects.get(name=task_name).enabled)
+        path.write_text(unchanged_content, encoding='utf-8')
+
+        report = sync_agents_dir()
+
+        self.assertEqual(report.failed, 0)
+        agent.refresh_from_db()
+        self.assertEqual(agent.status, AgentStatus.ACTIVE)
+        self.assertTrue(PeriodicTask.objects.get(name=task_name).enabled)
+        self.assertEqual(AgentConfig.objects.filter(agent=agent).count(), 1)
+
     def test_bad_yaml_keeps_last_good_config_active(self) -> None:
+        """Keep the last valid revision active after malformed disk content."""
         path = self.write_agent(prompt='Last good prompt.')
         sync_agents_dir()
         agent = Agent.objects.get(user=self.user, identifier='daily-helper')
         old_config_id = agent.current_config_id
         path.write_text('owner: alice\nllm: [not valid\n', encoding='utf-8')
 
-        with self.assertLogs('apps.local_disk.agent_sync', level='ERROR'):
+        with self.assertLogs('apps.agents.services.disk_sync', level='ERROR'):
             report = sync_agents_dir()
 
         self.assertEqual(report.failed, 1)

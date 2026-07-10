@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Synchronize local agent YAML files into database-backed agent revisions."""
+"""Synchronize local agent data files into database-backed revisions."""
 
 from __future__ import annotations
 
@@ -12,16 +12,24 @@ from pathlib import Path
 import yaml
 from apps.agents.ingest import IngestError, create_agent_from_spec, persist_agent_config
 from apps.agents.models import Agent, AgentStatus
-from apps.agents.services.config_validation import ConfigValidationError
+from apps.agents.services.config_validation import (
+    ConfigValidationError,
+    validate_agent_config_yaml,
+)
 from apps.agents.services.schedule_beat import sync_agent_schedule_triggers
 from apps.keys.services.disk_sync import SyncItemResult, SyncReport
 from apps.keys.services.owner import resolve_owner
+from django.conf import settings
 from django.db import transaction
-
-from .agent_parse import AgentDiskFile, parse_agent_file
-from .paths import resolve_local_root
+from libs.providers.data.agent_disk_parse import AgentDiskFile, parse_agent_file
 
 logger = logging.getLogger(__name__)
+
+
+def _configured_root() -> Path | None:
+    """Return the configured absolute local root, or none when disabled."""
+    raw = str(getattr(settings, 'CHIEF_LOCAL_DIR', '') or '').strip()
+    return Path(raw).expanduser().resolve() if raw else None
 
 
 def _relative_path(path: Path, root: Path) -> str:
@@ -34,7 +42,8 @@ def _relative_path(path: Path, root: Path) -> str:
 
 @transaction.atomic
 def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
-    """Create or revise one parsed disk agent without overwriting another provider."""
+    """Validate and persist one disk agent without overwriting another provider."""
+    spec = validate_agent_config_yaml(parsed.body_yaml)
     owner = resolve_owner(parsed.owner)
     if owner is None:
         raise ValueError('owner not found')
@@ -43,7 +52,7 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
     if agent is None:
         create_agent_from_spec(
             owner,
-            parsed.spec,
+            spec,
             name=parsed.name,
             identifier=parsed.identifier,
             config_source='disk',
@@ -55,6 +64,7 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
     if agent.config_source != 'disk':
         raise ValueError('agent is owned by another config source')
 
+    was_disabled = agent.status == AgentStatus.DISABLED
     changed_fields: list[str] = []
     for field, value in (
         ('name', parsed.name),
@@ -70,11 +80,16 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
     if agent.current_config is None or agent.current_config.source_rev != parsed.source_rev:
         persist_agent_config(
             agent,
-            parsed.spec,
+            spec,
             source_rev=parsed.source_rev,
             dirty=False,
             raw_yaml=parsed.body_yaml,
         )
+
+    # A removed file disables beat without changing its config revision. Restoring
+    # the same bytes must therefore rebuild beat even when no revision is persisted.
+    if was_disabled:
+        sync_agent_schedule_triggers(agent.id)
 
 
 def sync_agent_path(path: Path, *, root: Path) -> SyncItemResult:
@@ -109,19 +124,19 @@ def soft_disable_missing_disk_agents(*, present_paths: set[str]) -> int:
     return len(missing_ids)
 
 
-def sync_agents_dir() -> SyncReport:
-    """Synchronize all agent YAML files under the configured local root."""
-    root = resolve_local_root()
-    if root is None or not root.is_dir():
+def sync_agents_dir(*, root: Path | None = None) -> SyncReport:
+    """Synchronize all agent YAML files under a local root or configured root."""
+    resolved_root = root if root is not None else _configured_root()
+    if resolved_root is None or not resolved_root.is_dir():
         return SyncReport()
 
-    directory = root / 'agents'
+    directory = resolved_root / 'agents'
     paths: set[Path] = set()
     if directory.is_dir():
         paths.update(directory.glob('*.yaml'))
         paths.update(directory.glob('*.yml'))
 
-    present_paths = {_relative_path(path, root) for path in paths}
-    report = SyncReport(items=[sync_agent_path(path, root=root) for path in sorted(paths)])
+    present_paths = {_relative_path(path, resolved_root) for path in paths}
+    report = SyncReport(items=[sync_agent_path(path, root=resolved_root) for path in sorted(paths)])
     report.disabled = soft_disable_missing_disk_agents(present_paths=present_paths)
     return report

@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
+from apps.agents.services.disk_sync import sync_agents_dir
 from apps.keys.services.disk_sync import SyncReport, sync_keys_dir
 
-from .agent_sync import sync_agents_dir
 from .paths import resolve_local_root
 
 
@@ -22,7 +22,7 @@ def sync_all() -> SyncReport:
     (root / 'keys').mkdir(exist_ok=True)
     (root / 'agents').mkdir(exist_ok=True)
     key_report = sync_keys_dir(root=root)
-    agent_report = sync_agents_dir()
+    agent_report = sync_agents_dir(root=root)
     return SyncReport(
         items=[*key_report.items, *agent_report.items],
         disabled=key_report.disabled + agent_report.disabled,

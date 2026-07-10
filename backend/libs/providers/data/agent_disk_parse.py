@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Parse local agent YAML envelopes into validated config specs."""
+"""Parse local agent data files without Django dependencies."""
 
 from __future__ import annotations
 
@@ -11,36 +11,33 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from apps.agents.services.config_validation import validate_agent_config_yaml
-from libs.agent_spec import AgentConfigSpec
-
-from .hashing import content_hash
+from libs.file.hashing import content_hash
 
 _ENVELOPE_FIELDS = ('owner', 'identifier', 'name')
 
 
 @dataclass(frozen=True)
 class AgentDiskFile:
-    """Represent one parsed agent file and its disk provenance."""
+    """Represent one parsed agent file, config body, and disk provenance."""
 
     owner: str
     identifier: str
     name: str
-    spec: AgentConfigSpec
+    body: dict[object, object]
     body_yaml: str
     source_path: str
     source_rev: str
 
 
 def _non_empty_string(value: Any, *, field: str) -> str:
-    """Return a stripped envelope string or reject a missing/blank value."""
+    """Return a stripped envelope string or reject a missing or blank value."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'{field} must be a non-empty string')
     return value.strip()
 
 
 def parse_agent_file(path: Path, *, root: Path) -> AgentDiskFile:
-    """Strip one disk envelope and validate its remaining agent config body."""
+    """Strip one agent envelope while leaving config validation to app callers."""
     raw = path.read_text(encoding='utf-8')
     loaded = yaml.safe_load(raw)
     if not isinstance(loaded, dict):
@@ -51,13 +48,12 @@ def parse_agent_file(path: Path, *, root: Path) -> AgentDiskFile:
     name = _non_empty_string(loaded.get('name', identifier), field='name')
     body = {key: value for key, value in loaded.items() if key not in _ENVELOPE_FIELDS}
     body_yaml = yaml.safe_dump(body, sort_keys=False, allow_unicode=True)
-    spec = validate_agent_config_yaml(body_yaml)
     source_path = path.resolve().relative_to(root.resolve()).as_posix()
     return AgentDiskFile(
         owner=owner,
         identifier=identifier,
         name=name,
-        spec=spec,
+        body=body,
         body_yaml=body_yaml,
         source_path=source_path,
         source_rev=content_hash(raw),

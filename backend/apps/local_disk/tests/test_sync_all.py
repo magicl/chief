@@ -54,8 +54,9 @@ class TestSyncAll(OTestCase):
             calls.append('keys')
             return key_report
 
-        def sync_agents() -> SyncReport:
+        def sync_agents(*, root: Path) -> SyncReport:
             """Record agent provider ordering and return its sample report."""
+            self.assertTrue(root.is_dir())
             calls.append('agents')
             return agent_report
 
