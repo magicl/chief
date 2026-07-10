@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
+from apps.keys.services.disk_sync import SyncReport, sync_keys_dir
+
 from .agent_sync import sync_agents_dir
-from .key_sync import SyncReport, sync_keys_dir
 from .paths import resolve_local_root
 
 
@@ -20,7 +21,7 @@ def sync_all() -> SyncReport:
     # Agent materialization may reference credentials, so preserve this order.
     (root / 'keys').mkdir(exist_ok=True)
     (root / 'agents').mkdir(exist_ok=True)
-    key_report = sync_keys_dir()
+    key_report = sync_keys_dir(root=root)
     agent_report = sync_agents_dir()
     return SyncReport(
         items=[*key_report.items, *agent_report.items],

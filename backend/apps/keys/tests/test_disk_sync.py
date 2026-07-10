@@ -8,14 +8,42 @@ from tempfile import mkdtemp
 
 from apps.keys import crypto
 from apps.keys.models import CredentialSource, CredentialStatus, UserCredential
-from apps.local_disk.key_sync import sync_keys_dir
+from apps.keys.services.disk_sync import sync_keys_dir
+from apps.keys.services.owner import resolve_owner
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
 from olib.py.django.test.cases import OTestCase
 
 
-class TestKeySync(OTestCase):
+class TestOwnerResolution(OTestCase):
+    """Verify disk owner labels resolve without ambiguity."""
+
+    def test_resolve_owner_prefers_exact_username(self) -> None:
+        username_user = get_user_model().objects.create_user(
+            username='alice@example.com',
+            email='other@example.com',
+        )
+        get_user_model().objects.create_user(username='other', email='alice@example.com')
+
+        self.assertEqual(resolve_owner('alice@example.com'), username_user)
+
+    def test_resolve_owner_accepts_unique_email(self) -> None:
+        email_user = get_user_model().objects.create_user(username='alice', email='alice@example.com')
+
+        self.assertEqual(resolve_owner('alice@example.com'), email_user)
+
+    def test_resolve_owner_returns_none_for_missing_or_shared_email(self) -> None:
+        get_user_model().objects.create_user(username='alice', email='shared@example.com')
+        get_user_model().objects.create_user(username='bob', email='shared@example.com')
+
+        self.assertIsNone(resolve_owner('missing@example.com'))
+        self.assertIsNone(resolve_owner('shared@example.com'))
+
+
+class TestKeyDiskSync(OTestCase):
+    """Verify local credential files synchronize into encrypted rows."""
+
     def setUp(self) -> None:
         """Create an isolated configured local root and credential owner."""
         super().setUp()
@@ -91,7 +119,7 @@ class TestKeySync(OTestCase):
         )
         self.write_key(value='disk-secret')
 
-        with self.assertLogs('apps.local_disk.key_sync', level='ERROR'):
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR'):
             report = sync_keys_dir()
 
         self.assertEqual(report.succeeded, 0)
@@ -114,7 +142,16 @@ class TestKeySync(OTestCase):
     def test_missing_owner_records_failure_without_write(self) -> None:
         self.write_key(owner='nobody')
 
-        with self.assertLogs('apps.local_disk.key_sync', level='ERROR'):
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR'):
+            report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 1)
+        self.assertFalse(UserCredential.objects.exists())
+
+    def test_unknown_type_records_failure_without_write(self) -> None:
+        self.write_key(type_name='mystery')
+
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR'):
             report = sync_keys_dir()
 
         self.assertEqual(report.failed, 1)
@@ -126,7 +163,7 @@ class TestKeySync(OTestCase):
         malformed = self.keys_path / 'malformed.yaml'
         malformed.write_text('type: openai\nowner: alice\nvalue: [ultra-secret\n', encoding='utf-8')
 
-        with self.assertLogs('apps.local_disk.key_sync', level='ERROR') as captured:
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR') as captured:
             report = sync_keys_dir()
 
         self.assertEqual(report.failed, 1)

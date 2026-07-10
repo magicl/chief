@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Resolve local disk owner labels to Django users."""
+"""Resolve disk credential owner labels to Django users."""
 
 from __future__ import annotations
 

@@ -5,16 +5,15 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from apps.keys.exceptions import KeyValidationError
-from apps.local_disk.key_parse import KeyDiskFile, parse_key_file
-from apps.local_disk.owner import resolve_owner
-from django.contrib.auth import get_user_model
+from libs.providers.key.disk_parse import KeyDiskFile, parse_key_file
 from yaml import YAMLError
 
 from olib.py.django.test.cases import OTestCase
 
 
-class TestKeyParse(OTestCase):
+class TestKeyDiskParse(OTestCase):
+    """Verify Django-free parsing of credential files."""
+
     def test_parse_defaults_name_and_sets_provenance(self) -> None:
         with TemporaryDirectory() as raw_root:
             root = Path(raw_root)
@@ -64,18 +63,19 @@ class TestKeyParse(OTestCase):
                     encoding='utf-8',
                 )
 
-                with self.assertRaises(KeyValidationError):
+                with self.assertRaises(ValueError):
                     parse_key_file(path, root=root)
 
-    def test_parse_rejects_unknown_type(self) -> None:
+    def test_parse_returns_unknown_type_for_app_validation(self) -> None:
         with TemporaryDirectory() as raw_root:
             root = Path(raw_root)
             path = root / 'keys' / 'file.yaml'
             path.parent.mkdir()
             path.write_text('type: mystery\nowner: alice\nvalue: hidden\n', encoding='utf-8')
 
-            with self.assertRaises(KeyValidationError):
-                parse_key_file(path, root=root)
+            parsed = parse_key_file(path, root=root)
+
+        self.assertEqual(parsed.type, 'mystery')
 
     def test_parse_rejects_non_mapping_yaml(self) -> None:
         with TemporaryDirectory() as raw_root:
@@ -86,26 +86,3 @@ class TestKeyParse(OTestCase):
 
             with self.assertRaises(YAMLError):
                 parse_key_file(path, root=root)
-
-
-class TestOwnerResolution(OTestCase):
-    def test_resolve_owner_prefers_exact_username(self) -> None:
-        username_user = get_user_model().objects.create_user(
-            username='alice@example.com',
-            email='other@example.com',
-        )
-        get_user_model().objects.create_user(username='other', email='alice@example.com')
-
-        self.assertEqual(resolve_owner('alice@example.com'), username_user)
-
-    def test_resolve_owner_accepts_unique_email(self) -> None:
-        email_user = get_user_model().objects.create_user(username='alice', email='alice@example.com')
-
-        self.assertEqual(resolve_owner('alice@example.com'), email_user)
-
-    def test_resolve_owner_returns_none_for_missing_or_shared_email(self) -> None:
-        get_user_model().objects.create_user(username='alice', email='shared@example.com')
-        get_user_model().objects.create_user(username='bob', email='shared@example.com')
-
-        self.assertIsNone(resolve_owner('missing@example.com'))
-        self.assertIsNone(resolve_owner('shared@example.com'))

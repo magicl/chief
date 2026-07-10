@@ -13,8 +13,9 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from apps.keys.services.disk_sync import SyncReport, sync_keys_dir
+
 from .agent_sync import sync_agents_dir
-from .key_sync import SyncReport, sync_keys_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def sync_path(path: Path, *, root: Path) -> SyncReport:
     if not relative.parts:
         return SyncReport()
     if relative.parts[0] == 'keys':
-        return sync_keys_dir()
+        return sync_keys_dir(root=root)
     if relative.parts[0] == 'agents':
         return sync_agents_dir()
     return SyncReport()

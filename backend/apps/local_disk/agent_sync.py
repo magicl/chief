@@ -14,11 +14,11 @@ from apps.agents.ingest import IngestError, create_agent_from_spec, persist_agen
 from apps.agents.models import Agent, AgentStatus
 from apps.agents.services.config_validation import ConfigValidationError
 from apps.agents.services.schedule_beat import sync_agent_schedule_triggers
+from apps.keys.services.disk_sync import SyncItemResult, SyncReport
+from apps.keys.services.owner import resolve_owner
 from django.db import transaction
 
 from .agent_parse import AgentDiskFile, parse_agent_file
-from .key_sync import SyncItemResult, SyncReport
-from .owner import resolve_owner
 from .paths import resolve_local_root
 
 logger = logging.getLogger(__name__)

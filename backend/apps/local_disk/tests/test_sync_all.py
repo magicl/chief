@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from apps.local_disk.key_sync import SyncItemResult, SyncReport
+from apps.keys.services.disk_sync import SyncItemResult, SyncReport
 from apps.local_disk.sync import sync_all
 from django.test import override_settings
 
@@ -48,8 +48,9 @@ class TestSyncAll(OTestCase):
         key_report = SyncReport(items=[SyncItemResult('keys/key.yaml', True)], disabled=1)
         agent_report = SyncReport(items=[SyncItemResult('agents/agent.yaml', True)], disabled=2)
 
-        def sync_keys() -> SyncReport:
+        def sync_keys(*, root: Path) -> SyncReport:
             """Record key provider ordering and return its sample report."""
+            self.assertTrue(root.is_dir())
             calls.append('keys')
             return key_report
 
