@@ -210,6 +210,7 @@ def get_create_editor_context(
 def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
     """Template context for the config editor page."""
     config = agent.current_config
+    read_only = agent.config_source == 'disk'
     spec_yaml = ''
     spec_version = 0
     source_rev = '—'
@@ -233,6 +234,7 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'initialYaml': spec_yaml,
         'catalog': catalog,
         'mode': 'edit',
+        'readOnly': read_only,
         'urls': {},
     }
     return {
@@ -243,7 +245,9 @@ def get_config_editor_context(agent: Agent, user_id: int) -> dict[str, Any]:
         'spec_version': spec_version,
         'source_rev': source_rev,
         'dirty': dirty,
+        'read_only': read_only,
         'source_label': config_source_label(agent.config_source),
+        'source_path': agent.source_path,
         'history': list_config_history(agent),
         'pinned_sessions': pinned_sessions,
         'catalog': catalog,
