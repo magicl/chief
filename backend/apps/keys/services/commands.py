@@ -24,6 +24,7 @@ from apps.keys.types import (
     canonical_default_name,
     validate_type,
 )
+from django.db import transaction
 
 
 def _validate_secret(secret: str) -> str:
@@ -74,6 +75,71 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
             'status': CredentialStatus.ACTIVE,
         },
     )
+    return _user_metadata(row)
+
+
+def upsert_user_named_from_disk(
+    user_id: int,
+    name: str,
+    type_name: str,
+    secret: str,
+    *,
+    source_path: str,
+    source_rev: str,
+) -> KeyMetadata:
+    """Create or refresh a disk-owned credential without replacing database-owned data."""
+    validate_type(type_name)
+    validated_name = _validate_named_name(name, user_id=user_id)
+    validated_secret = _validate_secret(secret)
+
+    with transaction.atomic():
+        row = (
+            UserCredential.objects.select_for_update()
+            .filter(
+                user_id=user_id,
+                name=validated_name,
+            )
+            .first()
+        )
+        if row is not None and row.source != CredentialSource.DISK:
+            raise KeyValidationError(f'database-owned credential conflict: {validated_name}')
+        if (
+            row is not None
+            and row.type == type_name
+            and row.source_path == source_path
+            and row.source_rev == source_rev
+            and row.status == CredentialStatus.ACTIVE
+        ):
+            return _user_metadata(row)
+
+        encrypted_value = crypto.encrypt(validated_secret)
+        if row is None:
+            row = UserCredential.objects.create(
+                user_id=user_id,
+                name=validated_name,
+                type=type_name,
+                encrypted_value=encrypted_value,
+                source=CredentialSource.DISK,
+                source_path=source_path,
+                source_rev=source_rev,
+                status=CredentialStatus.ACTIVE,
+            )
+        else:
+            row.type = type_name
+            row.encrypted_value = encrypted_value
+            row.source_path = source_path
+            row.source_rev = source_rev
+            row.status = CredentialStatus.ACTIVE
+            row.save(
+                update_fields=[
+                    'type',
+                    'encrypted_value',
+                    'source_path',
+                    'source_rev',
+                    'status',
+                    'updated_at',
+                ]
+            )
     return _user_metadata(row)
 
 
