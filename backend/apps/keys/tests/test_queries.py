@@ -11,7 +11,7 @@ from apps.keys.exceptions import (
     KeyStorageMisconfiguredError,
     KeyTypeMismatchError,
 )
-from apps.keys.models import SystemCredential
+from apps.keys.models import SystemCredential, UserCredential
 from apps.keys.services import commands, queries
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
@@ -52,6 +52,19 @@ class TestCredentialQueries(OTransactionTestCase):
             queries.resolve_secret(user.pk, 'default:openai', expected_type='openai'),
             'sk-system',
         )
+
+    def test_resolve_skips_disabled_user_credential(self) -> None:
+        user = get_user_model().objects.create_user(username='q-user-disabled', password='x')
+        row = UserCredential.objects.create(
+            user=user,
+            name='openai-disabled',
+            type='openai',
+            encrypted_value=b'not-used',
+            status='disabled',
+        )
+
+        with self.assertRaises(KeyNotFoundError):
+            queries.resolve_secret(user.pk, row.name, expected_type='openai')
 
     def test_type_mismatch_raises(self) -> None:
         user = get_user_model().objects.create_user(username='q-user4', password='x')

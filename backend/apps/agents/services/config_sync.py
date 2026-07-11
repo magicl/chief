@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
-from apps.agents.models import Agent
+from apps.agents.models import Agent, AgentConfigSource
 
 
 def normalize_spec_bytes(raw: str) -> bytes:
@@ -31,6 +31,8 @@ def compute_save_metadata(_agent: Agent, _raw_yaml: str) -> tuple[str, bool]:
 
 def config_source_label(config_source: str) -> str:
     """Human-readable label for the config source badge."""
-    if config_source == 'ui':
+    if config_source == AgentConfigSource.UI:
         return 'UI'
+    if config_source == AgentConfigSource.DISK:
+        return 'Disk'
     return 'Legacy'

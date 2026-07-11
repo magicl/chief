@@ -1,0 +1,10 @@
+owner: your-username
+schema_version: 2
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+system_prompt: |
+  You are a helpful assistant.
+triggers:
+  - name: manual
+    kind: manual

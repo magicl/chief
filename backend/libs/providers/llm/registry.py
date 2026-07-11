@@ -6,18 +6,18 @@
 
 from __future__ import annotations
 
-from libs.providers.anthropic_provider import AnthropicProvider
-from libs.providers.base import LLMProvider, ProviderFactory
-from libs.providers.errors import UnsupportedLLMProvider
-from libs.providers.local_openai_provider import LocalOpenAIProvider
-from libs.providers.openai_provider import OpenAIProvider
-from libs.providers.repeat_provider import RepeatProvider
-from libs.providers.spec import (
+from libs.providers.llm.anthropic_provider import AnthropicProvider
+from libs.providers.llm.base import LLMProvider, ProviderFactory
+from libs.providers.llm.errors import UnsupportedLLMProvider
+from libs.providers.llm.local_openai_provider import LocalOpenAIProvider
+from libs.providers.llm.openai_provider import OpenAIProvider
+from libs.providers.llm.repeat_provider import RepeatProvider
+from libs.providers.llm.spec import (
     AnthropicProviderConfig,
     OpenAIProviderConfig,
     RepeatProviderConfig,
 )
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.types import ProviderLLMConfig
 
 PROVIDERS: dict[str, ProviderFactory] = {
     'openai': OpenAIProvider.from_spec(OpenAIProviderConfig()),

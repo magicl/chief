@@ -12,7 +12,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from apps.agents.ingest import persist_agent_config
-from apps.agents.models import AgentConfig
+from apps.agents.models import Agent, AgentConfig, AgentConfigSource
 from apps.agents.services.config_commands import (
     ConfigCommandError,
     create_from_yaml,
@@ -39,6 +39,7 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseBadRequest,
+    HttpResponseForbidden,
     JsonResponse,
 )
 from django.middleware.csrf import get_token
@@ -47,6 +48,13 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from libs.agent_specs import load_example_text
+
+
+def _agent_write_denied(agent: Agent) -> HttpResponseForbidden | None:
+    """Return a clear forbidden response when disk owns the agent configuration."""
+    if agent.config_source == AgentConfigSource.DISK:
+        return HttpResponseForbidden('disk-sourced agent is read-only; edit the source file instead')
+    return None
 
 
 def _validation_json_response(exc: ConfigValidationError) -> JsonResponse:
@@ -172,6 +180,9 @@ def agent_config_catalog(request: HttpRequest) -> JsonResponse:
 def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Validate posted YAML and persist a new immutable config revision."""
     agent = _owned_agent(request, agent_id)
+    denied = _agent_write_denied(agent)
+    if denied is not None:
+        return denied
     spec_yaml = request.POST.get('spec_yaml', '')
     if not spec_yaml.strip():
         return JsonResponse({'errors': [{'path': '', 'message': 'spec_yaml required'}]}, status=400)
@@ -206,7 +217,10 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @require_POST
 def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Apply a helper mutation to posted YAML without persisting."""
-    _owned_agent(request, agent_id)
+    agent = _owned_agent(request, agent_id)
+    denied = _agent_write_denied(agent)
+    if denied is not None:
+        return denied
     spec_yaml = request.POST.get('spec_yaml', '')
     if not spec_yaml.strip():
         return JsonResponse({'errors': [{'path': '', 'message': 'spec_yaml required'}]}, status=400)

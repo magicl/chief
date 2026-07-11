@@ -10,7 +10,7 @@ import json
 import logging
 from uuid import UUID
 
-from apps.agents.models import Agent, Trigger, TriggerKind, TriggerStatus
+from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from django_celery_beat.models import CrontabSchedule, PeriodicTask
 from libs.agent_spec.cron import parse_cron_fields
 
@@ -78,7 +78,7 @@ def upsert_schedule_trigger_beat(trigger: Trigger) -> None:
 
 
 def sync_schedule_trigger(trigger_id: UUID) -> None:
-    """Sync one schedule trigger's beat row from DB state (current config + status)."""
+    """Sync one schedule trigger's beat row from agent, config, and trigger status."""
     try:
         trigger = Trigger.objects.select_related('agent').get(pk=trigger_id)
     except Trigger.DoesNotExist:
@@ -89,7 +89,7 @@ def sync_schedule_trigger(trigger_id: UUID) -> None:
         return
 
     agent = trigger.agent
-    if trigger.agent_config_id != agent.current_config_id:
+    if agent.status != AgentStatus.ACTIVE or trigger.agent_config_id != agent.current_config_id:
         disable_schedule_trigger_beat(trigger.id)
         return
 
@@ -100,16 +100,20 @@ def sync_schedule_trigger(trigger_id: UUID) -> None:
 
 
 def sync_agent_schedule_triggers(agent_id: UUID) -> None:
-    """Rebuild beat tasks for all schedule triggers on *agent*'s current config."""
+    """Rebuild or disable beat tasks for all schedule triggers owned by an agent."""
     try:
         agent = Agent.objects.get(pk=agent_id)
     except Agent.DoesNotExist:
         return
 
-    stale_ids = Trigger.objects.filter(
-        agent_id=agent_id,
-        kind=TriggerKind.SCHEDULE,
-    ).exclude(agent_config_id=agent.current_config_id).values_list('id', flat=True)
+    stale_ids = (
+        Trigger.objects.filter(
+            agent_id=agent_id,
+            kind=TriggerKind.SCHEDULE,
+        )
+        .exclude(agent_config_id=agent.current_config_id)
+        .values_list('id', flat=True)
+    )
     for trigger_id in stale_ids:
         disable_schedule_trigger_beat(trigger_id)
 
@@ -121,7 +125,7 @@ def sync_agent_schedule_triggers(agent_id: UUID) -> None:
         agent_config_id=agent.current_config_id,
         kind=TriggerKind.SCHEDULE,
     ):
-        if trigger.status == TriggerStatus.ACTIVE:
+        if agent.status == AgentStatus.ACTIVE and trigger.status == TriggerStatus.ACTIVE:
             upsert_schedule_trigger_beat(trigger)
         else:
             disable_schedule_trigger_beat(trigger.id)

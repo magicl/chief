@@ -11,10 +11,10 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import ClassVar
 
-from libs.providers.base import ModelPricing, Usage
-from libs.providers.openai_provider import OpenAIProvider
-from libs.providers.spec import LocalOpenAIProviderConfig
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.base import ModelPricing, Usage
+from libs.providers.llm.openai_provider import OpenAIProvider
+from libs.providers.llm.spec import LocalOpenAIProviderConfig
+from libs.providers.llm.types import ProviderLLMConfig
 from pydantic import BaseModel
 
 

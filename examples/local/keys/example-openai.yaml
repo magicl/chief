@@ -1,0 +1,4 @@
+name: example-openai
+type: openai
+owner: your-username
+value: sk-example-not-a-real-secret

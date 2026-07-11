@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from apps.agents.ingest import persist_agent_config
-from apps.agents.models import Agent, Trigger, TriggerKind, TriggerStatus
+from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue, QueueItem, QueueItemStatus
 from apps.queues.services import commands
 from apps.runner.scheduling import (
@@ -206,6 +206,20 @@ class TestActiveTriggers(OTestCase):
         self.assertNotIn(v2_schedule, schedule_triggers)
         self.assertEqual(trigger_prompt(v2_queue), QUEUE_PROMPT)
 
+    def test_excludes_triggers_for_disabled_agents(self) -> None:
+        user = get_user_model().objects.create_user(username='sched-disabled', password='x')
+        agent = Agent.objects.create(user_id=user.pk, name='Sched', identifier='sched-disabled-agent')
+        config = persist_agent_config(
+            agent,
+            _minimal_spec(triggers=[TriggerSpec(name='manual', kind='manual'), _schedule_trigger()]),
+            source_rev='sched-disabled-v1',
+        )
+        trigger = Trigger.objects.get(agent=agent, agent_config=config, name='sweep')
+        agent.status = AgentStatus.DISABLED
+        agent.save(update_fields=['status'])
+
+        self.assertNotIn(trigger, _active_triggers(kind=TriggerKind.SCHEDULE))
+
 
 class TestDispatchScheduleTriggers(OTestCase):
     def _schedule_agent(self) -> tuple[Agent, Trigger]:
@@ -258,9 +272,7 @@ class TestDispatchScheduleTriggers(OTestCase):
         self.assertEqual(trigger.last_fired_at, fire_at.replace(second=30))
 
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
-    def test_max_sessions_capacity_skips_session_but_updates_last_fired_at(
-        self, mock_push: MagicMock
-    ) -> None:
+    def test_max_sessions_capacity_skips_session_but_updates_last_fired_at(self, mock_push: MagicMock) -> None:
         agent, trigger = self._schedule_agent()
         config = agent.current_config
         assert config is not None
@@ -280,6 +292,24 @@ class TestDispatchScheduleTriggers(OTestCase):
         mock_push.assert_not_called()
         trigger.refresh_from_db()
         self.assertEqual(trigger.last_fired_at, fire_at)
+
+    @patch('apps.agents.services.schedule_beat.disable_schedule_trigger_beat')
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
+    def test_disabled_agent_skips_dispatch_and_disables_beat(
+        self,
+        mock_push: MagicMock,
+        mock_disable: MagicMock,
+    ) -> None:
+        agent, trigger = self._schedule_agent()
+        agent.status = AgentStatus.DISABLED
+        agent.save(update_fields=['status'])
+
+        started = dispatch_schedule_trigger(trigger_id=trigger.id)
+
+        self.assertFalse(started)
+        self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
+        mock_push.assert_not_called()
+        mock_disable.assert_called_once_with(trigger.id)
 
     @patch('apps.runner.scheduling.logger')
     @patch('apps.runner.dispatch.push_chat_and_dispatch')

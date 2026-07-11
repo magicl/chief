@@ -36,6 +36,9 @@ WSGI_APPLICATION = 'chief.wsgi.application'
 
 SITE_NAME = env.str('SITE_NAME', default='Chief')  # noqa: F405
 
+CHIEF_LOCAL_DIR = env.str('CHIEF_LOCAL_DIR', default='')  # noqa: F405
+CHIEF_LOCAL_WATCH = env.bool('CHIEF_LOCAL_WATCH', default=False)  # noqa: F405
+
 # Fernet master key for credential encryption at rest (see apps.keys.crypto).
 # Required when DEBUG is False; dev default when DEBUG is True.
 CREDENTIALS_KEY = env_secret(  # noqa: F405

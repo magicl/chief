@@ -7,6 +7,7 @@
 from apps.agents.services.config_commands import create_from_example
 from apps.agents.services.config_sync import (
     compute_save_metadata,
+    config_source_label,
     spec_content_hash,
 )
 from django.contrib.auth import get_user_model
@@ -27,3 +28,6 @@ class ConfigSyncTests(OTestCase):
     def test_spec_content_hash_stable(self) -> None:
         raw = 'a: 1\n'
         self.assertEqual(spec_content_hash(raw), spec_content_hash('a: 1\r\n'))
+
+    def test_disk_config_source_has_human_label(self) -> None:
+        self.assertEqual(config_source_label('disk'), 'Disk')

@@ -15,8 +15,8 @@ from apps.keys.types import is_registered_type
 # isort: split
 
 from libs.agent_spec import LLMSpec
-from libs.providers.errors import CredentialStorageMisconfigured
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.errors import CredentialStorageMisconfigured
+from libs.providers.llm.types import ProviderLLMConfig
 
 
 def _wrap_secret_supplier(supplier: Callable[[], str | None]) -> Callable[[], str | None]:

@@ -9,9 +9,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from libs.providers.types import ProviderLLMConfig
+from libs.providers.llm.base import LLMProvider, StreamResult, Usage
+from libs.providers.llm.types import ProviderLLMConfig
 from libs.tools.schema import ToolDefinition
-from libs.providers.base import LLMProvider, StreamResult, Usage
 from pydantic import BaseModel
 
 

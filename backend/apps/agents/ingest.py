@@ -86,15 +86,17 @@ def create_agent_from_spec(
     name: str,
     identifier: str,
     config_source: str = 'ui',
+    source_path: str = '',
     source_rev: str = 'ui:initial',
     raw_yaml: str | None = None,
 ) -> Agent:
-    """Create ``Agent`` and persist config from a validated spec."""
+    """Create an agent with provenance and persist config from a validated spec."""
     agent = Agent.objects.create(
         user_id=user.pk,
         name=name,
         identifier=identifier,
         config_source=config_source,
+        source_path=source_path,
     )
     persist_agent_config(agent, spec, source_rev=source_rev, raw_yaml=raw_yaml)
     return agent

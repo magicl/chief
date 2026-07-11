@@ -19,6 +19,7 @@ from apps.agents.services.config_sync import config_source_label
 from apps.bus.client import async_client, key_prefix
 from apps.keys.credential_guides import credential_guides_for_ui
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
+from apps.keys.models import CredentialSource, UserCredential
 from apps.keys.services import commands
 from apps.keys.services.queries import list_user_credentials
 from apps.keys.types import SERVICE_TYPES
@@ -48,6 +49,13 @@ from django.views.decorators.http import require_GET, require_POST
 from libs.agent_specs import list_examples
 
 logger = logging.getLogger(__name__)
+
+
+def _credential_write_denied(row: UserCredential | None) -> HttpResponseBadRequest | None:
+    """Return a clear bad request when disk owns the credential."""
+    if row is not None and row.source == CredentialSource.DISK:
+        return HttpResponseBadRequest('disk-sourced credential is read-only; edit the source file instead')
+    return None
 
 
 def _owned_agent(request: HttpRequest, agent_id: UUID) -> Agent:
@@ -317,10 +325,15 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 @require_POST
 def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
+    """Create a UI-owned credential unless an existing disk credential owns its name."""
     name = request.POST.get('name', '').strip()
     type_name = request.POST.get('type', '').strip()
     secret = request.POST.get('secret', '')
     user = cast(AbstractBaseUser, request.user)
+    row = UserCredential.objects.filter(user_id=user.pk, name=name).first()
+    denied = _credential_write_denied(row)
+    if denied is not None:
+        return denied
     try:
         commands.upsert_user_named(user.pk, name, type_name, secret)
     except KeyValidationError as exc:
@@ -332,7 +345,12 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 @require_POST
 def settings_keys_delete_named(request: HttpRequest, name: str) -> HttpResponse:
+    """Delete a UI-owned credential while preserving disk-owned credentials."""
     user = cast(AbstractBaseUser, request.user)
+    row = UserCredential.objects.filter(user_id=user.pk, name=name).first()
+    denied = _credential_write_denied(row)
+    if denied is not None:
+        return denied
     try:
         commands.delete_user_credential(user.pk, name)
     except KeyValidationError as exc:

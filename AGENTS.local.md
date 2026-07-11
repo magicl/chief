@@ -74,7 +74,10 @@ Shared, Django-free packages live under `backend/libs/` (plural container):
 
 | Package | Role |
 |---------|------|
-| `libs/providers` | LLM provider implementations |
+| `libs/providers/llm` | LLM provider implementations |
+| `libs/providers/key` | Key-provider protocols + disk credential parsing |
+| `libs/providers/data` | Data-provider protocols + disk agent parsing |
+| `libs/file` | Shared file normalization + content hashing |
 | `libs/tools` | Tool definitions + registry |
 | `libs/algorithms` | Reusable algorithms (may call providers) |
 
@@ -88,10 +91,12 @@ Shared, Django-free packages live under `backend/libs/` (plural container):
   Django or `apps.keys` from libs.
 
 ```
-libs/providers          (stdlib + vendor SDKs)
-libs/tools              (stdlib + pydantic)
-libs/algorithms    -->  libs/providers
-apps/*             -->  libs/* (as needed)
+libs/file                    (stdlib)
+libs/providers/{key,data} --> libs/file
+libs/providers/llm           (stdlib + vendor SDKs)
+libs/tools                   (stdlib + pydantic)
+libs/algorithms          --> libs/providers/llm
+apps/*                   --> libs/* (as needed)
 ```
 
 ## Django app dependencies
