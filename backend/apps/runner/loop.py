@@ -11,6 +11,7 @@ import logging
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -50,25 +51,39 @@ class LoopControl:
 
 
 class SessionRunner:
-    def __init__(self, backend: SessionBackend, *, emit_restart: bool = False) -> None:
-        """Create a runner for one session backend and initialize runtime state."""
+    def __init__(
+        self,
+        backend: SessionBackend,
+        *,
+        emit_restart: bool = False,
+        client_factories: dict[str, Callable[..., Any]] | None = None,
+    ) -> None:
+        """Create a runner for one session backend and initialize tool client wiring."""
         self.backend = backend
         self.config_spec: AgentConfigSpec = backend.get_spec()
+        self.client_factories = client_factories
         session = getattr(backend, 'session', None)
         self.bound_tools = build_bound_tools(
             self.config_spec.tools,
             user_id=self.backend.user_id,
             agent_id=getattr(session, 'agent_id', None),
             session_id=backend.session_id,
+            client_factories=self.client_factories,
         )
         self.control = LoopControl()
         self.emit_restart = emit_restart
         self.hooks = HookRegistry()
 
     @classmethod
-    def for_session(cls, session: AgentSession, *, emit_restart: bool = False) -> SessionRunner:
-        """Build a runner for a persisted Django session."""
-        return cls(DjangoSessionBackend(session), emit_restart=emit_restart)
+    def for_session(
+        cls,
+        session: AgentSession,
+        *,
+        emit_restart: bool = False,
+        client_factories: dict[str, Callable[..., Any]] | None = None,
+    ) -> SessionRunner:
+        """Build a runner for a persisted Django session with optional tool client factories."""
+        return cls(DjangoSessionBackend(session), emit_restart=emit_restart, client_factories=client_factories)
 
     def add_hook(self, hooks: HookSet) -> None:
         """Attach observability callbacks to this runner instance."""
