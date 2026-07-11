@@ -47,7 +47,7 @@ routing was dropped from U1.
 | 7 | 7 | ClickUp lib + tool + source adapter |
 | 8 | 10 | Local disk root + providers: load/watch keys and agent configs |
 | 9 | 9 | Inbox triage agent (Gmail tag/archive/spam + ClickUp INBOX routing) |
-| 10 | 11 | Usecase harness + olib eval CLI; inbox functional tests + model-matrix evals |
+| 10 | 11 | SessionRunner hooks + olib eval CLI; inbox functional tests + model-matrix evals |
 | — | 8 | ~~Obsidian~~ — **cancelled** |
 
 ---
@@ -187,12 +187,12 @@ a watched file disappears.
 
 ### 11. Usecase tests and evals
 
-Full-stack **functional usecase tests** (Django unittest, scripted LLM, mock
-Gmail/ClickUp via test injection) plus a reusable **olib eval** runner
-(`olib/py/eval` + `orunr eval`) for separate harder scenarios and model matrices.
-Shared observability: partitioned event-log files and **model hooks** for
-terminal tracing (no eval instrumentation inside the agent). Inbox triage is the
-first consumer suite. See
+**SessionRunner**-driven **functional usecase tests** (MemorySessionBackend,
+FakeProvider, mock Gmail/ClickUp via test injection) plus a reusable **olib eval**
+runner (`olib/py/eval` + `orunr eval`) for separate harder scenarios and model
+matrices. Generic **hooks on SessionRunner** feed partitioned event-log files and
+terminal tracing (no eval instrumentation in agent product code). Inbox triage is
+the first consumer suite. See
 [spec](../specs/2026-07-11-usecase-tests-evals/).
 
 ---

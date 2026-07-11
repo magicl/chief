@@ -4,7 +4,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **11
 
 **Branch:** `feat/2026-07-11-usecase-tests-evals`
 
-Status: **spec only**
+Status: **spec only** (revised after review)
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) ·
 Queues/sources: [Sources and queues](../2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-design.md) ·
@@ -22,20 +22,21 @@ Mermaid display labels: per [`superpowers/brainstorming`](../../../olib/ai/skill
 
 Give Chief (and later other olib projects) a way to:
 
-1. Run **full-stack usecase tests** in-process (real adapters, queues, agents, Celery
-   eager) against **mock external clients**, with a **scripted LLM**, as normal Django
-   unittests — hard pass/fail for wiring and routing.
+1. Run **usecase functional tests** that drive the **same `SessionRunner`** as
+   production, against **mock external clients** and a **scripted / fake LLM**, as
+   normal Django unittests — hard pass/fail for wiring and routing.
 2. Run **offline evals** (not under Django unittest) against **separate, harder
    scenarios** and **real models**, including a **model matrix**, with soft scoring.
-3. Share one **simple text-based observability harness**: partitioned **event-log
-   files** plus **model hooks** for live terminal tracing — without baking eval
-   instrumentation into agent code.
+3. Share one **simple text-based observability** path: partitioned **event-log
+   files** plus **hooks registered on `SessionRunner`** for live terminal tracing —
+   without baking eval/test instrumentation into agent product logic.
 
-Inbox triage (U1) is the **first consumer**: seed emails → agent session(s) → assert
+Inbox triage (U1) is the **first consumer**: seed emails → `SessionRunner` → assert
 or score Gmail labels / spam / archive / ClickUp INBOX tasks.
 
 ### Non-goals
 
+- A parallel **`UsecaseHarness` runner** that reimplements the agent loop.
 - Selecting mocks from agent YAML / production config (injection is **test/eval only**).
 - Adopting Inspect AI / Promptfoo / DeepEval in v1 (revisit when many suites exist).
 - Production APM / hosted observability (LangSmith-style).
@@ -52,16 +53,19 @@ or score Gmail labels / spam / archive / ClickUp INBOX tasks.
 | Topic | Decision |
 |-------|----------|
 | Epic home | Stay in **U1** (not a new platform epic) |
+| Agent execution | Always **`SessionRunner`** — same loop as prod / CLI |
+| Session persistence in usecases | Prefer existing **`MemorySessionBackend`** (no DB user required); extend or add a backend only if memory cannot express a needed seam |
+| Django user | **Not required** for default usecase runs (`user_id=None` → env-only / mocks ignore auth) |
 | Mock selection | **Test/eval injection only** — no `backend: mock` in agent config |
 | Functional vs eval | **Separate** scenario packs and runners |
-| Functional LLM | **Scripted / fake** LLM (deterministic); no live API in default CI unittest |
+| Functional LLM | Existing **`FakeProvider`** (or thin extension) with scenario plans; no live API in default CI unittest |
 | Eval LLM | **Real models**; matrix over models |
 | Eval framework | **Custom**, reusable in **olib** (not Inspect AI for v1) |
 | Eval CLI | `orunr eval …` under `olib/py/cli/run/` |
 | Eval library | Importable mechanics in `olib/py/eval/` |
-| Observability | Shared **event-log file** + **model hooks** → terminal + file |
-| Agent instrumentation | **None** for eval tracing — hooks attach at model/wiring boundary |
-| Celery | Tests/evals use **eager** mode; beat work invoked **manually** (poll / dispatch / release) |
+| Observability hooks | **Generic hook system on `SessionRunner`**; callers register hooks; tests/evals register observability hooks |
+| Event logs | Partitioned file writer (olib utility); fed by SessionRunner hooks + session events |
+| Source → queue path | Optional **thin setup helpers** (not a second runner); agent usecases default to Memory backend + mailbox prompt |
 | First usecase | Inbox triage (Gmail + ClickUp mocks) |
 
 ---
@@ -73,58 +77,85 @@ flowchart TB
   subgraph olib ["olib"]
     EvalLib["olib/py/eval"]
     EvalCLI["orunr eval"]
-    Hooks["ModelTraceHooks"]
     LogWriter["EventLogWriter"]
     EvalCLI --> EvalLib
-    EvalLib --> Hooks
     EvalLib --> LogWriter
   end
 
   subgraph chief ["chief"]
-    Harness["UsecaseHarness"]
+    SR["SessionRunner + hooks"]
+    MemBE["MemorySessionBackend"]
     Mocks["Mock Gmail/ClickUp"]
-    ScriptedLLM["ScriptedLLM"]
+    FakeLLM["FakeProvider"]
+    Setup["Thin usecase setup helpers"]
     FuncTests["Django usecase tests"]
     Suites["Eval suite plugin"]
     ScenariosF["scenarios/functional"]
     ScenariosE["scenarios/eval"]
-    FuncTests --> Harness
+    FuncTests --> Setup
     FuncTests --> ScenariosF
-    Suites --> Harness
+    Suites --> Setup
     Suites --> ScenariosE
-    Harness --> Mocks
-    Harness --> ScriptedLLM
+    Setup --> SR
+    Setup --> MemBE
+    Setup --> Mocks
+    Setup --> FakeLLM
+    SR --> MemBE
   end
 
   EvalCLI --> Suites
-  Harness --> LogWriter
-  ScriptedLLM --> Hooks
-  Harness -->|"wrap real LLMProvider"| Hooks
+  Setup -->|"register hooks"| SR
+  SR -->|"hook callbacks"| LogWriter
 ```
 
 **Boundary:** `olib/py/eval` is Django-free and never imports chief. Chief implements
-olib protocols (suite loader, sample runner, scorer) and owns the Django pipeline
-harness + client mocks.
+olib protocols (suite loader, sample runner, scorer). **`SessionRunner` owns hooks**;
+olib supplies reusable log/report utilities that chief hooks invoke.
 
 ---
 
-## 1. Shared pipeline harness (chief)
+## 1. Execution model: SessionRunner (not a parallel harness)
 
-One **`UsecaseHarness`** used by functional tests and eval sample runs:
+**There is no `UsecaseHarness` agent loop.** Production, CLI (`run_agent`), functional
+tests, and evals all execute turns via **`SessionRunner`**.
 
-1. Create user, dummy credentials, and agent from **production-shaped YAML**
-   (same `type: gmail` / `type: clickup` as prod — no mock flags).
+What tests/evals still need (thin **setup helpers**, not a runner):
+
+1. Load production-shaped agent **spec** (YAML / example) into
+   **`MemorySessionBackend(spec, user_id=None)`** — no Django `User` / `Agent` row
+   required for the default path.
 2. Inject **mock clients** via existing seams (`client_factory` on tools; extend
-   source adapters the same way if missing).
-3. For functional runs, inject a **scripted LLM** behind the normal provider interface.
-4. Rely on Celery **`task_always_eager`** (olib/Django test default).
-5. Drive the schedule path **manually**: seed mock mailbox → `poll_source` →
-   queue put / dispatch → session run → optional `release_stale_items`.
-6. Return a structured **run result**: queue outcomes, mock client state, session
-   ids, and session event transcripts.
+   source adapters if a scenario needs poll).
+3. Functional: inject **`FakeProvider`** (scenario plan) via the same
+   `make_provider` seam tests already patch today.
+4. Push the turn prompt onto the backend mailbox (chat input), mirroring how a
+   queue trigger would supply “Triage this email…”.
+5. Construct `SessionRunner(backend)`, **register observability hooks**, call
+   `run()`.
+6. Assert / score from **mock client state** + `backend.events()`.
 
-Functional tests and evals differ only in scenario pack, LLM (scripted vs real),
-and pass criteria — not in how the pipeline is started.
+### Do we need a user?
+
+**No** for the default usecase path. `MemorySessionBackend` already documents
+`user_id=None` → env-only credential resolution and no `apps.keys` lookup. Mocks
+ignore auth. Evals with real models use env (or optional explicit `user_id` later
+if a scenario must exercise stored keys).
+
+### Do we need a new backend?
+
+**Prefer not.** Start with **`MemorySessionBackend`**. Add or extend a backend only
+if a concrete usecase needs persistence/control-plane behavior memory cannot
+provide. Do **not** invent a second runner.
+
+### Source → queue → dispatch
+
+Still valuable, but it is **not** the agent loop:
+
+- Cover with **focused helpers/tests** that call `poll_source` / put / dispatch under
+  Celery eager when we want that coverage.
+- Default inbox **routing** usecases seed the mock mailbox and drive
+  `SessionRunner` directly so harness complexity does not grow with every agent
+  scenario.
 
 ---
 
@@ -141,9 +172,9 @@ For **Gmail** and **ClickUp** (U1):
 Rules:
 
 - Production wiring **always** constructs the real client.
-- Harness injects mocks only in test/eval setup.
-- Credentials in tests may be dummy strings; mocks accept any token / ignore auth.
-- Source adapters must use the injected client instance so poll → enqueue matches prod.
+- Setup helpers inject mocks only in test/eval setup.
+- Credentials may be omitted / dummy; mocks accept any token or ignore auth.
+- If a scenario polls a source, the adapter must use the injected client instance.
 
 ---
 
@@ -151,16 +182,17 @@ Rules:
 
 | | Functional | Eval |
 |---|---|---|
-| Runner | Django `TestCase` / unittest | `orunr eval` (olib CLI) — **not** unittest |
-| LLM | Scripted / fake | Real model(s); matrix |
+| Agent loop | `SessionRunner` | `SessionRunner` |
+| Backend | `MemorySessionBackend` (default) | `MemorySessionBackend` (default) |
+| Outer runner | Django unittest | `orunr eval` (olib CLI) — **not** unittest |
+| LLM | `FakeProvider` + scenario plan | Real model(s); matrix |
 | Scenarios | Small, wiring-focused | Separate, harder / ambiguous |
-| Pass criteria | Hard asserts (mock state + queue `done`) | Soft scores; report (CI gate optional later) |
-| Location | e.g. `backend/apps/.../tests/usecases/` + `scenarios/functional/` | e.g. `evals/inbox/` + `scenarios/eval/` |
+| Pass criteria | Hard asserts on mock state (+ events) | Soft scores; report (CI gate optional later) |
+| Location | e.g. `backend/.../tests/usecases/` + `scenarios/functional/` | e.g. `evals/inbox/` + `scenarios/eval/` |
 
 **Scenario contents (both packs):** seed mailbox (+ optional ClickUp state), agent
-config reference, expected outcomes (labels, spam/archive, ClickUp fields).
-Functional scenarios **also** carry the scripted LLM plan (ordered tool calls /
-turn script).
+spec reference, expected outcomes (labels, spam/archive, ClickUp fields).
+Functional scenarios **also** carry the **FakeProvider** plan.
 
 **Eval matrix:** same eval scenarios × N models → score table. Functional suite
 never enters that matrix.
@@ -177,13 +209,15 @@ Django-free package responsible for:
 - Model matrix orchestration (run sample × model)
 - Protocols for project plugins:
   - **Suite**: list samples
-  - **Runner**: execute one sample (project harness)
+  - **Runner**: execute one sample (chief: setup + `SessionRunner`)
   - **Scorer**: map run result + expected → score(s)
-- **EventLogWriter** — partitioned append/write of run transcripts
-- **ModelTraceHooks** — hook entrypoints for model generate lifecycle (see §5)
+- **EventLogWriter** — partitioned append/write of run transcripts (utility sink)
 - Aggregation / simple text report (table of scores by scenario × model)
 
-### CLI — `olib/py/cli/run/templates/eval.py` (name may vary; group is **`eval`**)
+olib does **not** own SessionRunner hooks (those live in chief). It may define a
+small **log record / sink interface** that chief hook callbacks write into.
+
+### CLI — `olib/py/cli/run/templates/eval.py` (group name **`eval`**)
 
 Read-only-safe commands under `orunr`, e.g.:
 
@@ -195,14 +229,9 @@ Read-only-safe commands under `orunr`, e.g.:
 
 ### Project plug-in (chief)
 
-Discovered via `config.py` (entrypoint / path — exact config shape decided in plan).
-Chief registers:
-
-- Inbox eval suite(s)
-- Sample runner that boots Django + `UsecaseHarness` + real LLM + mocks
-- Inbox scorers (label match, ClickUp task match, partial credit axes)
-
-Other olib consumers later register their own suites the same way.
+Discovered via `config.py` (entrypoint / path — exact shape in plan). Chief
+registers inbox suites, a sample runner built on setup helpers + `SessionRunner`,
+and scorers.
 
 ### Submodule note
 
@@ -211,55 +240,60 @@ chief spec documents the contract and the first consumer.
 
 ---
 
-## 5. Observability: event logs + model hooks
+## 5. SessionRunner hooks (chief) + event logs
 
-### Event-log file
+### Generic hooks on `SessionRunner`
 
-Every functional and eval run writes (or appends to) a partitioned event log so
-failures are debuggable without a hosted UI.
+Add a **robust, generic hook registry** to `SessionRunner` (or a small collaborator
+it owns). Callers that construct the runner **register** hooks; the runner invokes
+them at well-defined lifecycle points. Product agent code does not special-case
+tests or evals.
 
-**Partition keys** (minimum): `kind` (`functional` | `eval`) · suite id · case /
-sample id · model id (evals; `scripted` for functional) · run timestamp / run id.
+Illustrative hook points (exact set refined in plan; keep stable and documented):
 
-**Payload:** session event transcript (LLM turns, tool calls, tool results) plus
-eval scores when applicable. Format: structured text or JSONL under a stable
-artifacts directory (e.g. `.output/usecase-logs/` — exact path in plan); must be
-easy to locate one slice of a matrix run by eye or grep.
+| Point | When |
+|-------|------|
+| `on_run_start` / `on_run_end` | Enter / leave `run()` |
+| `on_generate_start` / `on_generate_end` | Before / after provider `collect` |
+| `on_tool_call_start` / `on_tool_call_end` | Before / after tool invoke |
+| `on_event` | After `backend.append_event` (or publish) — covers INPUT/OUTPUT/TOOL_*/FAILURE |
+| `on_status` | Status transitions |
 
-### Model hooks (olib)
+Registration API sketch: `runner.add_hook(HookSet(...))` or typed callbacks per
+point. Hooks must be **side-effect free w.r.t. control flow** (observability /
+metrics only); they must not decide abort/pause or mutate tool results in v1.
 
-Hook protocol owned by olib eval/observability (names illustrative):
+**Why on SessionRunner (not only on the LLM):** tool calls, status, and event log
+already live in the runner; one registry covers models of different shapes and
+keeps tracing off the agent prompt/product path.
 
-- `on_generate_start` / `on_generate_end`
-- `on_message` (or equivalent turn/message events)
+### Test / eval observability hooks
 
-**Wiring:** harness/eval attaches hooks to the **model/provider** in use (scripted
-or real). Hooks fan out to:
+Functional tests and eval sample runners register hooks that:
 
-1. **Terminal** — simple live text trace
-2. **EventLogWriter** — same sink as the file log
+1. Print a **simple live text trace** to the terminal
+2. Append to the **partitioned event-log file** (via olib `EventLogWriter`)
 
-**Rules:**
+Partition keys (minimum): `kind` (`functional` | `eval`) · suite id · case /
+sample id · model id (evals; `fake` / `scripted` for functional) · run id.
 
-- Agent / runner code does **not** grow eval-specific print/trace paths.
-- Differently shaped models later adapt to the same hook entrypoints so they plug
-  into one observability harness.
-- Tool/session detail still comes from the existing **session event log**, exported
-  into the file (and optionally mirrored to the terminal by the harness), not from
-  ad-hoc agent logging.
+Artifacts dir (e.g. `.output/usecase-logs/` — exact path in plan) stays gitignored.
+
+Later, differently shaped models still go through `SessionRunner` generate hooks,
+so the same observability harness keeps working.
 
 ---
 
-## 6. Scripted LLM (chief, functional only)
+## 6. Fake / scripted LLM (functional only)
 
-A test double behind the same interface the runner uses for `LLMProvider`:
+Reuse / extend **`libs.providers.llm.fake_provider.FakeProvider`** (already used by
+`SessionRunner` unit tests):
 
 - Scenario supplies a deterministic plan (tool calls / messages per turn).
 - No network; CI-safe.
-- Still emits **model hooks** so functional runs exercise the same observability path.
+- Observability comes from **SessionRunner hooks**, not from custom agent logging.
 
-Evals never use the scripted LLM (unless an explicit dry-run flag is added later —
-out of v1 scope).
+Evals use real providers; they still register the same SessionRunner hooks.
 
 ---
 
@@ -267,8 +301,8 @@ out of v1 scope).
 
 **Functional (examples):**
 
-- Seed one obvious spam → assert `#x-spam` / spam disposition + queue `done`
-- Seed one clear todo → assert ClickUp INBOX task fields + Gmail tag + queue `done`
+- Seed one obvious spam → FakeProvider plan labels/spam → assert mock Gmail state
+- Seed one clear todo → plan creates ClickUp INBOX task + Gmail tag → assert mocks
 
 **Eval (examples, separate files):**
 
@@ -276,9 +310,8 @@ out of v1 scope).
 - Self-note vs ClickUp routing edge cases
 - Multi-signal emails where partial credit matters
 
-Exact taxonomy and expected fields follow epic item 9 / ROADMAP U1 once the triage
-agent prompt lands; this spec owns the **harness and scenario format**, not the
-final triage policy text.
+Exact taxonomy follows epic item 9 / ROADMAP U1. This spec owns **execution,
+hooks, mocks, scenario format**, not the final triage policy text.
 
 ---
 
@@ -286,33 +319,36 @@ final triage policy text.
 
 | Phase | Delivers |
 |-------|----------|
-| A | `olib/py/eval` core: hooks, EventLogWriter, protocols, matrix runner |
-| B | `orunr eval` CLI group |
-| C | Chief client Protocols + in-memory Gmail/ClickUp mocks + injection seams |
-| D | `UsecaseHarness` + scripted LLM + event-log integration |
-| E | Functional inbox scenarios + Django usecase tests |
-| F | Chief eval plugin + eval scenario pack + scorers + model matrix smoke |
+| A | `SessionRunner` generic hook registry + unit tests |
+| B | `olib/py/eval` core: EventLogWriter, protocols, matrix runner |
+| C | `orunr eval` CLI group |
+| D | Client Protocols + in-memory Gmail/ClickUp mocks + injection seams |
+| E | Thin usecase setup helpers + FakeProvider scenario plans + observability hooks |
+| F | Functional inbox scenarios + unittest suite |
+| G | Chief eval plugin + eval scenario pack + scorers + model matrix smoke |
 
-Phases A–B can proceed without the triage agent. E–F need a triage agent YAML
+Phases A–C can proceed without the triage agent. F–G need a triage agent YAML
 (spec 9 or a minimal stand-in).
 
 ---
 
 ## Error handling and flakiness
 
-- Functional: deterministic scripted LLM; failures are assertion failures; no retries.
+- Functional: deterministic FakeProvider; failures are assertion failures; no retries.
 - Eval: record per-sample errors in the log; matrix continues other cells; non-zero
   exit only when the run infrastructure fails or when an optional strict gate is set.
 - Missing API keys for evals: fail fast with a clear CLI message (do not silently skip
   the whole matrix unless `--allow-skip` is explicit — decide default in plan).
+- Hook exceptions: log and continue the session (observability must not fail the run)
+  unless a debug flag says otherwise — decide default in plan.
 
 ---
 
 ## Testing this spec
 
-- olib: unit tests for EventLogWriter partitioning, hook dispatch, matrix expansion.
-- chief: mock client unit tests; harness tests with scripted LLM; at least one
-  end-to-end functional usecase test.
+- chief: SessionRunner hook unit tests; mock client tests; at least one end-to-end
+  functional usecase with MemorySessionBackend + FakeProvider + log file output.
+- olib: EventLogWriter partitioning, matrix expansion, CLI smoke.
 - Manual: `orunr eval run` on a tiny inbox eval suite with one model.
 
 Required quality gate for chief Python changes remains `orunr py test-all`.
@@ -323,8 +359,9 @@ olib changes follow olib’s own `orunr py test-all` in the submodule.
 ## Constraints
 
 - No mock backends in production agent YAML.
+- No second agent loop alongside `SessionRunner`.
 - olib eval must not import Django or chief.
-- One session per email (existing U1 constraint) remains true in harness runs.
+- One session per email (existing U1 constraint) remains true for inbox usecases.
 - Never commit usecase logs that contain live secrets; artifacts dir stays gitignored.
 
 ---
@@ -334,5 +371,5 @@ olib changes follow olib’s own `orunr py test-all` in the submodule.
 - [U1 epic](../../epics/2026-07-03-inbox-cleanup.md)
 - [ROADMAP U1](../../ROADMAP.md)
 - [olib orun skill](../../../olib/ai/skills/orun/SKILL.md)
-- Existing seams: `GmailTool.bind(..., client_factory=…)`, Celery eager via olib
-  Django settings, `poll_source` / queue dispatch tasks
+- Existing: `SessionRunner`, `MemorySessionBackend`, `FakeProvider`,
+  `GmailTool.bind(..., client_factory=…)`, Celery eager via olib Django settings
