@@ -13,12 +13,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from libs.clients.clickup import ClickUpClient
+from libs.clients.clickup.client import ClickUpClient
 from libs.clients.clickup.errors import (
     ClickUpAuthError,
     ClickUpError,
     ClickUpNotFoundError,
 )
+from libs.clients.clickup.protocol import ClickUpClientProtocol
 from libs.tools.base import Tool, ToolFunction
 
 _TASK_ID_DESC = 'ClickUp task id (from `list_tasks`/queue item `ref.resource_id`).'
@@ -45,11 +46,11 @@ class ClickUpTool(Tool):
         *,
         token_supplier: Callable[[], str | None],
         config: dict[str, Any] | None = None,
-        client_factory: Callable[..., ClickUpClient] | None = None,
+        client_factory: Callable[..., ClickUpClientProtocol] | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Return an invoke closed over a ClickUpClient (`client_factory` is a test seam)."""
         cfg = config or {}
-        factory = client_factory or ClickUpClient
+        factory: Callable[..., ClickUpClientProtocol] = client_factory or ClickUpClient
         client = factory(token_supplier=token_supplier, config=cfg)
         team_id = cfg.get('team_id')
 
@@ -61,7 +62,9 @@ class ClickUpTool(Tool):
 
         return invoke
 
-    def _dispatch(self, client: ClickUpClient, team_id: str | None, function: str, arguments: dict[str, Any]) -> Any:
+    def _dispatch(
+        self, client: ClickUpClientProtocol, team_id: str | None, function: str, arguments: dict[str, Any]
+    ) -> Any:
         """Route one function call to the matching client method."""
         if function == 'list_spaces':
             tid = arguments.get('team_id') or team_id
