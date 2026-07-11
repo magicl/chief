@@ -1,22 +1,39 @@
 {
   "mcpServers": {
     "clickup": {
-      "url": "https://mcp.clickup.com/mcp"
+      "type": "sse",
+      "url": "http://localhost:9197/sse"
     },
     "local-grafana": {
-      "url": "http://localhost:9731/sse"
+      "type": "sse",
+      "url": "http://localhost:9191/sse"
     },
     "local-helm": {
-      "url": "http://localhost:9188/sse"
+      "type": "sse",
+      "url": "http://localhost:9192/sse"
     },
     "local-kubernetes": {
-      "url": "http://localhost:9187/sse"
-    },
-    "local-posthog": {
+      "type": "sse",
       "url": "http://localhost:9190/sse"
     },
+    "local-posthog": {
+      "type": "sse",
+      "url": "http://localhost:9193/sse"
+    },
+    "playwright": {
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--headless",
+        "--browser",
+        "chromium",
+        "--no-sandbox"
+      ],
+      "command": "npx"
+    },
     "sentry": {
-      "url": "https://mcp.sentry.dev/mcp"
+      "type": "sse",
+      "url": "http://localhost:9196/sse"
     }
   }
 }
