@@ -10,9 +10,9 @@
 
 ## Assessment
 
-**Ready to merge?** With fixes
+**Ready to merge?** Yes (after review fixes)
 
-**Reasoning:** Architecture matches the design (SessionRunner-only, test-only mocks, olib eval + hooks). One Important contract mismatch on missing-credential / `--allow-skip` behavior for live matrix runs should be fixed or explicitly deferred before merge.
+**Reasoning:** Architecture matches the design. Review findings below were addressed in follow-up commits.
 
 ## Strengths
 
@@ -35,15 +35,15 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 1 | | `olib/py/eval/runner.py`, `olib/py/cli/run/templates/eval_.py`, `evals/inbox/runner.py` | Missing credentials raise `RuntimeError` in the sample runner, but `run_matrix` converts all exceptions into failed cells and the CLI only exits nonzero after the matrix. Plan: missing API keys should fail the command unless `--allow-skip`. Today missing keys look like ordinary cell failures and may burn remaining matrix cells. | |
+| 1 | Fixed | `olib/py/eval/runner.py`, `olib/py/cli/run/templates/eval_.py`, `evals/inbox/runner.py` | Missing credentials raise `RuntimeError` in the sample runner, but `run_matrix` converts all exceptions into failed cells and the CLI only exits nonzero after the matrix. Plan: missing API keys should fail the command unless `--allow-skip`. Today missing keys look like ordinary cell failures and may burn remaining matrix cells. | `EvalAbortError` + `soft_abort=` on `run_matrix`; inbox/CLI raise/abort unless `--allow-skip` |
 
 ### Minor
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 1 | | `olib/py/cli/run/templates/eval_.py` | `orunr eval report` is a placeholder (“not available yet”); design/plan listed report as part of the CLI surface | |
-| 2 | | `backend/apps/runner/tests/usecases/test_inbox_functional.py` | Log partition `kind='usecase'` vs design’s `functional \| eval` | |
-| 3 | | `evals/inbox/scenarios/empty-inbox.yaml` | Loose expect (no spam / no tasks) can score a no-op model as perfect | |
+| 1 | Fixed | `olib/py/cli/run/templates/eval_.py` | `orunr eval report` is a placeholder (“not available yet”); design/plan listed report as part of the CLI surface | `format_log_dir_report` + `eval report --log-root` |
+| 2 | Fixed | `backend/apps/runner/tests/usecases/test_inbox_functional.py` | Log partition `kind='usecase'` vs design’s `functional \| eval` | Now `kind='functional'` |
+| 3 | Fixed | `evals/inbox/scenarios/empty-inbox.yaml` | Loose expect (no spam / no tasks) can score a no-op model as perfect | Requires `gmail__list` via `required_tool_calls` |
 
 ## Recommendations
 

@@ -26,6 +26,11 @@ def score_inbox_state(
     if 'tool_calls' in expect:
         _record_axis(axes, notes, 'tool_calls', list(tool_calls or []) == list(expect['tool_calls']))
 
+    if 'required_tool_calls' in expect:
+        required = [str(name) for name in expect['required_tool_calls']]
+        actual = list(tool_calls or [])
+        _record_axis(axes, notes, 'required_tool_calls', all(name in actual for name in required))
+
     gmail_expect = expect.get('gmail') or {}
     if not isinstance(gmail_expect, Mapping):
         raise ValueError('expect.gmail must be a mapping')

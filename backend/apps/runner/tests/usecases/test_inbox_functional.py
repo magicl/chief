@@ -79,7 +79,7 @@ class TestInboxFunctionalUsecases(OTestCase):
 
         with TemporaryDirectory() as temp_dir:
             partition = RunPartition(
-                kind='usecase',
+                kind='functional',
                 suite='runner-inbox-functional',
                 sample_id=scenario.id,
                 model='fake',

@@ -44,7 +44,7 @@ from libs.providers.llm.registry import make_provider
 from libs.providers.llm.types import ProviderLLMConfig
 
 from evals.inbox.scorers import score_inbox_state
-from olib.py.eval import EventLogWriter, RunPartition, Sample, Score
+from olib.py.eval import EvalAbortError, EventLogWriter, RunPartition, Sample, Score
 
 SPEC_KEYS = {'schema_version', 'description', 'llm', 'system_prompt', 'triggers', 'tools', 'queues'}
 
@@ -137,13 +137,13 @@ def _make_checked_provider(config: ProviderLLMConfig) -> Any:
 
 
 def _check_env_credentials(provider: str) -> None:
-    """Raise a clear RuntimeError when env credentials required by live providers are absent."""
+    """Raise EvalAbortError when env credentials required by live providers are absent."""
     required_env = {
         'anthropic': 'ANTHROPIC_API_KEY',
         'openai': 'OPENAI_API_KEY',
     }.get(provider)
     if required_env and not os.environ.get(required_env):
-        raise RuntimeError(
+        raise EvalAbortError(
             f"Missing credentials for eval provider '{provider}': set {required_env} or rerun with --allow-skip",
         )
 
@@ -192,13 +192,13 @@ def _tool_calls_from_events(events: list[Any]) -> list[str]:
 
 
 def _raise_for_missing_credentials(events: list[Any]) -> None:
-    """Translate runner-recorded provider credential failures into eval infrastructure misses."""
+    """Translate runner-recorded provider credential failures into eval aborts."""
     for event in events:
         if event.kind != AgentSessionEventKind.FAILURE:
             continue
         code = str(event.payload.get('code', ''))
         if code.startswith('missing_') and code.endswith('_credentials'):
             message = str(event.payload.get('message') or 'missing provider credentials')
-            raise RuntimeError(
+            raise EvalAbortError(
                 f'{message}; set the provider API key or rerun with --allow-skip',
             )

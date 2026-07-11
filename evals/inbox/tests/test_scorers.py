@@ -65,3 +65,16 @@ class TestInboxScorers(unittest.TestCase):
                 'clickup.created_tasks': 1.0,
             },
         )
+
+    def test_required_tool_calls_is_subset_match(self) -> None:
+        """required_tool_calls passes when each expected tool appears in the trace."""
+        gmail = MockGmailClient(token_supplier=lambda: None, config={})
+        clickup = MockClickUpClient(token_supplier=lambda: None, config={})
+        score = score_inbox_state(
+            expect={'required_tool_calls': ['gmail__list']},
+            gmail=gmail,
+            clickup=clickup,
+            tool_calls=['gmail__list', 'gmail__read'],
+        )
+        self.assertEqual(score.value, 1.0)
+        self.assertEqual(score.axes, {'required_tool_calls': 1.0})

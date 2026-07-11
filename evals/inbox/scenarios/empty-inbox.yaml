@@ -19,6 +19,8 @@ seed_clickup:
         name: Inbox
   tasks: []
 expect:
+  required_tool_calls:
+    - gmail__list
   gmail:
     spam: []
   clickup:

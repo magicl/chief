@@ -34,7 +34,9 @@ class TestUsecaseSetup(OTestCase):
         gmail_client.seed_message('msg-1', labels=('INBOX',), message={'subject': 'Hello'})
 
         with TemporaryDirectory() as temp_dir:
-            partition = RunPartition(kind='usecase', suite='runner', sample_id='gmail-smoke', model='fake', run_id='r1')
+            partition = RunPartition(
+                kind='functional', suite='runner', sample_id='gmail-smoke', model='fake', run_id='r1'
+            )
             log_writer = EventLogWriter(Path(temp_dir))
             backend, runner = build_memory_session_runner(
                 spec=spec,
