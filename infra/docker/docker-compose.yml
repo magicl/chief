@@ -79,6 +79,8 @@ services:
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
+      - ../../.local/agents:${CHIEF_AGENTS_DIR:-/mnt/local/agents}
+      - ../../.local/keys:${CHIEF_KEYS_DIR:-/mnt/local/keys}
     depends_on:
       chief-postgres:
         condition: service_healthy
@@ -117,6 +119,8 @@ services:
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
+      - ../../.local/agents:${CHIEF_AGENTS_DIR:-/mnt/local/agents}
+      - ../../.local/keys:${CHIEF_KEYS_DIR:-/mnt/local/keys}
     depends_on:
       chief-backend:
         condition: service_started
@@ -147,6 +151,8 @@ services:
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
+      - ../../.local/agents:${CHIEF_AGENTS_DIR:-/mnt/local/agents}
+      - ../../.local/keys:${CHIEF_KEYS_DIR:-/mnt/local/keys}
     depends_on:
       chief-redis:
         condition: service_started
