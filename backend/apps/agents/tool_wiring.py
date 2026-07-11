@@ -45,8 +45,8 @@ def bind_tool_invoke(
                 Callable[[str, dict[str, Any]], Any],
                 bind(user_id=user_id, agent_id=agent_id, session_id=session_id),
             )
-        if token_supplier is not None:
-            bind_kwargs: dict[str, Any] = {'token_supplier': token_supplier, 'config': config}
+        if token_supplier is not None or client_factory is not None:
+            bind_kwargs: dict[str, Any] = {'token_supplier': token_supplier or (lambda: None), 'config': config}
             if client_factory is not None:
                 bind_kwargs['client_factory'] = client_factory
             return cast(
