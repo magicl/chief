@@ -5,6 +5,7 @@
 """Tests for agent config web endpoints."""
 
 import json
+import logging
 
 from apps.agents.models import Agent
 from apps.agents.services.config_commands import create_from_example
@@ -16,6 +17,7 @@ from libs.agent_spec.yaml_dump import dump_agent_config_spec
 from libs.agent_specs import load_example, load_example_text
 
 from olib.py.django.test.cases import OTestCase
+from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
 
 class AgentConfigWebTests(OTestCase):
@@ -65,6 +67,9 @@ class AgentConfigWebTests(OTestCase):
         self.assertEqual(self.agent.name, 'Renamed agent')
         self.assertEqual(self.agent.identifier, 'renamed-agent')
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/config/save/', count=1)]
+    )
     def test_save_rejects_duplicate_identifier(self) -> None:
         create_from_example(
             self.user,
@@ -99,6 +104,9 @@ class AgentConfigWebTests(OTestCase):
         self.assertIn('yaml', payload)
         self.assertIn('id: clock', payload['yaml'])
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/config/save/', count=1)]
+    )
     def test_save_invalid_yaml_returns_json_errors(self) -> None:
         url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
         response = self.client.post(
@@ -153,6 +161,9 @@ class AgentConfigWebTests(OTestCase):
         self.assertContains(response, 'agents/cfg-agent.yaml')
         self.assertContains(response, 'id="save-config" class="primary" disabled')
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Forbidden: /agents/[0-9a-f-]+/config/save/', count=1)]
+    )
     def test_disk_config_save_rejects_yaml_and_profile_changes(self) -> None:
         self.agent.config_source = 'disk'
         self.agent.source_path = 'agents/cfg-agent.yaml'
@@ -175,6 +186,9 @@ class AgentConfigWebTests(OTestCase):
         self.assertEqual(self.agent.identifier, 'cfg-agent')
         self.assertEqual(self.agent.current_config_id, before_config_id)
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Forbidden: /agents/[0-9a-f-]+/config/mutate/', count=1)]
+    )
     def test_disk_config_mutate_is_rejected(self) -> None:
         self.agent.config_source = 'disk'
         self.agent.save(update_fields=['config_source'])
@@ -190,6 +204,9 @@ class AgentConfigWebTests(OTestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn(b'disk-sourced agent is read-only', response.content)
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Not Found: /agents/[0-9a-f-]+/config/', count=1)]
+    )
     def test_config_page_404_for_other_user(self) -> None:
         other = get_user_model().objects.create_user(username='other', password='secret')
         other_agent = create_from_example(other, 'clock-assistant', identifier='other-agent')

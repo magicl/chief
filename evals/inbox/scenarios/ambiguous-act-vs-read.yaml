@@ -1,0 +1,38 @@
+id: ambiguous-act-vs-read
+system_prompt: |
+  You triage Gmail inbox messages.
+  Read unread inbox mail. If a message asks only for review or reading and has no concrete task,
+  apply the Gmail label "Read" and do not create a ClickUp task.
+  Create ClickUp tasks only for concrete action items. Mark obvious junk as spam.
+prompt: |
+  Triage unread inbox messages. Distinguish messages that only need reading from concrete action items.
+seed_gmail:
+  messages:
+    - id: read-msg-1
+      labels:
+        - INBOX
+        - UNREAD
+      message:
+        subject: "FYI: product strategy memo"
+        from: product@example.com
+        snippet: "Sharing this memo for you to read when you have time. No action needed yet."
+seed_clickup:
+  spaces:
+    - team_id: team-1
+      space:
+        id: space-1
+        name: Work
+  lists:
+    - space_id: space-1
+      list:
+        id: list-1
+        name: Inbox
+  tasks: []
+expect:
+  gmail:
+    labeled:
+      - message_id: read-msg-1
+        label_name: Read
+    spam: []
+  clickup:
+    created_tasks: []

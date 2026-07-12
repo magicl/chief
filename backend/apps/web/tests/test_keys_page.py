@@ -2,12 +2,15 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+import logging
+
 from apps.keys.services import commands
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
 from olib.py.django.test.cases import OTransactionTestCase
+from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
 
 class TestKeysPage(OTransactionTestCase):
@@ -111,6 +114,7 @@ class TestKeysPage(OTransactionTestCase):
 
         self.assertContains(response, '<span class="pill waiting">Disabled</span>', html=True)
 
+    @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /settings/keys/named/', count=1)])
     def test_post_add_cannot_replace_disk_key(self) -> None:
         self.client.force_login(self.user)
         commands.upsert_user_named_from_disk(
@@ -133,6 +137,16 @@ class TestKeysPage(OTransactionTestCase):
         self.assertEqual(row.source, 'disk')
         self.assertEqual(row.source_path, 'keys/disk-openai.yaml')
 
+    @expectLogItems(
+        [
+            ExpectLogItem(
+                'django.request',
+                logging.WARNING,
+                r'Bad Request: /settings/keys/named/disk-openai/delete/',
+                count=1,
+            )
+        ]
+    )
     def test_post_delete_cannot_remove_disk_key(self) -> None:
         self.client.force_login(self.user)
         commands.upsert_user_named_from_disk(
@@ -152,6 +166,9 @@ class TestKeysPage(OTransactionTestCase):
         self.assertIn(b'disk-sourced credential is read-only', response.content)
         self.assertTrue(self.user.credentials.filter(name='disk-openai').exists())
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Not Found: /settings/keys/named/openai-work/', count=1)]
+    )
     def test_update_endpoint_removed(self) -> None:
         self.client.force_login(self.user)
         commands.upsert_user_named(self.user.pk, 'openai-work', 'openai', 'sk-old')

@@ -35,6 +35,7 @@ from olib.py.cli.run.templates.docker import (
     get_local_compose_entrypoint_url,
 )
 from olib.py.cli.run.templates.envs import EnvInfo
+from olib.py.cli.run.templates.eval_ import eval_cmd
 from olib.py.cli.run.templates.js_ import JSRoot, js
 from olib.py.cli.run.templates.postgres import postgres
 from olib.py.cli.run.templates.py_ import PyRoot
@@ -96,6 +97,7 @@ class TargetInfo(VersionClusterInfo):
         ),
     ],
 )
+@eval_cmd()
 @django_template()
 @remote(plugins=[], default_host='compose')
 @version_template
@@ -103,6 +105,9 @@ class Config:
     displayName = 'Chief'
     tools = ['python', 'javascript']
     license = 'apache'
+    eval_suites = {'inbox': 'evals.inbox:get_suite'}
+    eval_sample_runner = 'evals.inbox:get_sample_runner'
+    eval_log_root = '.output/usecase-logs'
 
     clusters: dict[str, TargetInfo] = {
         'compose': TargetInfo(

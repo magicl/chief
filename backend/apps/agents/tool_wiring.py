@@ -32,11 +32,12 @@ def bind_tool_invoke(
     *,
     token_supplier: Callable[[], str | None] | None,
     config: dict[str, Any] | None = None,
+    client_factory: Callable[..., Any] | None = None,
     user_id: int | None = None,
     agent_id: UUID | None = None,
     session_id: UUID | None = None,
 ) -> Callable[[str, dict[str, Any]], Any]:
-    """Return a bound invoke for *tool*, injecting credentials/config or queue session context."""
+    """Return a bound invoke for *tool*, injecting credentials, config, clients, or queue context."""
     bind = getattr(tool, 'bind', None)
     if bind is not None:
         if tool.name == 'queue':
@@ -44,10 +45,13 @@ def bind_tool_invoke(
                 Callable[[str, dict[str, Any]], Any],
                 bind(user_id=user_id, agent_id=agent_id, session_id=session_id),
             )
-        if token_supplier is not None:
+        if token_supplier is not None or client_factory is not None:
+            bind_kwargs: dict[str, Any] = {'token_supplier': token_supplier or (lambda: None), 'config': config}
+            if client_factory is not None:
+                bind_kwargs['client_factory'] = client_factory
             return cast(
                 Callable[[str, dict[str, Any]], Any],
-                bind(token_supplier=token_supplier, config=config),
+                bind(**bind_kwargs),
             )
     return tool.invoke
 
@@ -58,8 +62,9 @@ def build_bound_tools(
     user_id: int | None,
     agent_id: UUID | None = None,
     session_id: UUID | None = None,
+    client_factories: dict[str, Callable[..., Any]] | None = None,
 ) -> dict[str, BoundToolInstance]:
-    """Map tool instance ids to invoke callables with credentials and queue context wired."""
+    """Map tool instance ids to invoke callables with credentials, clients, and queue context wired."""
     bound: dict[str, BoundToolInstance] = {}
     for inst in instances:
         tool = get_tool(inst.type)
@@ -73,6 +78,7 @@ def build_bound_tools(
             tool,
             token_supplier=supplier,
             config=inst.config,
+            client_factory=client_factories.get(inst.type) if client_factories is not None else None,
             user_id=user_id,
             agent_id=agent_id,
             session_id=session_id,

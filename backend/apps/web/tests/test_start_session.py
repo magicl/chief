@@ -44,6 +44,9 @@ class TestStartAgentSessionView(OTransactionTestCase):
         page = self.client.get(response['Location'])
         self.assertEqual(page.status_code, 200)
 
+    @expectLogItems(
+        [ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/start/', count=1)]
+    )
     def test_disabled_agent_returns_clear_failure(self) -> None:
         self.client.force_login(self.user)
         self.agent.status = AgentStatus.DISABLED

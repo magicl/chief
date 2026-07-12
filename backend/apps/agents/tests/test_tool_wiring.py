@@ -124,6 +124,52 @@ class TestBuildBoundTools(OTestCase):
             out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
         self.assertEqual(out['message_ids'], ['m1'])
 
+    def test_gmail_tool_uses_injected_client_factory(self) -> None:
+        instances = [
+            ToolInstance(
+                id='gmail-personal',
+                type='gmail',
+                credential_ref='gmail-personal',
+                allow=['list'],
+                config={'subject': 'me@example.com'},
+            ),
+        ]
+        fake_client = MagicMock()
+        fake_client.list_messages.return_value = {'message_ids': ['m-factory'], 'next_page_token': None}
+        with patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: '{"sa": true}'):
+            bound = build_bound_tools(
+                instances,
+                user_id=1,
+                client_factories={'gmail': lambda **_kwargs: fake_client},
+            )
+            out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
+        self.assertEqual(out['message_ids'], ['m-factory'])
+        fake_client.list_messages.assert_called_once_with(query='in:inbox', max_results=100, page_token=None)
+
+    def test_gmail_tool_uses_injected_client_factory_without_user_supplier(self) -> None:
+        """Client factories bind even when env-only sessions have no Django user credential supplier."""
+        instances = [
+            ToolInstance(
+                id='gmail-personal',
+                type='gmail',
+                credential_ref='gmail-personal',
+                allow=['list'],
+                config={'subject': 'me@example.com'},
+            ),
+        ]
+        fake_client = MagicMock()
+        fake_client.list_messages.return_value = {'message_ids': ['m-env-only'], 'next_page_token': None}
+
+        bound = build_bound_tools(
+            instances,
+            user_id=None,
+            client_factories={'gmail': lambda **_kwargs: fake_client},
+        )
+        out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
+
+        self.assertEqual(out['message_ids'], ['m-env-only'])
+        fake_client.list_messages.assert_called_once_with(query='in:inbox', max_results=100, page_token=None)
+
     def test_credential_tool_receives_instance_config(self) -> None:
         instances = [
             ToolInstance(

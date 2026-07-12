@@ -5,7 +5,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Follow-on
 
 **Branch:** `feat/2026-07-12-eval-cli-polish`
 
-Status: **design**
+Status: **review**
 
 ---
 
