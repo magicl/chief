@@ -39,5 +39,5 @@ delete `libs/agent_specs`. Leave historical `docs/specs/**` paths unchanged.
 
 ## Links
 
-- PR: (pending)
+- PR: https://github.com/magicl/chief/pull/1
 - ClickUp: https://app.clickup.com/t/868kavfmw
