@@ -21,8 +21,8 @@ from libs.agent_spec import (
     SourceSpec,
     ToolInstance,
     TriggerSpec,
+    load_example,
 )
-from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTestCase
 

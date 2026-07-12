@@ -6,7 +6,7 @@ from apps.sessions.events import append_event
 from apps.sessions.models import AgentSessionEventKind
 from apps.sessions.rebuild import rebuild_messages
 from apps.sessions.tests.base import make_test_session
-from libs.agent_specs import load_example
+from libs.agent_spec import load_example
 
 from olib.py.django.test.cases import OTransactionTestCase
 

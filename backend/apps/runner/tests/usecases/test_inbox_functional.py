@@ -23,8 +23,7 @@ from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
 
 # isort: split
 
-from libs.agent_spec import AgentConfigSpec
-from libs.agent_specs import load_example
+from libs.agent_spec import AgentConfigSpec, load_example
 from libs.clients.clickup.mock import MockClickUpClient
 from libs.clients.gmail.mock import MockGmailClient
 

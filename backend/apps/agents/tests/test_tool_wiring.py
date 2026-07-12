@@ -21,8 +21,8 @@ from libs.agent_spec import (
     QueueSpec,
     SourceSpec,
     ToolInstance,
+    load_example,
 )
-from libs.agent_specs import load_example
 from libs.tools.base import Tool, ToolFunction
 from libs.tools.registry import register_tool
 

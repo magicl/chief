@@ -37,8 +37,7 @@ from apps.sessions.models import AgentSessionEventKind
 
 # isort: split
 
-from libs.agent_spec import AgentConfigSpec, LLMSpec, load_spec
-from libs.agent_specs import load_example
+from libs.agent_spec import AgentConfigSpec, LLMSpec, load_example, load_spec
 from libs.providers.llm.errors import UnsupportedLLMProvider
 from libs.providers.llm.registry import make_provider
 from libs.providers.llm.types import ProviderLLMConfig

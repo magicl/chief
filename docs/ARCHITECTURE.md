@@ -36,7 +36,7 @@ Each app exposes **`services/queries.py`** (read) and **`services/commands.py`**
 
 | Package | Role |
 |---------|------|
-| `libs/agent_spec` | Pydantic `AgentConfigSpec`, load-time spec migrations (Django-free) |
+| `libs/agent_spec` | Pydantic `AgentConfigSpec`, load-time spec migrations, shipped example specs (Django-free) |
 | `libs/providers/llm` | LLM provider implementations |
 | `libs/providers/key` | Key-provider protocols + disk credential parsing |
 | `libs/providers/data` | Data-provider protocols + disk agent parsing |
@@ -226,11 +226,11 @@ select the impersonated mailbox. Operators must create a Google Cloud service ac
 enable the Gmail API, grant **domain-wide delegation** on that SA, and authorize the
 client scopes (`gmail.modify`, `gmail.send`) in the Google Workspace admin console for
 the SA's client id. Example:
-[`backend/libs/agent_specs/examples/gmail-triage.yaml`](../backend/libs/agent_specs/examples/gmail-triage.yaml).
+[`backend/libs/agent_spec/examples/gmail-triage.yaml`](../backend/libs/agent_spec/examples/gmail-triage.yaml).
 
 **ClickUp (personal API token):** store the token as a `type=clickup` credential;
 set **`config.team_id`** on the tool (and source) for workspace addressing. The
 `libs/clients/clickup` client wraps the REST API via **`httpx`**; the source adapter
 polls a configured **`list_id`** (with optional status filters) into the queue.
 Example:
-[`backend/libs/agent_specs/examples/clickup-inbox.yaml`](../backend/libs/agent_specs/examples/clickup-inbox.yaml).
+[`backend/libs/agent_spec/examples/clickup-inbox.yaml`](../backend/libs/agent_spec/examples/clickup-inbox.yaml).

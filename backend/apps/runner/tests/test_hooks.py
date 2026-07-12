@@ -12,7 +12,7 @@ from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.hooks import HookSet
 from apps.runner.loop import SessionRunner
 from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
-from libs.agent_specs import load_example
+from libs.agent_spec import load_example
 from libs.providers.llm.base import StreamResult
 from libs.providers.llm.fake_provider import FakeProvider
 

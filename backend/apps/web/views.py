@@ -46,7 +46,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
-from libs.agent_specs import list_examples
+from libs.agent_spec import list_examples
 
 logger = logging.getLogger(__name__)
 

@@ -10,10 +10,13 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
-from libs.agent_spec import AgentConfigSpec, load_spec
+from libs.agent_spec.loader import load_spec
+
+if TYPE_CHECKING:
+    from libs.agent_spec.spec import AgentConfigSpec
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent / 'examples'
 

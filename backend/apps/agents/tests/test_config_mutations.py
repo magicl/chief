@@ -5,8 +5,8 @@
 """Tests for config editor mutations."""
 
 from apps.agents.services.config_mutations import apply_config_mutation
+from libs.agent_spec import load_example
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
-from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTestCase
 
