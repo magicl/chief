@@ -4,7 +4,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **11
 
 **Branch:** `feat/2026-07-11-usecase-tests-evals`
 
-Status: **spec only** (revised after review)
+Status: **done**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) ·
 Queues/sources: [Sources and queues](../2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-design.md) ·

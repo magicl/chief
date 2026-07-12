@@ -22,7 +22,7 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 - ~~8. Obsidian library and tool~~ — **cancelled** (out of U1; no spec folder)
 - [ ] 9. Inbox triage agent
 - [ ] 10. Local disk providers (keys + agent configs) — [spec](../specs/2026-07-09-local-disk-providers/)
-- [ ] 11. Usecase tests and evals — [spec](../specs/2026-07-11-usecase-tests-evals/)
+- [x] 11. Usecase tests and evals — [spec](../specs/2026-07-11-usecase-tests-evals/)
 
 Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 10 → 9 → 11** (spec 8 cancelled)
 
