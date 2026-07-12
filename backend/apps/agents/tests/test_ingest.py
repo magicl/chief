@@ -15,6 +15,7 @@ from apps.agents.services.config_commands import create_from_example
 from apps.queues.models import Queue, Source
 from django.contrib.auth import get_user_model
 from libs.agent_spec import (
+    AGENT_CONFIG_SPEC_VERSION,
     AgentConfigSpec,
     LLMSpec,
     QueueSpec,
@@ -104,8 +105,8 @@ class CreateAgentFromSpecTests(OTestCase):
         config = agent.current_config
         self.assertIsNotNone(config)
         assert config is not None
-        self.assertEqual(config.spec_version, 2)
-        self.assertEqual(config.spec['schema_version'], 2)
+        self.assertEqual(config.spec_version, AGENT_CONFIG_SPEC_VERSION)
+        self.assertEqual(config.spec['schema_version'], AGENT_CONFIG_SPEC_VERSION)
 
     def test_create_from_example_delegates_to_ingest(self) -> None:
         user = get_user_model().objects.create_user(username='boot', password='x')

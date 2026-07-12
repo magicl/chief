@@ -25,6 +25,7 @@ from libs.agent_spec.registry import get_spec_migrations, latest_spec_version
 from libs.agent_spec.spec import (
     AGENT_CONFIG_SPEC_VERSION,
     AgentConfigSpec,
+    IntegrationSpec,
     LLMSpec,
     QueueSpec,
     SourceSpec,
@@ -36,6 +37,7 @@ __all__ = [
     'AGENT_CONFIG_SPEC_VERSION',
     'AgentConfigSpec',
     'ExampleSpecInfo',
+    'IntegrationSpec',
     'LLMSpec',
     'QueueSpec',
     'SourceSpec',

@@ -22,7 +22,7 @@ V0_CLOCK_SPEC = {
 }
 
 MINIMAL_SPEC_DICT = {
-    'schema_version': 2,
+    'schema_version': 3,
     'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
     'system_prompt': 'hello',
     'triggers': [{'name': 'manual', 'kind': 'manual'}],
@@ -32,7 +32,7 @@ MINIMAL_SPEC_DICT = {
 
 class TestAgentConfigSpec(OTestCase):
     def test_current_schema_version_constant(self) -> None:
-        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 2)
+        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 3)
 
     def test_tool_instance_requires_id_and_type(self) -> None:
         inst = ToolInstance(id='clock', type='clock', allow=['now'])
@@ -41,7 +41,7 @@ class TestAgentConfigSpec(OTestCase):
     def test_duplicate_instance_ids_rejected_at_spec_level(self) -> None:
         with self.assertRaises(ValidationError):
             AgentConfigSpec(
-                schema_version=2,
+                schema_version=3,
                 llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
                 system_prompt='hi',
                 tools=[
@@ -52,8 +52,110 @@ class TestAgentConfigSpec(OTestCase):
 
     def test_load_spec_upgrades_v0_dict(self) -> None:
         spec = load_spec(V0_CLOCK_SPEC, stored_version=0)
-        self.assertEqual(spec.schema_version, 2)
+        self.assertEqual(spec.schema_version, 3)
         self.assertEqual(spec.tools[0].id, 'clock')
+
+    def test_integration_fills_tool_and_source(self) -> None:
+        spec = load_spec(
+            {
+                'schema_version': 3,
+                'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
+                'system_prompt': 'hello',
+                'integrations': [
+                    {
+                        'id': 'gmail-personal',
+                        'type': 'gmail',
+                        'credential_ref': 'gmail-personal',
+                        'config': {'subject': 'me@example.com'},
+                    }
+                ],
+                'tools': [
+                    {
+                        'id': 'gmail-personal',
+                        'integration': 'gmail-personal',
+                        'allow': ['list'],
+                    }
+                ],
+                'queues': [
+                    {
+                        'id': 'inbox',
+                        'sources': [
+                            {
+                                'id': 'gmail-main',
+                                'integration': 'gmail-personal',
+                                'config': {'query': 'in:inbox'},
+                            }
+                        ],
+                    }
+                ],
+                'triggers': [{'name': 'manual', 'kind': 'manual'}],
+            }
+        )
+        self.assertEqual(spec.tools[0].type, 'gmail')
+        self.assertEqual(spec.tools[0].credential_ref, 'gmail-personal')
+        self.assertEqual(spec.tools[0].config['subject'], 'me@example.com')
+        source = spec.queues[0].sources[0]
+        self.assertEqual(source.adapter_type, 'gmail')
+        self.assertEqual(source.credential_ref, 'gmail-personal')
+        self.assertEqual(source.config['subject'], 'me@example.com')
+        self.assertEqual(source.config['query'], 'in:inbox')
+
+    def test_unknown_integration_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            load_spec(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'tools': [{'id': 'gmail', 'integration': 'missing', 'allow': ['list']}],
+                }
+            )
+
+    def test_integration_type_conflict_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            load_spec(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'integrations': [{'id': 'g', 'type': 'gmail', 'credential_ref': 'g'}],
+                    'tools': [{'id': 'g', 'integration': 'g', 'type': 'clickup', 'allow': ['list']}],
+                }
+            )
+
+    def test_explicit_null_credential_ref_opts_out_of_integration(self) -> None:
+        spec = load_spec(
+            {
+                **MINIMAL_SPEC_DICT,
+                'integrations': [
+                    {
+                        'id': 'gmail-personal',
+                        'type': 'gmail',
+                        'credential_ref': 'gmail-personal',
+                        'config': {'subject': 'me@example.com'},
+                    }
+                ],
+                'tools': [
+                    {
+                        'id': 'gmail-personal',
+                        'integration': 'gmail-personal',
+                        'credential_ref': None,
+                        'allow': ['list'],
+                    }
+                ],
+            }
+        )
+        self.assertIsNone(spec.tools[0].credential_ref)
+        self.assertEqual(spec.tools[0].type, 'gmail')
+        self.assertEqual(spec.tools[0].config['subject'], 'me@example.com')
+
+    def test_duplicate_integration_ids_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            load_spec(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'integrations': [
+                        {'id': 'g', 'type': 'gmail'},
+                        {'id': 'g', 'type': 'gmail'},
+                    ],
+                }
+            )
 
 
 class TestQueueSpec(OTestCase):
