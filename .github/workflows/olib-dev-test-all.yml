@@ -1,0 +1,32 @@
+name: olib-dev-test-all
+on:
+  push:
+  pull_request:
+jobs:
+  test-all:
+    runs-on: ol-base-chief
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Drop GITHUB_TOKEN from git http headers so the olib PAT can authenticate the submodule.
+          persist-credentials: false
+      - name: Checkout olib submodule
+        env:
+          OLIB_CHECKOUT_TOKEN: ${{ secrets.OLIB_CHECKOUT_TOKEN }}
+        run: |
+          if [ -z "$OLIB_CHECKOUT_TOKEN" ]; then
+            echo '::error::OLIB_CHECKOUT_TOKEN secret is empty. Add an org/repo Actions secret with Contents:Read on magicl/olib.'
+            exit 1
+          fi
+          # Parent checkout uses GITHUB_TOKEN; this PAT only needs Contents:Read on magicl/olib.
+          # Rewrite .gitmodules first — `submodule sync` copies that URL into .git/config and would
+          # otherwise restore the SSH remote from .gitmodules and fail host-key checks.
+          git config -f .gitmodules submodule.olib.url "https://x-access-token:${OLIB_CHECKOUT_TOKEN}@github.com/magicl/olib.git"
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth=1
+      - name: Init
+        run: |
+          ./olib/scripts/init.sh --py --js --rust --cpp --go
+      - name: Dev test-all
+        run: ./olib/scripts/orunr dev test-all --full-log-on-failure
