@@ -47,7 +47,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
-from libs.agent_specs import load_example_text
+from libs.agent_spec import load_example_text
 
 
 def _agent_write_denied(agent: Agent) -> HttpResponseForbidden | None:

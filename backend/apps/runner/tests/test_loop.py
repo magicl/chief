@@ -10,8 +10,7 @@ from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
 
 # isort: split
 
-from libs.agent_spec import LLMSpec
-from libs.agent_specs import load_example
+from libs.agent_spec import LLMSpec, load_example
 from libs.providers.llm.base import ProviderError, StreamResult
 from libs.providers.llm.fake_provider import FakeProvider
 

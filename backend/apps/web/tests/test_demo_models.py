@@ -4,7 +4,7 @@
 # ~
 """Tests for example specs catalog."""
 
-from libs.agent_specs import list_examples
+from libs.agent_spec import list_examples
 
 from olib.py.django.test.cases import OTestCase
 

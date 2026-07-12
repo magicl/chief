@@ -13,7 +13,7 @@ from apps.agents.models import Agent
 from apps.agents.services.config_sync import spec_content_hash
 from apps.agents.services.config_validation import validate_agent_config_yaml
 from django.contrib.auth.models import AbstractBaseUser
-from libs.agent_specs import load_example_text
+from libs.agent_spec import load_example_text
 
 _IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 

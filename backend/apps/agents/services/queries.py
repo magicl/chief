@@ -14,12 +14,12 @@ from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
 from apps.sessions.models import AgentSession
 from django.urls import reverse
+from libs.agent_spec import list_examples
 from libs.agent_spec.trigger_prompts import (
     DEFAULT_AGENT_TRIGGER_PROMPT,
     DEFAULT_QUEUE_TRIGGER_PROMPT,
     DEFAULT_SCHEDULE_TRIGGER_PROMPT,
 )
-from libs.agent_specs import list_examples
 from libs.providers.llm.anthropic_provider import AnthropicProvider
 from libs.providers.llm.local_openai_provider import LocalOpenAIProvider
 from libs.providers.llm.openai_provider import OpenAIProvider

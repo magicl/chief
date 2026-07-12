@@ -5,7 +5,7 @@
 """Tests for example agent specs library."""
 
 from apps.agents.ingest import validate_spec_tools
-from libs.agent_specs import list_examples, load_example
+from libs.agent_spec import list_examples, load_example
 
 from olib.py.django.test.cases import OTestCase
 
@@ -41,7 +41,7 @@ class AgentSpecsTests(OTestCase):
         self.assertEqual(spec.queues[0].sources[0].adapter_type, 'clickup')
 
     def test_load_example_rejects_path_traversal(self) -> None:
-        from libs.agent_specs import load_example_text
+        from libs.agent_spec import load_example_text
 
         with self.assertRaises(FileNotFoundError):
             load_example_text('../../../config')

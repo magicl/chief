@@ -12,8 +12,8 @@ from apps.agents.services.config_commands import (
     suggest_identifier,
 )
 from django.contrib.auth import get_user_model
+from libs.agent_spec import load_example
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
-from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTestCase
 

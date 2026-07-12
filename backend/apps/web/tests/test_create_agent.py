@@ -9,8 +9,8 @@ from apps.agents.services.config_commands import create_from_example
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
+from libs.agent_spec import load_example
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
-from libs.agent_specs import load_example
 
 from olib.py.django.test.cases import OTransactionTestCase
 from olib.py.utils.logexpect import ExpectLogItem, expectLogItems

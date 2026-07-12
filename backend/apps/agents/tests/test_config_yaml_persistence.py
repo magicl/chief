@@ -10,7 +10,7 @@ from apps.agents.ingest import create_agent_from_spec
 from apps.agents.services.config_commands import create_from_yaml
 from apps.agents.services.config_validation import validate_agent_config_yaml
 from django.contrib.auth import get_user_model
-from libs.agent_specs import load_example
+from libs.agent_spec import load_example
 
 from olib.py.django.test.cases import OTransactionTestCase
 
