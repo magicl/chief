@@ -4,11 +4,17 @@
 # ~
 from apps.agents.models import Agent, AgentConfig
 from django.contrib.auth import get_user_model
-from libs.agent_spec import AGENT_CONFIG_SPEC_VERSION, detect_version, load_spec, load_spec_dict
+from libs.agent_spec import (
+    AGENT_CONFIG_SPEC_VERSION,
+    detect_version,
+    load_spec,
+    load_spec_dict,
+)
 from libs.agent_spec.exceptions import (
     SpecMigrationError,
     UnsupportedSpecVersionError,
 )
+from libs.agent_spec.migrations import integrations as mig003
 from libs.agent_spec.migrations import tool_instances as mig001
 from libs.agent_spec.migrations import trigger_prompts as mig002
 from libs.agent_spec.registry import (
@@ -91,18 +97,37 @@ class TestMigration002TriggerPrompts(OTestCase):
         self.assertEqual(out['triggers'][1]['prompt'], 'Custom sweep.')
 
 
+class TestMigration003Integrations(OTestCase):
+    def test_module_versions(self) -> None:
+        self.assertEqual(mig003.FROM_VERSION, 2)
+        self.assertEqual(mig003.TO_VERSION, 3)
+
+    def test_upgrade_adds_empty_integrations(self) -> None:
+        raw = {
+            'schema_version': 2,
+            'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
+            'system_prompt': 'hello',
+            'tools': [],
+        }
+        out = mig003.upgrade(raw)
+        self.assertEqual(out['schema_version'], 3)
+        self.assertEqual(out['integrations'], [])
+
+
 class TestSpecMigrationRegistry(OTestCase):
     def test_agent_config_spec_version_matches_registry(self) -> None:
         self.assertEqual(AGENT_CONFIG_SPEC_VERSION, latest_spec_version())
 
     def test_registry_has_contiguous_chain_starting_at_zero(self) -> None:
         steps = get_spec_migrations()
-        self.assertEqual(len(steps), 2)
+        self.assertEqual(len(steps), 3)
         self.assertEqual(steps[0].from_version, 0)
         self.assertEqual(steps[0].to_version, 1)
         self.assertEqual(steps[1].from_version, 1)
         self.assertEqual(steps[1].to_version, 2)
-        self.assertEqual(latest_spec_version(), 2)
+        self.assertEqual(steps[2].from_version, 2)
+        self.assertEqual(steps[2].to_version, 3)
+        self.assertEqual(latest_spec_version(), 3)
 
     def test_detect_version_legacy_shape(self) -> None:
         self.assertEqual(detect_version(V0_CLOCK_SPEC), 0)
@@ -113,12 +138,13 @@ class TestSpecMigrationRegistry(OTestCase):
 
     def test_load_spec_dict_upgrades_v0(self) -> None:
         out = load_spec_dict(V0_CLOCK_SPEC, stored_version=0)
-        self.assertEqual(out['schema_version'], 2)
+        self.assertEqual(out['schema_version'], 3)
         self.assertEqual(out['tools'][0]['id'], 'clock')
+        self.assertEqual(out['integrations'], [])
 
     def test_load_spec_dict_upgrades_v1_schedule_spec(self) -> None:
         out = load_spec_dict(V1_SCHEDULE_SPEC, stored_version=1)
-        self.assertEqual(out['schema_version'], 2)
+        self.assertEqual(out['schema_version'], 3)
         sweep = next(t for t in out['triggers'] if t['name'] == 'sweep')
         self.assertEqual(sweep['prompt'], DEFAULT_SCHEDULE_TRIGGER_PROMPT)
 
@@ -128,7 +154,7 @@ class TestSpecMigrationRegistry(OTestCase):
 
     def test_load_spec_validates_upgraded_v1_schedule(self) -> None:
         spec = load_spec(V1_SCHEDULE_SPEC, stored_version=1)
-        self.assertEqual(spec.schema_version, 2)
+        self.assertEqual(spec.schema_version, 3)
         sweep = next(t for t in spec.triggers if t.name == 'sweep')
         self.assertEqual(sweep.prompt, DEFAULT_SCHEDULE_TRIGGER_PROMPT)
 
@@ -143,7 +169,7 @@ class TestAgentConfigGetSpec(OTestCase):
             spec_version=0,
         )
         spec = config.get_spec()
-        self.assertEqual(spec.schema_version, 2)
+        self.assertEqual(spec.schema_version, 3)
         self.assertEqual(spec.tools[0].id, 'clock')
 
     def test_get_spec_upgrades_v1_row_with_schedule_trigger(self) -> None:

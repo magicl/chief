@@ -1,28 +1,29 @@
 # title: ClickUp inbox
 # description: Illustrative ClickUp INBOX router with gated tool and list source.
-schema_version: 2
+schema_version: 3
 description: Illustrative ClickUp INBOX router
 llm:
   provider: anthropic
   model: claude-sonnet-4-6
 system_prompt: |
   Route items to the ClickUp INBOX list using the clickup tool.
-tools:
+integrations:
   - id: clickup
     type: clickup
     credential_ref: clickup
     config:
       team_id: "9000000"
+tools:
+  - id: clickup
+    integration: clickup
     allow: [list_spaces, list_lists, list_tasks, get_task, create_task, update_task, create_comment]
     deny: [delete_task]
 queues:
   - id: clickup-inbox
     sources:
       - id: clickup-list
-        type: clickup
-        credential_ref: clickup
+        integration: clickup
         config:
-          team_id: "9000000"
           list_id: "901000000"
           statuses: [open]
           max_results: 50

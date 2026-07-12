@@ -205,8 +205,11 @@ Each external service follows the same three-component anatomy:
 | **Source adapter** | `libs/sources/adapters/` | Polls external items → enqueues queue payloads |
 | **Tool** | `libs/tools/tools/` | Agent-callable functions gated by `allow` / `deny` |
 
-**`ToolInstance.config`** holds non-secret addressing (mailbox, team id, query filters).
-Secrets stay in `apps.keys`; YAML references them via **`credential_ref`** only.
+**`ToolInstance.config`** / **`SourceSpec.config`** hold non-secret addressing
+(mailbox, team id, query filters). Shared connection details can be declared once
+under **`integrations[]`** and referenced via **`integration:`** on tools and
+sources (schema v3+). Secrets stay in `apps.keys`; YAML references them via
+**`credential_ref`** only (on the integration or inline on the tool/source).
 
 **Queue payload envelope:** source adapters enqueue `{data, ref}` — `data` is the
 session-facing summary; `ref` carries stable ids and fetch hints so tools can re-read
@@ -221,16 +224,16 @@ derive `external_id` from a change token (Gmail `historyId`, ClickUp `date_updat
 updates can re-enter the queue.
 
 **Gmail (service account + domain-wide delegation):** store the SA JSON as a
-`type=gmail` credential; set **`config.subject`** on both the tool and source to
-select the impersonated mailbox. Operators must create a Google Cloud service account,
-enable the Gmail API, grant **domain-wide delegation** on that SA, and authorize the
-client scopes (`gmail.modify`, `gmail.send`) in the Google Workspace admin console for
-the SA's client id. Example:
+`type=gmail` credential; set **`config.subject`** on an integration (or on both the
+tool and source) to select the impersonated mailbox. Operators must create a Google
+Cloud service account, enable the Gmail API, grant **domain-wide delegation** on that
+SA, and authorize the client scopes (`gmail.modify`, `gmail.send`) in the Google
+Workspace admin console for the SA's client id. Example:
 [`backend/libs/agent_spec/examples/gmail-triage.yaml`](../backend/libs/agent_spec/examples/gmail-triage.yaml).
 
 **ClickUp (personal API token):** store the token as a `type=clickup` credential;
-set **`config.team_id`** on the tool (and source) for workspace addressing. The
-`libs/clients/clickup` client wraps the REST API via **`httpx`**; the source adapter
-polls a configured **`list_id`** (with optional status filters) into the queue.
-Example:
+set **`config.team_id`** on an integration (or on the tool and source) for workspace
+addressing. The `libs/clients/clickup` client wraps the REST API via **`httpx`**; the
+source adapter polls a configured **`list_id`** (with optional status filters) into the
+queue. Example:
 [`backend/libs/agent_spec/examples/clickup-inbox.yaml`](../backend/libs/agent_spec/examples/clickup-inbox.yaml).

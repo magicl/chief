@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-AGENT_CONFIG_SPEC_VERSION = 2
+AGENT_CONFIG_SPEC_VERSION = 3
 
 _INSTANCE_ID_RE = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
@@ -61,9 +61,19 @@ class TriggerSpec(BaseModel):
         return self
 
 
+class IntegrationSpec(BaseModel):
+    """Shared connection details referenced by tools and sources."""
+
+    id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
+    type: str
+    credential_ref: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class ToolInstance(BaseModel):
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
     type: str
+    integration: str | None = None
     credential_ref: str | None = None
     config: dict[str, Any] = {}  # non-secret per-instance addressing
     allow: list[str] = ['*']
@@ -77,6 +87,7 @@ class SourceSpec(BaseModel):
 
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
     adapter_type: str = Field(validation_alias='type', serialization_alias='type')
+    integration: str | None = None
     credential_ref: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -101,14 +112,89 @@ class QueueSpec(BaseModel):
         return self
 
 
+def _integration_map(raw_integrations: Any) -> dict[str, dict[str, Any]]:
+    """Index integration dicts by id; reject duplicates."""
+    if not raw_integrations:
+        return {}
+    if not isinstance(raw_integrations, list):
+        raise ValueError('integrations must be a list')
+    by_id: dict[str, dict[str, Any]] = {}
+    for entry in raw_integrations:
+        if not isinstance(entry, dict):
+            raise ValueError('integration entries must be mappings')
+        integ_id = entry.get('id')
+        if not isinstance(integ_id, str) or not integ_id:
+            raise ValueError('integration id is required')
+        if integ_id in by_id:
+            raise ValueError(f'duplicate integration id {integ_id!r}')
+        by_id[integ_id] = entry
+    return by_id
+
+
+def _apply_integration(entry: dict[str, Any], integrations: dict[str, dict[str, Any]], *, kind: str) -> dict[str, Any]:
+    """Fill type / credential_ref / config from a named integration when referenced."""
+    out = dict(entry)
+    ref = out.get('integration')
+    if not ref:
+        return out
+    if not isinstance(ref, str):
+        raise ValueError(f'{kind} integration must be a string id')
+    integ = integrations.get(ref)
+    if integ is None:
+        raise ValueError(f'{kind} references unknown integration {ref!r}')
+    integ_type = integ.get('type')
+    if out.get('type') is None:
+        out['type'] = integ_type
+    elif out.get('type') != integ_type:
+        raise ValueError(
+            f"{kind} type {out.get('type')!r} conflicts with integration {ref!r} type {integ_type!r}",
+        )
+    # Distinguish omitted credential_ref from explicit null (opt out of inherited cred).
+    if 'credential_ref' not in out and integ.get('credential_ref') is not None:
+        out['credential_ref'] = integ.get('credential_ref')
+    merged = dict(integ.get('config') or {})
+    merged.update(out.get('config') or {})
+    out['config'] = merged
+    return out
+
+
 class AgentConfigSpec(BaseModel):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     description: str | None = None
     llm: LLMSpec
     system_prompt: str
+    integrations: list[IntegrationSpec] = []
     triggers: list[TriggerSpec] = []
     tools: list[ToolInstance] = []
     queues: list[QueueSpec] = []
+
+    @model_validator(mode='before')
+    @classmethod
+    def _resolve_integrations(cls, data: Any) -> Any:
+        """Expand ``integration:`` refs on tools and sources before field validation."""
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        integrations = _integration_map(out.get('integrations'))
+        tools_in = out.get('tools') or []
+        out['tools'] = [
+            _apply_integration(dict(tool), integrations, kind='tool') if isinstance(tool, dict) else tool
+            for tool in tools_in
+        ]
+        queues_out: list[Any] = []
+        for queue in out.get('queues') or []:
+            if not isinstance(queue, dict):
+                queues_out.append(queue)
+                continue
+            queue_out = dict(queue)
+            sources_in = queue_out.get('sources') or []
+            queue_out['sources'] = [
+                _apply_integration(dict(source), integrations, kind='source') if isinstance(source, dict) else source
+                for source in sources_in
+            ]
+            queues_out.append(queue_out)
+        out['queues'] = queues_out
+        return out
 
     @model_validator(mode='after')
     def _unique_instance_ids(self) -> AgentConfigSpec:
