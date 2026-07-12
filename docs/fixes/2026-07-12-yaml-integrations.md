@@ -39,5 +39,5 @@ to `[]`.
 
 ## Links
 
-- PR: (pending)
+- PR: https://github.com/magicl/chief/pull/2
 - ClickUp: https://app.clickup.com/t/868k9u6zj
