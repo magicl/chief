@@ -14,8 +14,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from libs.clients.gmail import GmailClient
+from libs.clients.gmail.client import GmailClient
 from libs.clients.gmail.errors import GmailAuthError, GmailError, GmailNotFoundError
+from libs.clients.gmail.protocol import GmailClientProtocol
 from libs.tools.base import Tool, ToolFunction
 
 _MESSAGE_ID_DESC = 'Gmail message id (from `list`/queue item `ref.resource_id`).'
@@ -41,13 +42,13 @@ class GmailTool(Tool):
         *,
         token_supplier: Callable[[], str | None],
         config: dict[str, Any] | None = None,
-        client_factory: Callable[..., GmailClient] | None = None,
+        client_factory: Callable[..., GmailClientProtocol] | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Return an invoke closed over a per-mailbox GmailClient.
 
         ``client_factory`` is a test seam; production uses the real GmailClient.
         """
-        factory = client_factory or GmailClient
+        factory: Callable[..., GmailClientProtocol] = client_factory or GmailClient
         client = factory(token_supplier=token_supplier, config=config or {})
 
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
@@ -58,7 +59,7 @@ class GmailTool(Tool):
 
         return invoke
 
-    def _dispatch(self, client: GmailClient, function: str, arguments: dict[str, Any]) -> Any:
+    def _dispatch(self, client: GmailClientProtocol, function: str, arguments: dict[str, Any]) -> Any:
         """Route one function call to the matching client method."""
         if function == 'list':
             return client.list_messages(

@@ -1,0 +1,65 @@
+id: todo_to_clickup
+prompt: |
+  Triage unread inbox messages. Create ClickUp tasks for actionable mail and label handled messages.
+seed_gmail:
+  messages:
+    - id: todo-msg-1
+      labels:
+        - INBOX
+        - UNREAD
+      message:
+        subject: "Please prepare the launch checklist"
+        from: product@example.com
+        snippet: "Can you track a task to prepare the launch checklist by Friday?"
+seed_clickup:
+  spaces:
+    - team_id: team-1
+      space:
+        id: space-1
+        name: Work
+  lists:
+    - space_id: space-1
+      list:
+        id: list-1
+        name: Inbox
+  tasks: []
+fake_responses:
+  - content: ""
+    tool_calls:
+      - id: todo-call-1
+        name: gmail__list
+        arguments:
+          query: "in:inbox"
+      - id: todo-call-2
+        name: gmail__read
+        arguments:
+          message_id: todo-msg-1
+      - id: todo-call-3
+        name: clickup__create_task
+        arguments:
+          list_id: list-1
+          name: "Prepare launch checklist"
+          description: "From todo-msg-1: Can you track a task to prepare the launch checklist by Friday?"
+      - id: todo-call-4
+        name: gmail__label
+        arguments:
+          message_id: todo-msg-1
+          add_names:
+            - ClickUp
+  - content: "Created one ClickUp task and labeled the source message."
+expect:
+  tool_calls:
+    - gmail__list
+    - gmail__read
+    - clickup__create_task
+    - gmail__label
+  gmail:
+    labeled:
+      - message_id: todo-msg-1
+        label_name: ClickUp
+  clickup:
+    created_tasks:
+      - id: mock-task-1
+        list_id: list-1
+        name: "Prepare launch checklist"
+        description: "From todo-msg-1: Can you track a task to prepare the launch checklist by Friday?"

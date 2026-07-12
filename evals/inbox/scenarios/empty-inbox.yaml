@@ -1,0 +1,27 @@
+id: empty-inbox
+system_prompt: |
+  You triage Gmail inbox messages.
+  If the inbox has no unread messages, report that there is nothing to triage and do not create tasks.
+prompt: |
+  Triage unread inbox messages. Do not create work when there are no messages to handle.
+seed_gmail:
+  messages: []
+seed_clickup:
+  spaces:
+    - team_id: team-1
+      space:
+        id: space-1
+        name: Work
+  lists:
+    - space_id: space-1
+      list:
+        id: list-1
+        name: Inbox
+  tasks: []
+expect:
+  required_tool_calls:
+    - gmail__list
+  gmail:
+    spam: []
+  clickup:
+    created_tasks: []

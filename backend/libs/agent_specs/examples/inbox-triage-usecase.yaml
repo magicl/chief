@@ -1,0 +1,70 @@
+# title: Inbox triage usecase
+# description: Functional smoke fixture with Gmail and ClickUp mock data.
+schema_version: 2
+id: inbox-triage-usecase
+description: Gmail to ClickUp inbox triage usecase smoke fixture
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+  temperature: 0.2
+system_prompt: |
+  You triage Gmail inbox messages into ClickUp tasks.
+  Read unread inbox messages, create a ClickUp task for actionable mail, and keep responses concise.
+triggers:
+  - name: manual
+    kind: manual
+tools:
+  - id: gmail
+    type: gmail
+    credential_ref: gmail-personal
+    config:
+      subject: me@example.com
+    allow:
+      - list
+      - read
+      - label
+      - archive
+  - id: clickup
+    type: clickup
+    credential_ref: clickup-workspace
+    config:
+      team_id: team-1
+    allow:
+      - list_spaces
+      - list_lists
+      - create_task
+prompt: |
+  Triage unread inbox messages into ClickUp tasks.
+seed_gmail:
+  messages:
+    - id: msg-1
+      labels:
+        - INBOX
+        - UNREAD
+      message:
+        subject: "Please follow up"
+        from: sender@example.com
+        snippet: "Can you make sure this gets tracked?"
+seed_clickup:
+  spaces:
+    - team_id: team-1
+      space:
+        id: space-1
+        name: Work
+  lists:
+    - space_id: space-1
+      list:
+        id: list-1
+        name: Inbox
+  tasks: []
+fake_responses:
+  - content: ""
+    tool_calls:
+      - id: call-1
+        name: gmail__list
+        arguments:
+          query: "in:inbox"
+  - content: "Found one unread message to triage."
+expect:
+  tool_calls:
+    - gmail__list

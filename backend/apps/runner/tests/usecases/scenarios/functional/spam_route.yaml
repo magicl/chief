@@ -1,0 +1,60 @@
+id: spam_route
+prompt: |
+  Triage unread inbox messages. Obvious junk should be labeled and reported as spam.
+seed_gmail:
+  messages:
+    - id: spam-msg-1
+      labels:
+        - INBOX
+        - UNREAD
+      message:
+        subject: "Exclusive prize winner"
+        from: prize-desk@example.invalid
+        snippet: "Claim your free crypto reward by sending your account details today."
+seed_clickup:
+  spaces:
+    - team_id: team-1
+      space:
+        id: space-1
+        name: Work
+  lists:
+    - space_id: space-1
+      list:
+        id: list-1
+        name: Inbox
+  tasks: []
+fake_responses:
+  - content: ""
+    tool_calls:
+      - id: spam-call-1
+        name: gmail__list
+        arguments:
+          query: "in:inbox"
+      - id: spam-call-2
+        name: gmail__read
+        arguments:
+          message_id: spam-msg-1
+      - id: spam-call-3
+        name: gmail__label
+        arguments:
+          message_id: spam-msg-1
+          add_names:
+            - Spam reviewed
+      - id: spam-call-4
+        name: gmail__mark_spam
+        arguments:
+          message_id: spam-msg-1
+  - content: "Marked one obvious junk message as spam."
+expect:
+  tool_calls:
+    - gmail__list
+    - gmail__read
+    - gmail__label
+    - gmail__mark_spam
+  gmail:
+    spam:
+      - spam-msg-1
+    has_label_names:
+      - Spam reviewed
+  clickup:
+    created_tasks: []

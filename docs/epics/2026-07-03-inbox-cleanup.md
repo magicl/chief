@@ -22,12 +22,15 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 - ~~8. Obsidian library and tool~~ — **cancelled** (out of U1; no spec folder)
 - [ ] 9. Inbox triage agent
 - [ ] 10. Local disk providers (keys + agent configs) — [spec](../specs/2026-07-09-local-disk-providers/)
+- [ ] 11. Usecase tests and evals — [spec](../specs/2026-07-11-usecase-tests-evals/)
 
-Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 10 → 9** (spec 8 cancelled)
+Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 10 → 9 → 11** (spec 8 cancelled)
 
 Phasing: Gmail + ClickUp integrations are done. Next is **local disk providers
 (spec 10)** so oagent/host can edit keys and agent YAML on disk with live reload,
-then **inbox triage agent (spec 9)**. Obsidian routing was dropped from U1.
+then **inbox triage agent (spec 9)**, then **usecase tests and evals (spec 11)**
+(olib eval harness may start earlier; inbox scenarios need triage YAML). Obsidian
+routing was dropped from U1.
 
 ---
 
@@ -44,6 +47,7 @@ then **inbox triage agent (spec 9)**. Obsidian routing was dropped from U1.
 | 7 | 7 | ClickUp lib + tool + source adapter |
 | 8 | 10 | Local disk root + providers: load/watch keys and agent configs |
 | 9 | 9 | Inbox triage agent (Gmail tag/archive/spam + ClickUp INBOX routing) |
+| 10 | 11 | SessionRunner hooks + olib eval CLI; inbox functional tests + model-matrix evals |
 | — | 8 | ~~Obsidian~~ — **cancelled** |
 
 ---
@@ -181,6 +185,16 @@ start and is **watched live**; DB is runtime SoT. Disk-sourced items are
 **read-only in the UI**. Required `owner` on key/agent files. Soft-disable when
 a watched file disappears.
 
+### 11. Usecase tests and evals
+
+**SessionRunner**-driven **functional usecase tests** (MemorySessionBackend,
+FakeProvider, mock Gmail/ClickUp via test injection) plus a reusable **olib eval**
+runner (`olib/py/eval` + `orunr eval`) for separate harder scenarios and model
+matrices. Generic **hooks on SessionRunner** feed partitioned event-log files and
+terminal tracing (no eval instrumentation in agent product code). Inbox triage is
+the first consumer suite. See
+[spec](../specs/2026-07-11-usecase-tests-evals/).
+
 ---
 
 ## Constraints
@@ -193,6 +207,7 @@ a watched file disappears.
 - **ClickUp INBOX** — routed tasks land in an INBOX list, not project backlogs.
 - **DB runtime SoT** — disk/GitHub providers ingest into DB; runners resolve from DB only.
 - **Disk UI read-only** — items with `config_source` / key source `disk` are not editable in the UI (v1).
+- **Usecase mocks** — mock Gmail/ClickUp (and similar) are injected only in tests/evals; never selectable from agent YAML.
 
 ---
 
