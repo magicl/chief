@@ -103,6 +103,11 @@ class TargetInfo(VersionClusterInfo):
 @version_template
 class Config:
     displayName = 'Chief'
+    # GitHub org and repo for managed CI workflows (orun init --github).
+    githubOrg = 'magicl'
+    githubRepo = 'chief'
+    # True → ARC runner label ol-base-{githubOrg}; False → ol-base-{githubRepo}.
+    githubInOrg = False
     tools = ['python', 'javascript']
     license = 'apache'
     eval_suites = {'inbox': 'evals.inbox:get_suite'}
