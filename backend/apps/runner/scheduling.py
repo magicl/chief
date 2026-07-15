@@ -14,6 +14,7 @@ from uuid import UUID
 
 from apps.agents.models import AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue
+from apps.runner.budget_gate import budget_allows_dispatch
 from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.db import transaction
 from django.db.models import F
@@ -131,7 +132,7 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
     try:
         with transaction.atomic():
             locked = Trigger.objects.select_for_update().get(pk=trigger.pk)
-            if trigger_has_capacity(locked):
+            if trigger_has_capacity(locked) and budget_allows_dispatch(agent):
                 session = start_trigger_session(locked.agent, locked)
             Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
     except Exception:  # pylint: disable=broad-exception-caught
@@ -177,6 +178,8 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
             with transaction.atomic():
                 Trigger.objects.select_for_update().get(pk=trigger.pk)
                 if not trigger_has_capacity(trigger):
+                    break
+                if not budget_allows_dispatch(trigger.agent):
                     break
                 session = start_trigger_session(trigger.agent, trigger)
                 take_result = take_item(queue=queue, session_id=session.id)
