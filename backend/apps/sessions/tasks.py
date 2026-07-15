@@ -7,13 +7,22 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from apps.runner.llm_config import provider_config_from_spec
-from apps.sessions.models import AgentSession
+from apps.sessions.models import (
+    AgentSession,
+    AgentSessionEvent,
+    AgentSessionEventKind,
+    HourlyUsage,
+)
 from apps.sessions.services.queries import get_first_input_text, get_session_name
 from celery import shared_task
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncHour
+from django.utils import timezone
 
 # isort: split
 
@@ -53,3 +62,62 @@ def generate_session_name(self: Any, session_id: str) -> None:
     from apps.sessions.services.commands import update_session_name
 
     update_session_name(uid, name)
+
+
+@shared_task(ignore_result=True)
+def aggregate_hourly_usage() -> None:
+    """Roll up recent OUTPUT/TOOL_CALL events into HourlyUsage rows.
+
+    Uses a 2-hour lookback window and full-replaces affected hour buckets,
+    making the task idempotent without needing a watermark.
+    """
+    cutoff = timezone.now() - timedelta(hours=2)
+
+    output_rows = (
+        AgentSessionEvent.objects.filter(
+            kind=AgentSessionEventKind.OUTPUT,
+            created_at__gte=cutoff,
+        )
+        .annotate(hour=TruncHour('created_at'))
+        .values('session__agent_id', 'model', 'hour')
+        .annotate(
+            total_input_tokens=Sum('input_tokens'),
+            total_output_tokens=Sum('output_tokens'),
+            total_cost=Sum('cost_usd'),
+            iteration_count=Count('id'),
+        )
+    )
+
+    tool_call_rows = (
+        AgentSessionEvent.objects.filter(
+            kind=AgentSessionEventKind.TOOL_CALL,
+            created_at__gte=cutoff,
+        )
+        .annotate(hour=TruncHour('created_at'))
+        .values('session__agent_id', 'hour')
+        .annotate(tool_call_count=Count('id'))
+    )
+
+    # Index tool_call counts by (agent_id, hour) for fast lookup
+    tool_counts: dict[tuple[int, Any], int] = {}
+    for tc in tool_call_rows:
+        key = (tc['session__agent_id'], tc['hour'])
+        tool_counts[key] = tc['tool_call_count']
+
+    for row in output_rows:
+        agent_id = row['session__agent_id']
+        hour = row['hour']
+        tc_key = (agent_id, hour)
+
+        HourlyUsage.objects.update_or_create(
+            agent_id=agent_id,
+            hour=hour,
+            model=row['model'],
+            defaults={
+                'input_tokens': row['total_input_tokens'] or 0,
+                'output_tokens': row['total_output_tokens'] or 0,
+                'cost_usd': row['total_cost'] or 0,
+                'iteration_count': row['iteration_count'],
+                'tool_call_count': tool_counts.get(tc_key, 0),
+            },
+        )

@@ -25,4 +25,8 @@ app.conf.beat_schedule = {
         'task': 'apps.runner.trigger_tasks.dispatch_queue_triggers',
         'schedule': 15.0,
     },
+    'sessions-aggregate-hourly-usage': {
+        'task': 'apps.sessions.tasks.aggregate_hourly_usage',
+        'schedule': 600.0,  # every 10 minutes
+    },
 }
