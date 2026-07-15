@@ -119,6 +119,7 @@ class HourlyUsage(models.Model):
     cache_creation_input_tokens = models.PositiveBigIntegerField(default=0)
     cost_usd = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     iteration_count = models.PositiveIntegerField(default=0)
+    tool_call_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = [
@@ -142,38 +143,57 @@ Runs every ~10 minutes via celery beat:
 
 Watermark tracking: store the last processed `AgentSessionEvent.created_at` (or event id) in a small singleton model or Django cache, to avoid reprocessing the entire table each run.
 
-### Budget check query
+### Budget check: effective cap computation
+
+Rather than querying the DB every loop iteration, rolling budgets are collapsed into a single **effective session spend cap** computed at session start (and refreshed periodically for long-running sessions).
+
+At session start:
+
+```python
+agent_daily_remaining = agent.daily_spend_limit_usd - agent_daily_spend_from_hourly_usage()
+agent_monthly_remaining = agent.monthly_spend_limit_usd - agent_monthly_spend_from_hourly_usage()
+user_daily_remaining = user.spend_policy.daily_spend_limit_usd - user_daily_spend_from_hourly_usage()
+user_monthly_remaining = user.spend_policy.monthly_spend_limit_usd - user_monthly_spend_from_hourly_usage()
+
+effective_spend_cap = min_non_none(
+    session_spend_cap,           # from narrowing hierarchy (global/agent/trigger)
+    agent_daily_remaining,
+    agent_monthly_remaining,
+    user_daily_remaining,
+    user_monthly_remaining,
+)
+```
+
+During the loop: compare `_session_cost_usd >= effective_spend_cap`. **Pure in-memory, zero DB queries per iteration.**
+
+For long-running sessions (>5 minutes), re-snapshot from `HourlyUsage` and recompute `effective_spend_cap` periodically (~every 5 min or every N iterations, whichever comes first). This catches spend from other concurrent sessions that the aggregation task has rolled in since the session started.
+
+### Bounded overshoot
+
+The aggregation task runs every ~10 minutes, so if two sessions start simultaneously they both see the same "remaining" budget. Worst case, each spends up to its per-session cap before the system catches up. This overshoot is bounded by 1× session cap and is acceptable for daily/monthly windows. The scheduling gate refuses new sessions once aggregation reflects the true total.
+
+### Helper queries (used at start and during re-snapshot)
 
 ```python
 from django.db.models import Sum
 from django.utils import timezone
-from datetime import timedelta
 
 def agent_daily_spend(agent_id: UUID) -> Decimal:
     """Sum spend from HourlyUsage for the current UTC day."""
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     return HourlyUsage.objects.filter(
-        agent_id=agent_id,
-        hour__gte=today_start,
+        agent_id=agent_id, hour__gte=today_start,
     ).aggregate(total=Sum('cost_usd'))['total'] or Decimal(0)
 
 def user_daily_spend(user_id: int) -> Decimal:
     """Sum spend across all agents for a user for the current UTC day."""
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     return HourlyUsage.objects.filter(
-        agent__user_id=user_id,
-        hour__gte=today_start,
+        agent__user_id=user_id, hour__gte=today_start,
     ).aggregate(total=Sum('cost_usd'))['total'] or Decimal(0)
 ```
 
 Monthly variants filter `hour__gte` to the first of the current month.
-
-### Staleness window
-
-The aggregation task runs every 10 minutes, so budget data may be up to ~10 minutes stale. This is acceptable because:
-- Per-session limits (iteration + spend) are enforced in real-time from in-memory accumulators.
-- Rolling budgets are a slower-moving safety net — 10-minute lag before catching a runaway is fine for daily/monthly windows.
-- A session that's actively burning money is still constrained by its per-session spend cap.
 
 ---
 
@@ -265,11 +285,11 @@ The `SessionRunner` gains a single pre-iteration checkpoint:
 self._check_limits()
 ```
 
-`_check_limits()` runs all checks in order:
-1. Session iteration count >= effective `max_iterations` → fail
-2. Session accumulated spend >= effective `max_cost_usd` → fail
-3. Agent daily/monthly spend (from `HourlyUsage` + current session's local accumulator) >= budget → fail
-4. User daily/monthly spend (same approach) >= budget → fail
+`_check_limits()` runs two in-memory comparisons:
+1. `_iteration_count >= effective_max_iterations` → fail with `session_iteration_limit`
+2. `_session_cost_usd >= effective_spend_cap` → fail with appropriate code
+
+Both are pure in-memory checks — no DB queries during the loop.
 
 The method raises a `SessionFailure` (already handled by the loop) on breach.
 
@@ -278,12 +298,31 @@ The method raises a `SessionFailure` (already handled by the loop) on breach.
 ```python
 self._iteration_count: int = 0
 self._session_cost_usd: Decimal = Decimal(0)
+self._effective_max_iterations: int | None = None  # computed at init
+self._effective_spend_cap: Decimal | None = None   # computed at init, refreshed periodically
+self._last_budget_snapshot: float = 0.0            # monotonic time of last re-snapshot
 ```
 
 - `_iteration_count` incremented after each successful `provider.collect()`.
 - `_session_cost_usd` updated after each `_emit_output()` (where cost is computed).
+- `_effective_max_iterations` computed once at session start from `min(global, agent, trigger)`.
+- `_effective_spend_cap` computed at session start as `min(session_cap, remaining_agent_daily, remaining_agent_monthly, remaining_user_daily, remaining_user_monthly)`. Refreshed every ~5 minutes by re-querying `HourlyUsage` and recomputing remaining budgets.
 
-For rolling budget checks, the session queries `HourlyUsage` once at start (to get the baseline) and adds its own `_session_cost_usd` on top for comparison. Re-queries every ~5 minutes or N iterations to pick up aggregation updates from other concurrent sessions.
+### Refresh logic
+
+```python
+BUDGET_REFRESH_INTERVAL_S = 300  # 5 minutes
+
+def _maybe_refresh_spend_cap(self) -> None:
+    """Re-snapshot rolling budgets for long-running sessions."""
+    now = time.monotonic()
+    if now - self._last_budget_snapshot < BUDGET_REFRESH_INTERVAL_S:
+        return
+    self._effective_spend_cap = self._compute_effective_spend_cap()
+    self._last_budget_snapshot = now
+```
+
+Called at the start of `_check_limits()`. For short sessions (<5 min), only the initial snapshot is used.
 
 ---
 
