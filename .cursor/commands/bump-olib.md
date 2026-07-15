@@ -1,0 +1,1 @@
+../../olib/ai/commands/bump-olib.md

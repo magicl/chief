@@ -4,21 +4,17 @@
       "type": "sse",
       "url": "http://localhost:9197/sse"
     },
-    "local-grafana": {
+    "grafana": {
       "type": "sse",
       "url": "http://localhost:9191/sse"
     },
-    "local-helm": {
+    "helm": {
       "type": "sse",
       "url": "http://localhost:9192/sse"
     },
-    "local-kubernetes": {
+    "kubernetes": {
       "type": "sse",
       "url": "http://localhost:9190/sse"
-    },
-    "local-posthog": {
-      "type": "sse",
-      "url": "http://localhost:9193/sse"
     },
     "playwright": {
       "args": [
@@ -30,6 +26,10 @@
         "--no-sandbox"
       ],
       "command": "npx"
+    },
+    "posthog": {
+      "type": "sse",
+      "url": "http://localhost:9193/sse"
     },
     "sentry": {
       "type": "sse",
