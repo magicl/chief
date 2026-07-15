@@ -42,6 +42,18 @@ class Agent(models.Model):
         on_delete=models.SET_NULL,
         related_name='+',
     )
+    daily_spend_limit_usd = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    monthly_spend_limit_usd = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         constraints = [
@@ -109,3 +121,29 @@ class Trigger(models.Model):
 
     def __str__(self) -> str:
         return f'{self.agent.identifier}:{self.name}'
+
+
+class SpendPolicy(models.Model):
+    """Per-user global spend backstop (daily + monthly)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='spend_policy',
+    )
+    daily_spend_limit_usd = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    monthly_spend_limit_usd = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+
+    def __str__(self) -> str:
+        return f'SpendPolicy(user={self.user_id})'

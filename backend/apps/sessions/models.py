@@ -101,3 +101,37 @@ class AgentSessionEvent(models.Model):
             'latency_ms': self.latency_ms,
             'created_at': self.created_at.isoformat(),
         }
+
+
+class HourlyUsage(models.Model):
+    """Pre-aggregated token and spend totals per agent per model per hour.
+
+    Populated by a periodic celery task that rolls up AgentSessionEvent rows.
+    Consumed by budget-check queries (daily/monthly spend sums).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='hourly_usage')
+    hour = models.DateTimeField()
+    model = models.CharField(max_length=255)
+    input_tokens = models.PositiveBigIntegerField(default=0)
+    output_tokens = models.PositiveBigIntegerField(default=0)
+    cached_input_tokens = models.PositiveBigIntegerField(default=0)
+    cache_creation_input_tokens = models.PositiveBigIntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    iteration_count = models.PositiveIntegerField(default=0)
+    tool_call_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['agent', 'hour', 'model'],
+                name='sessions_hourlyusage_agent_hour_model_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['agent', 'hour']),
+        ]
+
+    def __str__(self) -> str:
+        return f'HourlyUsage({self.agent_id}, {self.hour}, {self.model})'
