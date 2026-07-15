@@ -2,12 +2,16 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+from decimal import Decimal
+
 from libs.agent_spec import (
     AGENT_CONFIG_SPEC_VERSION,
     AgentConfigSpec,
     LLMSpec,
     QueueSpec,
+    SessionLimitsSpec,
     ToolInstance,
+    TriggerSpec,
     load_spec,
 )
 from pydantic import ValidationError
@@ -22,7 +26,7 @@ V0_CLOCK_SPEC = {
 }
 
 MINIMAL_SPEC_DICT = {
-    'schema_version': 3,
+    'schema_version': 4,
     'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
     'system_prompt': 'hello',
     'triggers': [{'name': 'manual', 'kind': 'manual'}],
@@ -32,7 +36,7 @@ MINIMAL_SPEC_DICT = {
 
 class TestAgentConfigSpec(OTestCase):
     def test_current_schema_version_constant(self) -> None:
-        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 3)
+        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 4)
 
     def test_tool_instance_requires_id_and_type(self) -> None:
         inst = ToolInstance(id='clock', type='clock', allow=['now'])
@@ -41,7 +45,7 @@ class TestAgentConfigSpec(OTestCase):
     def test_duplicate_instance_ids_rejected_at_spec_level(self) -> None:
         with self.assertRaises(ValidationError):
             AgentConfigSpec(
-                schema_version=3,
+                schema_version=4,
                 llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
                 system_prompt='hi',
                 tools=[
@@ -52,7 +56,7 @@ class TestAgentConfigSpec(OTestCase):
 
     def test_load_spec_upgrades_v0_dict(self) -> None:
         spec = load_spec(V0_CLOCK_SPEC, stored_version=0)
-        self.assertEqual(spec.schema_version, 3)
+        self.assertEqual(spec.schema_version, 4)
         self.assertEqual(spec.tools[0].id, 'clock')
 
     def test_integration_fills_tool_and_source(self) -> None:
@@ -323,6 +327,57 @@ class TestTriggerSpec(OTestCase):
             }
         )
         self.assertEqual(spec.triggers[0].max_sessions, 1)
+
+
+class TestSessionLimitsSpec(OTestCase):
+    def test_session_limits_spec_defaults_to_uncapped(self) -> None:
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='hello',
+        )
+        self.assertIsNone(spec.limits.max_iterations)
+        self.assertIsNone(spec.limits.max_cost_usd)
+
+    def test_session_limits_spec_accepts_valid_values(self) -> None:
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='hello',
+            limits=SessionLimitsSpec(max_iterations=50, max_cost_usd=Decimal('2.00')),
+        )
+        self.assertEqual(spec.limits.max_iterations, 50)
+        self.assertEqual(spec.limits.max_cost_usd, Decimal('2.00'))
+
+    def test_session_limits_spec_accepts_dict_input(self) -> None:
+        """Verify Pydantic coerces a raw dict (e.g. from YAML) into SessionLimitsSpec."""
+        spec = AgentConfigSpec.model_validate(
+            {
+                'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
+                'system_prompt': 'hello',
+                'limits': {'max_iterations': 50, 'max_cost_usd': '2.00'},
+            }
+        )
+        self.assertEqual(spec.limits.max_iterations, 50)
+        self.assertEqual(spec.limits.max_cost_usd, Decimal('2.00'))
+
+    def test_session_limits_rejects_negative_iterations(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec(
+                llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+                system_prompt='hello',
+                limits=SessionLimitsSpec(max_iterations=-1),
+            )
+
+    def test_trigger_spec_accepts_limit_fields(self) -> None:
+        trigger = TriggerSpec(
+            name='sweep',
+            kind='schedule',
+            cron='0 * * * *',
+            prompt='go',
+            max_iterations=20,
+            max_cost_usd=Decimal('0.50'),
+        )
+        self.assertEqual(trigger.max_iterations, 20)
+        self.assertEqual(trigger.max_cost_usd, Decimal('0.50'))
 
 
 class TestToolInstanceConfig(OTestCase):
