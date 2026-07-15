@@ -57,6 +57,10 @@ live updates to the frontend over **websockets**, driven by **Django signals**:
 Open decisions (transport, e.g. Django Channels vs. an external pub/sub bridge)
 are deferred; this is a placeholder for the intended design only.
 
+## Documentation
+
+- [Agent format, tools, triggers, queues, and credentials](docs/docs/agents.md)
+
 ## Development setup
 
 Bootstrap, dependency sync, lint/test commands, and Docker Compose (DOCO slots) are documented in:
