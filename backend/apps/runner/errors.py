@@ -55,6 +55,26 @@ class SessionSpendLimitExceeded(SessionFailure):
         )
 
 
+class AgentDailySpendLimitExceeded(SessionFailure):
+    def __init__(self, limit: str) -> None:
+        super().__init__(f'Agent daily spend limit reached (${limit})', code='agent_daily_spend_limit')
+
+
+class AgentMonthlySpendLimitExceeded(SessionFailure):
+    def __init__(self, limit: str) -> None:
+        super().__init__(f'Agent monthly spend limit reached (${limit})', code='agent_monthly_spend_limit')
+
+
+class UserDailySpendLimitExceeded(SessionFailure):
+    def __init__(self, limit: str) -> None:
+        super().__init__(f'User daily spend limit reached (${limit})', code='user_daily_spend_limit')
+
+
+class UserMonthlySpendLimitExceeded(SessionFailure):
+    def __init__(self, limit: str) -> None:
+        super().__init__(f'User monthly spend limit reached (${limit})', code='user_monthly_spend_limit')
+
+
 def session_failure_from_provider_error(exc: ProviderConfigurationError) -> SessionFailure:
     """Map provider setup errors raised before the first LLM call."""
     if exc.code == 'credential_storage_misconfigured':

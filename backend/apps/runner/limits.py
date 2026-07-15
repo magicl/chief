@@ -4,9 +4,10 @@
 # ~
 """Session limit checker — computes effective caps and runs pre-iteration checks.
 
-Collapses the narrowing hierarchy + rolling budgets into two in-memory values
-(effective_max_iterations and effective_spend_cap) that are compared every iteration
-with zero DB queries. Long-running sessions refresh the spend cap periodically.
+Collapses the narrowing hierarchy (global settings > agent spec > trigger spec)
+into in-memory limits.  Rolling budgets (agent daily/monthly, user daily/monthly)
+are tracked per-level so check() can raise the specific failure class for whichever
+level is breached.  Long-running sessions refresh rolling budgets periodically.
 """
 
 from __future__ import annotations
@@ -16,13 +17,16 @@ from decimal import Decimal
 from uuid import UUID
 
 from apps.runner.errors import (
+    AgentDailySpendLimitExceeded,
+    AgentMonthlySpendLimitExceeded,
     SessionIterationLimitExceeded,
     SessionSpendLimitExceeded,
+    UserDailySpendLimitExceeded,
+    UserMonthlySpendLimitExceeded,
 )
 from apps.sessions.services.budget import (
     agent_daily_spend,
     agent_monthly_spend,
-    compute_effective_spend_cap,
     user_daily_spend,
     user_monthly_spend,
 )
@@ -50,6 +54,9 @@ class SessionLimitChecker:
     Computes effective caps at init from the narrowing hierarchy
     (global settings > agent spec > trigger spec) plus rolling budgets.
     The check() method is called pre-iteration — pure in-memory comparisons.
+
+    Rolling budget remaining amounts are stored per-level so check() can raise
+    the specific failure class for the breached level.
     """
 
     def __init__(
@@ -91,43 +98,71 @@ class SessionLimitChecker:
             trigger_max_cost,
         )
 
-        # Compute full effective spend cap including rolling budgets
+        # Per-level remaining amounts (refreshed together)
+        self._agent_daily_remaining: Decimal | None = None
+        self._agent_monthly_remaining: Decimal | None = None
+        self._user_daily_remaining: Decimal | None = None
+        self._user_monthly_remaining: Decimal | None = None
+
         self._last_budget_snapshot = time.monotonic()
-        self.effective_spend_cap = self._compute_effective_spend_cap()
+        self._refresh_budget_levels()
 
-    def _compute_effective_spend_cap(self) -> Decimal | None:
-        """Query HourlyUsage and compute the tightest spend cap across all levels."""
-        agent_daily_remaining = None
-        agent_monthly_remaining = None
-        user_daily_remaining = None
-        user_monthly_remaining = None
+    def _refresh_budget_levels(self) -> None:
+        """Query HourlyUsage and store per-level remaining budget for this session.
 
+        Subtracts ``session_cost_usd`` from the aggregated baseline to avoid
+        double-counting after the aggregation task folds this session's events
+        into HourlyUsage.
+        """
         if self._agent_id is not None and self._agent_daily_limit is not None:
-            agent_daily_remaining = self._agent_daily_limit - agent_daily_spend(self._agent_id)
-        if self._agent_id is not None and self._agent_monthly_limit is not None:
-            agent_monthly_remaining = self._agent_monthly_limit - agent_monthly_spend(self._agent_id)
-        if self._user_id is not None and self._user_daily_limit is not None:
-            user_daily_remaining = self._user_daily_limit - user_daily_spend(self._user_id)
-        if self._user_id is not None and self._user_monthly_limit is not None:
-            user_monthly_remaining = self._user_monthly_limit - user_monthly_spend(self._user_id)
+            baseline = agent_daily_spend(self._agent_id)
+            others = max(baseline - self.session_cost_usd, Decimal(0))
+            self._agent_daily_remaining = self._agent_daily_limit - others
+        else:
+            self._agent_daily_remaining = None
 
-        return compute_effective_spend_cap(
-            session_spend_cap=self._session_spend_cap,
-            agent_daily_remaining=agent_daily_remaining,
-            agent_monthly_remaining=agent_monthly_remaining,
-            user_daily_remaining=user_daily_remaining,
-            user_monthly_remaining=user_monthly_remaining,
-        )
+        if self._agent_id is not None and self._agent_monthly_limit is not None:
+            baseline = agent_monthly_spend(self._agent_id)
+            others = max(baseline - self.session_cost_usd, Decimal(0))
+            self._agent_monthly_remaining = self._agent_monthly_limit - others
+        else:
+            self._agent_monthly_remaining = None
+
+        if self._user_id is not None and self._user_daily_limit is not None:
+            baseline = user_daily_spend(self._user_id)
+            others = max(baseline - self.session_cost_usd, Decimal(0))
+            self._user_daily_remaining = self._user_daily_limit - others
+        else:
+            self._user_daily_remaining = None
+
+        if self._user_id is not None and self._user_monthly_limit is not None:
+            baseline = user_monthly_spend(self._user_id)
+            others = max(baseline - self.session_cost_usd, Decimal(0))
+            self._user_monthly_remaining = self._user_monthly_limit - others
+        else:
+            self._user_monthly_remaining = None
 
     def check(self) -> None:
-        """Run all limit checks pre-iteration. Raises SessionFailure on breach."""
-        self._maybe_refresh_spend_cap()
+        """Run all limit checks pre-iteration. Raises the most specific SessionFailure."""
+        self._maybe_refresh_budget()
 
         if self.effective_max_iterations is not None and self.iteration_count >= self.effective_max_iterations:
             raise SessionIterationLimitExceeded(self.effective_max_iterations)
 
-        if self.effective_spend_cap is not None and self.session_cost_usd >= self.effective_spend_cap:
-            raise SessionSpendLimitExceeded(str(self.effective_spend_cap))
+        if self._agent_daily_remaining is not None and self.session_cost_usd >= self._agent_daily_remaining:
+            raise AgentDailySpendLimitExceeded(str(self._agent_daily_limit))
+
+        if self._agent_monthly_remaining is not None and self.session_cost_usd >= self._agent_monthly_remaining:
+            raise AgentMonthlySpendLimitExceeded(str(self._agent_monthly_limit))
+
+        if self._user_daily_remaining is not None and self.session_cost_usd >= self._user_daily_remaining:
+            raise UserDailySpendLimitExceeded(str(self._user_daily_limit))
+
+        if self._user_monthly_remaining is not None and self.session_cost_usd >= self._user_monthly_remaining:
+            raise UserMonthlySpendLimitExceeded(str(self._user_monthly_limit))
+
+        if self._session_spend_cap is not None and self.session_cost_usd >= self._session_spend_cap:
+            raise SessionSpendLimitExceeded(str(self._session_spend_cap))
 
     def record_iteration(self) -> None:
         """Increment iteration count after a successful provider.collect()."""
@@ -138,10 +173,10 @@ class SessionLimitChecker:
         if cost_usd is not None:
             self.session_cost_usd += cost_usd
 
-    def _maybe_refresh_spend_cap(self) -> None:
+    def _maybe_refresh_budget(self) -> None:
         """Re-snapshot rolling budgets for long-running sessions (every 5 min)."""
         now = time.monotonic()
         if now - self._last_budget_snapshot < BUDGET_REFRESH_INTERVAL_S:
             return
-        self.effective_spend_cap = self._compute_effective_spend_cap()
+        self._refresh_budget_levels()
         self._last_budget_snapshot = now
