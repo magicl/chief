@@ -104,10 +104,16 @@ def aggregate_hourly_usage() -> None:
         key = (tc['session__agent_id'], tc['hour'])
         tool_counts[key] = tc['tool_call_count']
 
+    # Track which (agent, hour) keys have had their tool_call_count written
+    # to avoid inflating totals when multiple model rows share the same key.
+    tc_written: set[tuple[int, object]] = set()
+
     for row in output_rows:
         agent_id = row['session__agent_id']
         hour = row['hour']
         tc_key = (agent_id, hour)
+        tc_val = tool_counts.get(tc_key, 0) if tc_key not in tc_written else 0
+        tc_written.add(tc_key)
 
         HourlyUsage.objects.update_or_create(
             agent_id=agent_id,
@@ -118,6 +124,6 @@ def aggregate_hourly_usage() -> None:
                 'output_tokens': row['total_output_tokens'] or 0,
                 'cost_usd': row['total_cost'] or 0,
                 'iteration_count': row['iteration_count'],
-                'tool_call_count': tool_counts.get(tc_key, 0),
+                'tool_call_count': tc_val,
             },
         )

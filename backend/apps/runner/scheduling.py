@@ -128,11 +128,16 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
         disable_schedule_trigger_beat(trigger.id)
         return False
 
+    # Budget check outside the atomic block to avoid holding the row lock during spend queries
+    if not budget_allows_dispatch(agent):
+        Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
+        return False
+
     session = None
     try:
         with transaction.atomic():
             locked = Trigger.objects.select_for_update().get(pk=trigger.pk)
-            if trigger_has_capacity(locked) and budget_allows_dispatch(agent):
+            if trigger_has_capacity(locked):
                 session = start_trigger_session(locked.agent, locked)
             Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
     except Exception:  # pylint: disable=broad-exception-caught
@@ -172,14 +177,16 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
     started = 0
 
     while True:
+        # Budget check outside the atomic block to avoid holding the row lock during spend queries
+        if not budget_allows_dispatch(trigger.agent):
+            break
+
         take_result = None
         session = None
         try:
             with transaction.atomic():
                 Trigger.objects.select_for_update().get(pk=trigger.pk)
                 if not trigger_has_capacity(trigger):
-                    break
-                if not budget_allows_dispatch(trigger.agent):
                     break
                 session = start_trigger_session(trigger.agent, trigger)
                 take_result = take_item(queue=queue, session_id=session.id)
