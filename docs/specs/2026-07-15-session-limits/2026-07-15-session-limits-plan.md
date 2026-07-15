@@ -54,6 +54,8 @@
 | `backend/apps/runner/tests/test_limits.py` | Create | Unit + integration tests for limit enforcement |
 | `backend/apps/sessions/tests/test_aggregation.py` | Create | Tests for the hourly aggregation task |
 | `backend/apps/runner/tests/test_scheduling.py` | Modify | Add budget gate tests |
+| `backend/templates/web/dashboard.html` | Modify | Show user daily/monthly spend + caps |
+| `backend/templates/web/agent_detail.html` | Modify | Show agent daily/monthly spend + caps |
 
 ---
 
@@ -1259,9 +1261,199 @@ git fetch origin main && git rebase origin/main && git push
 
 ---
 
+## Task 8: Dashboard and agent view — usage + caps display
+
+**Files:**
+- Modify: `backend/apps/web/views.py`
+- Modify: `backend/templates/web/dashboard.html`
+- Modify: `backend/templates/web/agent_detail.html`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# Add to backend/apps/web/tests/ (or existing test file for views)
+# Verify the dashboard context contains usage data
+
+from decimal import Decimal
+from apps.agents.models import Agent, AgentConfig, SpendPolicy
+from apps.sessions.models import HourlyUsage
+from django.test import RequestFactory
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+
+from olib.py.django.test.cases import OTestCase
+
+User = get_user_model()
+
+
+class TestDashboardUsageContext(OTestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(username='dash-usage', password='x')
+        self.client.force_login(self.user)
+        self.agent = Agent.objects.create(
+            user=self.user, name='A', identifier='dash-agent',
+            daily_spend_limit_usd=Decimal('10.00'),
+            monthly_spend_limit_usd=Decimal('100.00'),
+        )
+        config = AgentConfig.objects.create(agent=self.agent, spec={'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'}, 'system_prompt': 'hi', 'schema_version': 4}, spec_version=4)
+        self.agent.current_config = config
+        self.agent.save()
+        SpendPolicy.objects.create(
+            user=self.user,
+            daily_spend_limit_usd=Decimal('50.00'),
+            monthly_spend_limit_usd=Decimal('500.00'),
+        )
+        HourlyUsage.objects.create(
+            agent=self.agent,
+            hour=timezone.now().replace(minute=0, second=0, microsecond=0),
+            model='gpt-5.4-mini',
+            cost_usd=Decimal('1.25'),
+            iteration_count=10,
+            tool_call_count=5,
+        )
+
+    def test_dashboard_includes_user_usage(self) -> None:
+        resp = self.client.get('/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('user_daily_spend', resp.context)
+        self.assertEqual(resp.context['user_daily_spend'], Decimal('1.25'))
+
+    def test_agent_detail_includes_agent_usage(self) -> None:
+        resp = self.client.get(f'/agents/{self.agent.id}/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('agent_daily_spend', resp.context)
+        self.assertEqual(resp.context['agent_daily_spend'], Decimal('1.25'))
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `./olib/scripts/orunr py test backend/apps/web/tests/ -v -k "usage"`
+Expected: FAIL (context keys don't exist)
+
+- [ ] **Step 3: Update `dashboard` view to include user-level usage context**
+
+In `backend/apps/web/views.py`, update the `dashboard` function:
+
+```python
+from apps.sessions.services.budget import user_daily_spend, user_monthly_spend
+from apps.agents.models import SpendPolicy
+
+def dashboard(request: HttpRequest) -> HttpResponse:
+    agents = Agent.objects.select_related('current_config', 'user').order_by('-id')
+    sessions = AgentSession.objects.select_related('agent').order_by('-created_at')
+    if request.user.is_authenticated:
+        agents = agents.filter(user=request.user)
+        sessions = sessions.filter(agent__user=request.user)
+    sessions = sessions[:20]
+    examples = list_examples() if request.user.is_authenticated else []
+
+    context: dict[str, Any] = {'agents': agents, 'sessions': sessions, 'examples': examples}
+
+    if request.user.is_authenticated:
+        uid = request.user.pk
+        context['user_daily_spend'] = user_daily_spend(uid)
+        context['user_monthly_spend'] = user_monthly_spend(uid)
+        try:
+            policy = SpendPolicy.objects.get(user_id=uid)
+            context['user_daily_limit'] = policy.daily_spend_limit_usd
+            context['user_monthly_limit'] = policy.monthly_spend_limit_usd
+        except SpendPolicy.DoesNotExist:
+            context['user_daily_limit'] = None
+            context['user_monthly_limit'] = None
+
+    return render(request, 'web/dashboard.html', context)
+```
+
+- [ ] **Step 4: Update `agent_detail` view to include agent-level usage context**
+
+In `backend/apps/web/views.py`, update the `agent_detail` function:
+
+```python
+from apps.sessions.services.budget import agent_daily_spend, agent_monthly_spend
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    agent = _owned_agent(request, agent_id)
+    sessions = AgentSession.objects.filter(agent=agent).order_by('-created_at')
+    context: dict[str, Any] = {
+        'agent': agent,
+        'sessions': sessions,
+        'source_label': config_source_label(agent.config_source),
+        'config_dirty': agent.current_config.dirty if agent.current_config else False,
+        'agent_daily_spend': agent_daily_spend(agent.id),
+        'agent_monthly_spend': agent_monthly_spend(agent.id),
+        'agent_daily_limit': agent.daily_spend_limit_usd,
+        'agent_monthly_limit': agent.monthly_spend_limit_usd,
+    }
+    context.update(_chatbox_context(agent=agent, session=None))
+    return render(request, 'web/agent_detail.html', context)
+```
+
+- [ ] **Step 5: Add usage display to `dashboard.html`**
+
+Add a section between the agents table and sessions table:
+
+```html
+{% if user.is_authenticated %}
+<section class="card" style="margin-top: 1.5rem">
+  <h2>Usage</h2>
+  <table class="usage-table">
+    <thead>
+      <tr><th></th><th>Today</th><th>This month</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Spend</td>
+        <td>${{ "%.4f"|format(user_daily_spend) }}{% if user_daily_limit %} <span class="muted">/ ${{ "%.2f"|format(user_daily_limit) }}</span>{% endif %}</td>
+        <td>${{ "%.4f"|format(user_monthly_spend) }}{% if user_monthly_limit %} <span class="muted">/ ${{ "%.2f"|format(user_monthly_limit) }}</span>{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+{% endif %}
+```
+
+- [ ] **Step 6: Add usage display to `agent_detail.html`**
+
+Add a usage section in the `frame_header` or as a new card in `frame_main` (before the sessions table):
+
+```html
+<section class="card" style="margin-bottom: 1rem">
+  <h3>Agent usage</h3>
+  <table class="usage-table">
+    <thead>
+      <tr><th></th><th>Today</th><th>This month</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Spend</td>
+        <td>${{ "%.4f"|format(agent_daily_spend) }}{% if agent_daily_limit %} <span class="muted">/ ${{ "%.2f"|format(agent_daily_limit) }}</span>{% endif %}</td>
+        <td>${{ "%.4f"|format(agent_monthly_spend) }}{% if agent_monthly_limit %} <span class="muted">/ ${{ "%.2f"|format(agent_monthly_limit) }}</span>{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+```
+
+- [ ] **Step 7: Run tests to verify they pass**
+
+Run: `./olib/scripts/orunr py test backend/apps/web/tests/ -v`
+Expected: PASS
+
+- [ ] **Step 8: Commit and sync**
+
+```bash
+git add backend/apps/web/ backend/templates/web/
+git commit -m "feat: show daily/monthly usage and spend caps in dashboard and agent view"
+git fetch origin main && git rebase origin/main && git push
+```
+
+---
+
 ## S_final — Code review (mandatory)
 
-### Task 8: Code review
+### Task 9: Code review
 
 > **REQUIRED SKILL:** Read and follow **`superpowers/requesting-code-review`**. Dispatch a code reviewer subagent using the template at `requesting-code-review/code-reviewer.md`. Review the feature branch against the plan/design. Write findings to **`*-review.md`** (see `review-file-template.md`). Do not fix findings unless the user asks — summarize in chat and in the review file.
 
