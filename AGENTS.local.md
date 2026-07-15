@@ -68,55 +68,13 @@ LLM API keys: **Settings → Keys** (encrypted store) or `.env.local` under `#[b
 Docker Compose loads `.env.local` into backend/worker containers (optional file) and bakes
 it into `.output/env.compose.backend` when you run `./olib/scripts/orunr docker compose`.
 
-## Backend libs (`backend/libs/`)
+## Architecture
 
-Shared, Django-free packages live under `backend/libs/` (plural container):
+Backend architecture (three-layer request handling, app dependencies, lib rules,
+services pattern, Celery tasks, SSE notifications) is documented in
+**`docs/ARCHITECTURE.md`** — the canonical reference for all structural decisions.
 
-| Package | Role |
-|---------|------|
-| `libs/providers/llm` | LLM provider implementations |
-| `libs/providers/key` | Key-provider protocols + disk credential parsing |
-| `libs/providers/data` | Data-provider protocols + disk agent parsing |
-| `libs/file` | Shared file normalization + content hashing |
-| `libs/tools` | Tool definitions + registry |
-| `libs/algorithms` | Reusable algorithms (may call providers) |
-
-**Lib rules:**
-
-- Libs do **not** import `apps.*`.
-- Minimize coupling between libs; use one-directional deps and public interfaces.
-- Apps orchestrate; libs compute.
-- When a lib needs credentials or app/domain access, **inject at the app boundary**
-  (see `apps.agents` tool wiring and `docs/ARCHITECTURE.md` for secrets) — do not import
-  Django or `apps.keys` from libs.
-
-```
-libs/file                    (stdlib)
-libs/providers/{key,data} --> libs/file
-libs/providers/llm           (stdlib + vendor SDKs)
-libs/tools                   (stdlib + pydantic)
-libs/algorithms          --> libs/providers/llm
-apps/*                   --> libs/* (as needed)
-```
-
-## Django app dependencies
-
-Backend apps have **one-directional** imports (see `docs/specs/2026-06-23-design/2026-06-23-design-design.md`):
-
-| App | Role | May import from |
-|-----|------|-----------------|
-| `apps.agents` | Domain core: models, config ingest/materialization, tool wiring | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), **`queues`** (materialize only) |
-| `apps.queues` | Agent-scoped queues, sources, items, poll/release | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only) |
-| `apps.sessions` | Session + event log + session services/tasks | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
-| `apps.bus` | Redis pub/sub + mailbox primitives | Django/stdlib only |
-| `apps.runner` | Celery step loop, tool invocation | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
-| `apps.keys` | Encrypted credentials (system + user) | Django/stdlib, `cryptography` only |
-| `apps.web` | Dashboard, SSE, control endpoints | all of the above (keys: metadata + commands only) |
-
-Direction: `agents → sessions → runner → web`, with `bus` and `keys` as leaves (`keys`
-has no app imports; `web` must not import `resolve_*` from keys). **`apps.agents`**
-imports **`apps.queues`** only for config materialization (`sync_from_spec`); see
-`docs/ARCHITECTURE.md` (Agent configuration).
+See `docs/ARCHITECTURE.md` for the libs table, dependency graph, and import rules.
 
 ## Credentials & secrets
 
@@ -173,51 +131,8 @@ Skip this checklist for optional-only additions — update `AgentConfigSpec` and
 6. Update **`HARDCODED_SPEC`**, YAML fixtures, and docs/examples to the new version.
 7. Django migration **only** if new columns/indexes are needed — not for JSON rewrites.
 
-## App services (queries + commands)
+**Additional codebase rules:**
 
-Each app exposes a **public API** for other apps and Celery tasks via
-`apps/<app>/services/`:
-
-| Module | Purpose |
-|--------|---------|
-| `services/queries.py` | Read-only domain access (no bus publish, no task scheduling) |
-| `services/commands.py` | Mutations: DB writes, notifications, downstream `.delay()` |
-
-**Rules:**
-
-- Celery tasks, runner, and web views call **services**, not raw ORM updates
-  (when a service exists).
-- Tasks are **thin orchestrators**: query → lib function → command.
-- Commands that mutate session/agent state emit UI notifications (see below).
-
-Example (sessions): `get_first_input_text` (query), `record_input` /
-`update_session_name` (commands).
-
-## Celery tasks
-
-- Each app that needs async work owns **`apps/<app>/tasks.py`**.
-- Register task modules in **`chief/tasks.py`** (imports only — see existing
-  `apps.runner.tasks` pattern).
-- **`apps.runner.tasks`**: long-lived session execution (`run_session`).
-- **`apps.sessions.tasks`**: short metadata side work (e.g. `generate_session_name`).
-- Tasks never call `publish_*` directly; commands own side effects.
-
-## Real-time UI notifications (SSE)
-
-Session-scoped Redis pub/sub carries an envelope:
-
-- `session_event` — `AgentSessionEvent` payload (dedupe by `seq` in SSE)
-- `session_update` — partial session patch, e.g. `{"name": "..."}`
-
-Commands call `publish_session_update` after DB writes. The session detail page
-listens on the existing SSE connection and patches Alpine state (no HTMX swap
-required for simple fields).
-
-**Rules for agents working on the codebase:**
-
-- Do not import `runner` or `web` from `agents` or `sessions`.
-- Provider-specific UI (e.g. listing models for dashboard buttons) belongs in `web`, not `agents`.
-- Types referenced by `AgentConfigSpec` stay in `agents` even when `runner` invokes them at runtime.
 - **`AgentConfigSpec` schema changes:** follow **Agent config schema migrations** above —
   add a spec migration step and tests; do not transform spec JSON in Django data migrations.
 - Algorithm config: pydantic struct per algorithm with defaults; override on call — avoid new env vars for tuning.
