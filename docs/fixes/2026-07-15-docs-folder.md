@@ -35,5 +35,5 @@ Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 
 ## Links
 
-- PR: (pending)
+- PR: https://github.com/magicl/chief/pull/3
 - ClickUp: https://app.clickup.com/t/868kcw0w9
