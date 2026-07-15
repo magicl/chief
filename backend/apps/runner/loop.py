@@ -25,6 +25,7 @@ from apps.runner.errors import (
     session_failure_from_provider_runtime_error,
 )
 from apps.runner.hooks import HookRegistry, HookSet
+from apps.runner.limits import SessionLimitChecker
 from apps.runner.llm_config import provider_config_from_spec
 from apps.runner.tool_definitions import build_tool_definitions
 from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
@@ -55,6 +56,7 @@ class SessionRunner:
         self,
         backend: SessionBackend,
         *,
+        agent_id: uuid.UUID | None = None,
         emit_restart: bool = False,
         client_factories: dict[str, Callable[..., Any]] | None = None,
     ) -> None:
@@ -73,6 +75,12 @@ class SessionRunner:
         self.control = LoopControl()
         self.emit_restart = emit_restart
         self.hooks = HookRegistry()
+
+        self._limit_checker = SessionLimitChecker(
+            self.config_spec,
+            agent_id=agent_id,
+            user_id=self.backend.user_id,
+        )
 
     @classmethod
     def for_session(
@@ -129,6 +137,12 @@ class SessionRunner:
                         self._record_failure(session_failure_from_provider_error(exc))
                         return
 
+                try:
+                    self._limit_checker.check()
+                except SessionFailure as exc:
+                    self._record_failure(exc)
+                    return
+
                 self.hooks.fire('on_generate_start', messages, tool_definitions)
                 result = provider.collect(messages, tool_definitions)
                 self.hooks.fire('on_generate_end', result)
@@ -136,7 +150,9 @@ class SessionRunner:
                     self._record_provider_error(result.error)
                     return
 
-                self._emit_output(provider, result)
+                cost = self._emit_output(provider, result)
+                self._limit_checker.record_iteration()
+                self._limit_checker.record_cost(cost)
 
                 if result.tool_calls:
                     for call in result.tool_calls:
@@ -186,8 +202,8 @@ class SessionRunner:
 
         self.control.pending_inputs.clear()
 
-    def _emit_output(self, provider: LLMProvider, result: StreamResult) -> None:
-        """Record provider output and usage details as a session event."""
+    def _emit_output(self, provider: LLMProvider, result: StreamResult) -> Decimal | None:
+        """Record provider output and usage details as a session event. Returns computed cost."""
         usage = result.usage
         cost = provider.compute_cost_usd(usage, latency_ms=result.latency_ms) if usage else None
         event = self._append_event(
@@ -200,6 +216,7 @@ class SessionRunner:
             latency_ms=result.latency_ms,
         )
         self.backend.publish_event(event)
+        return cost
 
     def _handle_tool_call(self, call: dict[str, Any]) -> None:
         """Invoke one requested tool call and record its call/result events."""

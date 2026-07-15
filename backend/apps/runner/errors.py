@@ -39,6 +39,22 @@ class CredentialStorageMisconfigured(SessionFailure):
         super().__init__('credential storage misconfigured', code='credential_storage_misconfigured')
 
 
+class SessionIterationLimitExceeded(SessionFailure):
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            f'Session iteration limit reached ({limit})',
+            code='session_iteration_limit',
+        )
+
+
+class SessionSpendLimitExceeded(SessionFailure):
+    def __init__(self, limit: str) -> None:
+        super().__init__(
+            f'Session spend limit reached (${limit})',
+            code='session_spend_limit',
+        )
+
+
 def session_failure_from_provider_error(exc: ProviderConfigurationError) -> SessionFailure:
     """Map provider setup errors raised before the first LLM call."""
     if exc.code == 'credential_storage_misconfigured':

@@ -60,3 +60,17 @@ for _tpl in TEMPLATES:  # noqa: F405
             'django.contrib.messages.context_processors.messages',
         ]
         break
+
+from decimal import Decimal as _Decimal
+
+# Session limits — global defaults (narrowing hierarchy floor)
+DEFAULT_MAX_SESSION_ITERATIONS: int | None = 200
+DEFAULT_MAX_SESSION_COST_USD: _Decimal | None = _Decimal('5.00')
+
+# Agent rolling spend defaults
+DEFAULT_AGENT_DAILY_SPEND_LIMIT_USD: _Decimal | None = None
+DEFAULT_AGENT_MONTHLY_SPEND_LIMIT_USD: _Decimal | None = None
+
+# User rolling spend defaults
+DEFAULT_USER_DAILY_SPEND_LIMIT_USD: _Decimal | None = None
+DEFAULT_USER_MONTHLY_SPEND_LIMIT_USD: _Decimal | None = None
