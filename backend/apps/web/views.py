@@ -14,7 +14,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
-from apps.agents.models import Agent
+from apps.agents.models import Agent, SpendPolicy
 from apps.bus.client import async_client, key_prefix
 from apps.keys.credential_guides import credential_guides_for_ui
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
@@ -31,6 +31,12 @@ from apps.runner.session_start import StartSessionError
 from apps.runner.start import start_manual_session
 from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession
+from apps.sessions.services.budget import (
+    agent_daily_spend,
+    agent_monthly_spend,
+    user_daily_spend,
+    user_monthly_spend,
+)
 from apps.web.services.queries import (
     get_agent_detail_data,
     get_credential_for_write_check,
@@ -92,10 +98,25 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     """Main dashboard listing agents and recent sessions."""
     user_id = cast(AbstractBaseUser, request.user).pk if request.user.is_authenticated else None
     data = get_dashboard_data(user_id=user_id)
+
+    usage_context: dict[str, Any] = {}
+    if user_id is not None:
+        usage_context['user_daily_spend'] = user_daily_spend(user_id)
+        usage_context['user_monthly_spend'] = user_monthly_spend(user_id)
+        try:
+            policy = SpendPolicy.objects.get(user_id=user_id)
+            usage_context['user_daily_limit'] = policy.daily_spend_limit_usd
+            usage_context['user_monthly_limit'] = policy.monthly_spend_limit_usd
+        except SpendPolicy.DoesNotExist:
+            from django.conf import settings
+
+            usage_context['user_daily_limit'] = getattr(settings, 'DEFAULT_USER_DAILY_SPEND_LIMIT_USD', None)
+            usage_context['user_monthly_limit'] = getattr(settings, 'DEFAULT_USER_MONTHLY_SPEND_LIMIT_USD', None)
+
     return render(
         request,
         'web/dashboard.html',
-        {'agents': data.agents, 'sessions': data.sessions, 'examples': data.examples},
+        {'agents': data.agents, 'sessions': data.sessions, 'examples': data.examples, **usage_context},
     )
 
 
@@ -109,6 +130,10 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
         'sessions': data.sessions,
         'source_label': data.source_label,
         'config_dirty': data.config_dirty,
+        'agent_daily_spend': agent_daily_spend(data.agent.pk),
+        'agent_monthly_spend': agent_monthly_spend(data.agent.pk),
+        'agent_daily_limit': data.agent.daily_spend_limit_usd,
+        'agent_monthly_limit': data.agent.monthly_spend_limit_usd,
     }
     context.update(_chatbox_context(agent=data.agent, session=None))
     return render(request, 'web/agent_detail.html', context)

@@ -26,7 +26,30 @@
 </div>
 {% endblock %}
 
+{% block frame_extra_styles %}
+<style>
+  .usage-grid { display: flex; gap: 2rem; flex-wrap: wrap; }
+  .usage-item { display: flex; flex-direction: column; gap: .25rem; }
+  .usage-label { font-size: .8rem; color: #8b919a; }
+  .usage-value { font-size: 1.1rem; font-weight: 500; }
+</style>
+{% endblock %}
+
 {% block frame_main %}
+<section class="card" style="margin-bottom: 1rem">
+  <h3>Usage</h3>
+  <div class="usage-grid">
+    <div class="usage-item">
+      <span class="usage-label">Daily spend</span>
+      <span class="usage-value">${{ "%.2f"|format(agent_daily_spend) }}{% if agent_daily_limit %} / ${{ "%.2f"|format(agent_daily_limit) }}{% endif %}</span>
+    </div>
+    <div class="usage-item">
+      <span class="usage-label">Monthly spend</span>
+      <span class="usage-value">${{ "%.2f"|format(agent_monthly_spend) }}{% if agent_monthly_limit %} / ${{ "%.2f"|format(agent_monthly_limit) }}{% endif %}</span>
+    </div>
+  </div>
+</section>
+
 <section class="card">
   <h2>Sessions</h2>
   {% if sessions %}

@@ -66,6 +66,22 @@
   {% endif %}
 </section>
 
+{% if user.is_authenticated %}
+<section class="card" style="margin-top: 1.5rem">
+  <h2>Usage</h2>
+  <div class="usage-grid">
+    <div class="usage-item">
+      <span class="usage-label">Daily spend</span>
+      <span class="usage-value">${{ "%.2f"|format(user_daily_spend) }}{% if user_daily_limit %} / ${{ "%.2f"|format(user_daily_limit) }}{% endif %}</span>
+    </div>
+    <div class="usage-item">
+      <span class="usage-label">Monthly spend</span>
+      <span class="usage-value">${{ "%.2f"|format(user_monthly_spend) }}{% if user_monthly_limit %} / ${{ "%.2f"|format(user_monthly_limit) }}{% endif %}</span>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 <section class="card" style="margin-top: 1.5rem">
   <h2>Recent sessions</h2>
   {% if sessions %}
@@ -118,5 +134,9 @@
     background: #4a2326; color: #ff9ea3; cursor: pointer; font-size: .85rem;
   }
   button.danger:hover { background: #5a2d31; }
+  .usage-grid { display: flex; gap: 2rem; flex-wrap: wrap; }
+  .usage-item { display: flex; flex-direction: column; gap: .25rem; }
+  .usage-label { font-size: .8rem; color: #8b919a; }
+  .usage-value { font-size: 1.1rem; font-weight: 500; }
 </style>
 {% endblock %}
