@@ -8,4 +8,4 @@ Focus list for in-flight work. Updated by Superpowers via **managing-active**.
 
 ## Specs
 
-- [session-limits](specs/2026-07-15-session-limits/) — plan
+- [session-limits](specs/2026-07-15-session-limits/) — implementing
