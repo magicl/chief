@@ -9,8 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
+from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
 from libs.clients.gmail import GmailClient
 from libs.clients.gmail.errors import GmailNotFoundError
+from libs.tools.context import ToolContext
 from libs.tools.tools.gmail import GmailTool
 
 from olib.py.django.test.cases import OTestCase
@@ -48,14 +50,17 @@ class _FakeGmailClient:
 class TestGmailTool(OTestCase):
     def _bound(self, fake: _FakeGmailClient) -> Callable[[str, dict[str, Any]], Any]:
         tool = GmailTool()
-        return tool.bind(
-            token_supplier=lambda: '{"sa": true}',
-            config={'subject': 'me@example.com'},
-            client_factory=cast(Callable[..., GmailClient], lambda **kw: fake),
+        inst = ToolInstance(id='gmail', type='gmail', config={'subject': 'me@example.com'})
+        ctx = ToolContext(
+            spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            secret_supplier_factory=lambda ref, typ: lambda: '{"sa": true}',
+            client_factories={'gmail': cast(Callable[..., GmailClient], lambda **kw: fake)},
         )
+        return tool.bind(ctx, inst)
 
     def test_functions_expose_full_surface_with_readonly_flags(self) -> None:
-        fns = {f.name: f for f in GmailTool().functions()}
+        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'))
+        fns = {f.name: f for f in GmailTool().functions(ctx)}
         self.assertEqual(
             set(fns),
             {'list', 'read', 'list_labels', 'get_attachment', 'label', 'archive', 'mark_spam', 'trash', 'send'},

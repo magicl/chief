@@ -9,8 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
 from libs.clients.gmail.mock import MockGmailClient
 from libs.clients.gmail.protocol import GmailClientProtocol
+from libs.tools.context import ToolContext
 from libs.tools.tools.gmail import GmailTool
 
 from olib.py.django.test.cases import OTestCase
@@ -18,7 +20,12 @@ from olib.py.django.test.cases import OTestCase
 
 def _invoke_with(client: MockGmailClient) -> Callable[[str, dict[str, Any]], Any]:
     """Bind GmailTool to a supplied mock client."""
-    return GmailTool().bind(token_supplier=lambda: None, config={}, client_factory=lambda **_kwargs: client)
+    inst = ToolInstance(id='gmail', type='gmail', config={})
+    ctx = ToolContext(
+        spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+        client_factories={'gmail': lambda **_kwargs: client},
+    )
+    return GmailTool().bind(ctx, inst)
 
 
 class TestMockGmailClient(OTestCase):

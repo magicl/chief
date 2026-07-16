@@ -9,8 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
 from libs.clients.clickup.mock import MockClickUpClient
 from libs.clients.clickup.protocol import ClickUpClientProtocol
+from libs.tools.context import ToolContext
 from libs.tools.tools.clickup import ClickUpTool
 
 from olib.py.django.test.cases import OTestCase
@@ -19,7 +21,12 @@ from olib.py.django.test.cases import OTestCase
 def _invoke_with(client: MockClickUpClient, *, team_id: str | None = None) -> Callable[[str, dict[str, Any]], Any]:
     """Bind ClickUpTool to a supplied mock client."""
     config = {'team_id': team_id} if team_id is not None else {}
-    return ClickUpTool().bind(token_supplier=lambda: None, config=config, client_factory=lambda **_kwargs: client)
+    inst = ToolInstance(id='clickup', type='clickup', config=config)
+    ctx = ToolContext(
+        spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+        client_factories={'clickup': lambda **_kwargs: client},
+    )
+    return ClickUpTool().bind(ctx, inst)
 
 
 class TestMockClickUpClient(OTestCase):

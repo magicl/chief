@@ -13,8 +13,18 @@ from django.db import transaction
 
 # isort: split
 
-from libs.agent_spec import AGENT_CONFIG_SPEC_VERSION, AgentConfigSpec, ToolInstance
+from libs.agent_spec import (
+    AGENT_CONFIG_SPEC_VERSION,
+    AgentConfigSpec,
+    LLMSpec,
+    ToolInstance,
+)
+from libs.tools.context import ToolContext
 from libs.tools.registry import get_tool
+
+_DUMMY_CTX = ToolContext(
+    spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+)
 
 
 class IngestError(ValueError):
@@ -35,7 +45,7 @@ def _validate_tool_instance(inst: ToolInstance) -> None:
     if inst.credential_ref and not getattr(tool, 'credential_type', None):
         raise IngestError(f"Tool {inst.type!r} does not accept credential_ref")
 
-    known_functions = {fn.name for fn in tool.functions()}
+    known_functions = {fn.name for fn in tool.functions(_DUMMY_CTX)}
     if '*' not in inst.allow:
         unknown = sorted(set(inst.allow) - known_functions)
         if unknown:

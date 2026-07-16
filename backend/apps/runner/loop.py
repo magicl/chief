@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import Any
 
 from apps.agents.tool_wiring import build_bound_tools
+from apps.keys.services.queries import make_secret_supplier
 from apps.runner.backends.base import RecordedEvent, SessionBackend
 from apps.runner.backends.django import DjangoSessionBackend
 from apps.runner.errors import (
@@ -37,6 +38,7 @@ from libs.providers.llm.base import LLMProvider, ProviderError, StreamResult
 from libs.providers.llm.errors import ProviderConfigurationError
 from libs.providers.llm.registry import make_provider
 from libs.tools.base import parse_qualified_tool_name
+from libs.tools.context import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +63,28 @@ class SessionRunner:
         """Create a runner for one session backend and initialize tool client wiring."""
         self.backend = backend
         self.config_spec: AgentConfigSpec = backend.get_spec()
-        self.client_factories = client_factories
         session = getattr(backend, 'session', None)
-        self.bound_tools = build_bound_tools(
-            self.config_spec.tools,
-            user_id=self.backend.user_id,
+
+        user_id = self.backend.user_id
+        supplier_factory: Callable[[str | None, str], Callable[[], str | None]] | None = None
+        if user_id is not None:
+            _uid = user_id
+
+            def _make_supplier(cred_ref: str | None, cred_type: str) -> Callable[[], str | None]:
+                """Wrap make_secret_supplier into the ToolContext factory signature."""
+                return make_secret_supplier(_uid, name=cred_ref, type=cred_type)
+
+            supplier_factory = _make_supplier
+
+        self.ctx = ToolContext(
+            spec=self.config_spec,
+            user_id=user_id,
             agent_id=getattr(session, 'agent_id', None),
             session_id=backend.session_id,
-            client_factories=self.client_factories,
+            secret_supplier_factory=supplier_factory,
+            client_factories=client_factories or {},
         )
+        self.bound_tools = build_bound_tools(self.config_spec.tools, ctx=self.ctx)
         self.control = LoopControl()
         self.emit_restart = emit_restart
         self.hooks = HookRegistry()
@@ -101,6 +116,7 @@ class SessionRunner:
 
             tool_definitions = build_tool_definitions(
                 self.config_spec.tools,
+                ctx=self.ctx,
                 is_allowed=self._is_allowed,
             )
             provider: LLMProvider | None = None

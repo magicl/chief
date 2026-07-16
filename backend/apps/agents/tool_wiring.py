@@ -8,16 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
-from uuid import UUID
-
-from apps.keys.services.queries import make_secret_supplier
-
-# isort: split
+from typing import Any
 
 from libs.agent_spec import ToolInstance
-from libs.tools.base import Tool
-from libs.tools.registry import get_tool
+from libs.tools.context import ToolContext
+from libs.tools.registry import all_tools, get_tool
 
 
 @dataclass(frozen=True)
@@ -27,65 +22,34 @@ class BoundToolInstance:
     invoke: Callable[[str, dict[str, Any]], Any]
 
 
-def bind_tool_invoke(
-    tool: Tool,
-    *,
-    token_supplier: Callable[[], str | None] | None,
-    config: dict[str, Any] | None = None,
-    client_factory: Callable[..., Any] | None = None,
-    user_id: int | None = None,
-    agent_id: UUID | None = None,
-    session_id: UUID | None = None,
-) -> Callable[[str, dict[str, Any]], Any]:
-    """Return a bound invoke for *tool*, injecting credentials, config, clients, or queue context."""
-    bind = getattr(tool, 'bind', None)
-    if bind is not None:
-        if tool.name == 'queue':
-            return cast(
-                Callable[[str, dict[str, Any]], Any],
-                bind(user_id=user_id, agent_id=agent_id, session_id=session_id),
-            )
-        if token_supplier is not None or client_factory is not None:
-            bind_kwargs: dict[str, Any] = {'token_supplier': token_supplier or (lambda: None), 'config': config}
-            if client_factory is not None:
-                bind_kwargs['client_factory'] = client_factory
-            return cast(
-                Callable[[str, dict[str, Any]], Any],
-                bind(**bind_kwargs),
-            )
-    return tool.invoke
-
-
 def build_bound_tools(
     instances: list[ToolInstance],
     *,
-    user_id: int | None,
-    agent_id: UUID | None = None,
-    session_id: UUID | None = None,
-    client_factories: dict[str, Callable[..., Any]] | None = None,
+    ctx: ToolContext,
 ) -> dict[str, BoundToolInstance]:
-    """Map tool instance ids to invoke callables with credentials, clients, and queue context wired."""
+    """Map tool instance ids to invoke callables with context wired.
+
+    Processes explicit tools from ``instances`` (config tools[]), then scans
+    the registry for auto-tools whose ``should_include(ctx)`` returns True.
+    """
     bound: dict[str, BoundToolInstance] = {}
     for inst in instances:
         tool = get_tool(inst.type)
         if tool is None:
             raise ValueError(f'Unknown tool type {inst.type!r}')
-        supplier = None
-        cred_type = getattr(tool, 'credential_type', None)
-        if cred_type and user_id is not None:
-            supplier = make_secret_supplier(user_id, name=inst.credential_ref, type=cred_type)
-        invoke = bind_tool_invoke(
-            tool,
-            token_supplier=supplier,
-            config=inst.config,
-            client_factory=client_factories.get(inst.type) if client_factories is not None else None,
-            user_id=user_id,
-            agent_id=agent_id,
-            session_id=session_id,
-        )
+        invoke = tool.bind(ctx, inst) or tool.invoke
         bound[inst.id] = BoundToolInstance(
             instance_id=inst.id,
             tool_type=inst.type,
+            invoke=invoke,
+        )
+    for tool in all_tools().values():
+        if not tool.auto or not tool.should_include(ctx):
+            continue
+        invoke = tool.bind(ctx) or tool.invoke
+        bound[tool.name] = BoundToolInstance(
+            instance_id=tool.name,
+            tool_type=tool.name,
             invoke=invoke,
         )
     return bound

@@ -1,7 +1,7 @@
 # Skill support — Design
 
 **Branch:** `feat/2026-07-15-skill-support`
-Status: **plan**
+Status: **implementing**
 
 **ClickUp:** https://app.clickup.com/t/868kcw16x
 **ClickUp branch field:** `feat/2026-07-15-skill-support`

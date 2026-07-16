@@ -40,6 +40,12 @@ class AgentSpecsTests(OTestCase):
         self.assertEqual(spec.tools[0].config['team_id'], '9000000')
         self.assertEqual(spec.queues[0].sources[0].adapter_type, 'clickup')
 
+    def test_skills_demo_example_validates(self) -> None:
+        spec = load_example('skills-demo')
+        validate_spec_tools(spec)
+        self.assertEqual(len(spec.skills), 1)
+        self.assertEqual(spec.skills[0].id, 'greeting-style')
+
     def test_load_example_rejects_path_traversal(self) -> None:
         from libs.agent_spec import load_example_text
 
