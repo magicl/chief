@@ -20,6 +20,7 @@ class BoundToolInstance:
     instance_id: str
     tool_type: str
     invoke: Callable[[str, dict[str, Any]], Any]
+    is_auto: bool = False
 
 
 def build_bound_tools(
@@ -51,5 +52,6 @@ def build_bound_tools(
             instance_id=tool.name,
             tool_type=tool.name,
             invoke=invoke,
+            is_auto=True,
         )
     return bound

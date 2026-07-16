@@ -21,6 +21,7 @@ from libs.agent_spec import (
     AgentConfigSpec,
     LLMSpec,
     QueueSpec,
+    SkillSpec,
     SourceSpec,
     ToolInstance,
     load_example,
@@ -222,6 +223,40 @@ class TestBuildBoundTools(OTestCase):
         bound = build_bound_tools(instances, ctx=ctx)
         out = bound['gmail-a'].invoke('ping', {})
         self.assertEqual(out, {'token_set': True, 'subject': 'me@example.com'})
+
+    def test_auto_tool_included_when_should_include_true(self) -> None:
+        """Auto-tools appear in bound map when their should_include returns True."""
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='test',
+            skills=[SkillSpec(id='s1', description='d', content='c')],
+        )
+        ctx = ToolContext(spec=spec, user_id=1)
+        bound = build_bound_tools([], ctx=ctx)
+        self.assertIn('load_skill', bound)
+        self.assertTrue(bound['load_skill'].is_auto)
+
+    def test_auto_tool_excluded_when_should_include_false(self) -> None:
+        """Auto-tools are absent from bound map when should_include returns False."""
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='test',
+        )
+        ctx = ToolContext(spec=spec, user_id=1)
+        bound = build_bound_tools([], ctx=ctx)
+        self.assertNotIn('load_skill', bound)
+
+    def test_auto_tool_invoke_returns_skill_content(self) -> None:
+        """Auto-bound load_skill returns skill content via invoke."""
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='test',
+            skills=[SkillSpec(id='triage', description='Triage rules', content='Priority logic')],
+        )
+        ctx = ToolContext(spec=spec, user_id=1)
+        bound = build_bound_tools([], ctx=ctx)
+        result = bound['load_skill'].invoke('load', {'name': 'triage'})
+        self.assertEqual(result, {'skill': 'triage', 'content': 'Priority logic'})
 
     def test_queue_tool_round_trip_take_and_complete(self) -> None:
         user = get_user_model().objects.create_user(username='queue-wire-user', password='x')

@@ -227,8 +227,9 @@ class SessionRunner:
 
         bound = self.bound_tools.get(instance_id)
         tool_type = bound.tool_type if bound is not None else None
+        is_auto = bound is not None and bound.is_auto
 
-        if not self._is_allowed(instance_id, function_name):
+        if not is_auto and not self._is_allowed(instance_id, function_name):
             result_content = json.dumps({'failure': f'Permission denied for {instance_id}.{function_name}'})
             tool_latency_ms = 0
         elif bound is None:
