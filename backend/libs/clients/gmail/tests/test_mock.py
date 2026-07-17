@@ -23,6 +23,7 @@ def _invoke_with(client: MockGmailClient) -> Callable[[str, dict[str, Any]], Any
     inst = ToolInstance(id='gmail', type='gmail', config={})
     ctx = ToolContext(
         spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+        user_id=1,
         client_factories={'gmail': lambda **_kwargs: client},
     )
     return GmailTool().bind(ctx, inst)

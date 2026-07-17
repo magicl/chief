@@ -18,7 +18,7 @@ from libs.clients.gmail.client import GmailClient
 from libs.clients.gmail.errors import GmailAuthError, GmailError, GmailNotFoundError
 from libs.clients.gmail.protocol import GmailClientProtocol
 from libs.tools.base import Tool, ToolFunction
-from libs.tools.context import ToolContext
+from libs.tools.context import ToolContext, token_supplier_for
 
 if TYPE_CHECKING:
     from libs.agent_spec.spec import ToolInstance
@@ -52,14 +52,11 @@ class GmailTool(Tool):
         config and client factory overrides from ``instance`` / ``ctx``.
         """
         config = instance.config if instance else {}
-        token_supplier: Callable[[], str | None]
-        if ctx.secret_supplier_factory and (instance and instance.credential_ref or self.credential_type):
-            token_supplier = ctx.secret_supplier_factory(
-                instance.credential_ref if instance else None,
-                self.credential_type or '',
-            )
-        else:
-            token_supplier = lambda: None
+        token_supplier = token_supplier_for(
+            ctx,
+            credential_type=self.credential_type,
+            credential_ref=instance.credential_ref if instance else None,
+        )
         client_factory = ctx.client_factories.get(self.name)
         factory: Callable[..., GmailClientProtocol] = client_factory or GmailClient
         client = factory(token_supplier=token_supplier, config=config)

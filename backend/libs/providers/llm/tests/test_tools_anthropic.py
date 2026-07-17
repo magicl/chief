@@ -22,7 +22,7 @@ _STREAM_EVENT_ADAPTER: TypeAdapter[RawMessageStreamEvent] = TypeAdapter(RawMessa
 class TestToolsAnthropicProvider(OTestCase):
     def test_format_tools_uses_wire_safe_names(self) -> None:
         provider = AnthropicProvider('claude-haiku-4-5')
-        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'))
+        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'), user_id=1)
         definitions = build_tool_definitions(
             [ToolInstance(id='clock', type='clock', allow=['now'])],
             ctx=ctx,

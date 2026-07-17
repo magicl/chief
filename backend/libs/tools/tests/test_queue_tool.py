@@ -118,7 +118,7 @@ class TestQueueTool(OTestCase):
 
     def test_functions_include_list_and_put_without_owner_agent(self) -> None:
         """Tool schema exposes list and agent-scoped put without cross-agent owner_agent."""
-        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'))
+        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'), user_id=1)
         names = {fn.name for fn in self.tool.functions(ctx)}
         self.assertEqual(names, {'list', 'put', 'take', 'complete', 'fail'})
         put_fn = next(fn for fn in self.tool.functions(ctx) if fn.name == 'put')

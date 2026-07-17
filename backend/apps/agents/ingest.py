@@ -24,6 +24,7 @@ from libs.tools.registry import get_tool
 
 _DUMMY_CTX = ToolContext(
     spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+    user_id=0,
 )
 
 

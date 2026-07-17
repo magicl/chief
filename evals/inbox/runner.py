@@ -123,7 +123,7 @@ def _provider_config_from_model_string(model: str) -> ProviderLLMConfig:
     provider, sep, model_name = model.partition('/')
     if not sep or not provider or not model_name:
         raise RuntimeError(f"Eval model must use locked 'provider/model' format, got {model!r}")
-    return ProviderLLMConfig(provider=provider, model=model_name)
+    return ProviderLLMConfig(provider=provider, model=model_name, user_id=0)
 
 
 def _make_checked_provider(config: ProviderLLMConfig) -> Any:

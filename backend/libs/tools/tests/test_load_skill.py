@@ -19,7 +19,7 @@ def _make_ctx(skills: list[SkillSpec] | None = None) -> ToolContext:
         system_prompt='test',
         skills=skills or [],
     )
-    return ToolContext(spec=spec)
+    return ToolContext(spec=spec, user_id=1)
 
 
 class TestLoadSkillTool(OTestCase):

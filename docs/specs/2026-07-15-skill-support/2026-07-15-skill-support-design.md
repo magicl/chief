@@ -127,14 +127,17 @@ class ToolContext:
     """Agent/session context passed to tools at wiring and definition time."""
 
     spec: AgentConfigSpec
-    user_id: int | None = None
+    user_id: int
     agent_id: UUID | None = None
     session_id: UUID | None = None
-    secret_supplier_factory: Callable[[str | None, str], Callable[[], str | None]] | None = None
-    client_factories: dict[str, Callable[..., Any]] | None = None
+    secret_supplier_factory: Callable[[str | None, str], Callable[[], str | None]]
+    client_factories: dict[str, Callable[..., Any]]
 ```
 
-Lives in `libs/tools/context.py` (Django-free).
+Lives in `libs/tools/context.py` (Django-free). Every agent run has an owning
+``user_id``. Credential tools resolve secrets via ``token_supplier_for(ctx,
+credential_type=..., credential_ref=...)``, which keys off the tool's
+``credential_type`` (ingest rejects ``credential_ref`` without one).
 
 `secret_supplier_factory(credential_ref, credential_type)` wraps
 `apps.keys.services.queries.make_secret_supplier` — tools call it to get a supplier

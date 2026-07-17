@@ -21,7 +21,7 @@ from libs.clients.clickup.errors import (
 )
 from libs.clients.clickup.protocol import ClickUpClientProtocol
 from libs.tools.base import Tool, ToolFunction
-from libs.tools.context import ToolContext
+from libs.tools.context import ToolContext, token_supplier_for
 
 if TYPE_CHECKING:
     from libs.agent_spec.spec import ToolInstance
@@ -56,14 +56,11 @@ class ClickUpTool(Tool):
         config and client factory overrides from ``instance`` / ``ctx``.
         """
         cfg = instance.config if instance else {}
-        token_supplier: Callable[[], str | None]
-        if ctx.secret_supplier_factory and (instance and instance.credential_ref or self.credential_type):
-            token_supplier = ctx.secret_supplier_factory(
-                instance.credential_ref if instance else None,
-                self.credential_type or '',
-            )
-        else:
-            token_supplier = lambda: None
+        token_supplier = token_supplier_for(
+            ctx,
+            credential_type=self.credential_type,
+            credential_ref=instance.credential_ref if instance else None,
+        )
         client_factory = ctx.client_factories.get(self.name)
         factory: Callable[..., ClickUpClientProtocol] = client_factory or ClickUpClient
         client = factory(token_supplier=token_supplier, config=cfg)

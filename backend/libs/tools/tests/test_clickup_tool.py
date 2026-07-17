@@ -21,7 +21,7 @@ from olib.py.django.test.cases import OTestCase
 def _make_ctx(**client_factories: Any) -> ToolContext:
     """Build a ToolContext for ClickUp tests."""
     spec = AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_')
-    return ToolContext(spec=spec, client_factories=client_factories)
+    return ToolContext(spec=spec, user_id=1, client_factories=client_factories)
 
 
 class _FakeClickUpClient:
@@ -51,6 +51,7 @@ class TestClickUpTool(OTestCase):
         ctx = _make_ctx(clickup=cast(Callable[..., ClickUpClient], lambda **kw: fake))
         ctx = ToolContext(
             spec=ctx.spec,
+            user_id=1,
             secret_supplier_factory=lambda ref, typ: lambda: 'pk_test',
             client_factories=ctx.client_factories,
         )
@@ -96,6 +97,7 @@ class TestClickUpTool(OTestCase):
         inst = ToolInstance(id='clickup', type='clickup', config={})
         ctx = ToolContext(
             spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            user_id=1,
             secret_supplier_factory=lambda ref, typ: lambda: 'pk_test',
             client_factories={'clickup': cast(Callable[..., ClickUpClient], lambda **kw: fake)},
         )

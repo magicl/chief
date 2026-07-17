@@ -64,24 +64,18 @@ class SessionRunner:
         self.backend = backend
         self.config_spec: AgentConfigSpec = backend.get_spec()
         session = getattr(backend, 'session', None)
-
         user_id = self.backend.user_id
-        supplier_factory: Callable[[str | None, str], Callable[[], str | None]] | None = None
-        if user_id is not None:
-            _uid = user_id
 
-            def _make_supplier(cred_ref: str | None, cred_type: str) -> Callable[[], str | None]:
-                """Wrap make_secret_supplier into the ToolContext factory signature."""
-                return make_secret_supplier(_uid, name=cred_ref, type=cred_type)
-
-            supplier_factory = _make_supplier
+        def _make_supplier(cred_ref: str | None, cred_type: str) -> Callable[[], str | None]:
+            """Wrap make_secret_supplier into the ToolContext factory signature."""
+            return make_secret_supplier(user_id, name=cred_ref, type=cred_type)
 
         self.ctx = ToolContext(
             spec=self.config_spec,
             user_id=user_id,
             agent_id=getattr(session, 'agent_id', None),
             session_id=backend.session_id,
-            secret_supplier_factory=supplier_factory,
+            secret_supplier_factory=_make_supplier,
             client_factories=client_factories or {},
         )
         self.bound_tools = build_bound_tools(self.config_spec.tools, ctx=self.ctx)

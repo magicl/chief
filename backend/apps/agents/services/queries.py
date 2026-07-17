@@ -30,6 +30,7 @@ from libs.tools.registry import all_tools
 
 _DUMMY_CTX = ToolContext(
     spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+    user_id=0,
 )
 
 TRIGGER_KINDS = ['schedule', 'manual', 'agent', 'queue']

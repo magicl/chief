@@ -16,7 +16,7 @@ def _make_ctx(spec: AgentConfigSpec | None = None) -> ToolContext:
             llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
             system_prompt='test',
         )
-    return ToolContext(spec=spec)
+    return ToolContext(spec=spec, user_id=1)
 
 
 class TestBuildToolDefinitions(OTestCase):

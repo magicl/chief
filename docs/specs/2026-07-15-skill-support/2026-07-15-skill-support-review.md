@@ -40,7 +40,7 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 1 | | `gmail.py`, `clickup.py`, `test_tool_wiring.py` | Credential-supplier resolution pattern duplicated across tool `bind()` methods | Can extract helper in future when more credential tools are added |
+| 1 | Fixed | `gmail.py`, `clickup.py`, `test_tool_wiring.py` | Credential-supplier resolution pattern duplicated / defensive `credential_type or ''` | Extracted `token_supplier_for`; keys off `credential_type` only (ingest already rejects ref-without-type). `user_id` is now required on backends/`ToolContext` so the loop always wires a supplier. |
 | 2 | | `ingest.py:25`, `queries.py:56`, `base.py:85` | `_DUMMY_CTX` singletons use fake spec values — fragile if future tools inspect `ctx.spec` in `functions()` | Works for current tools; document constraint |
 
 ## Recommendations

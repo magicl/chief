@@ -24,6 +24,7 @@ def _invoke_with(client: MockClickUpClient, *, team_id: str | None = None) -> Ca
     inst = ToolInstance(id='clickup', type='clickup', config=config)
     ctx = ToolContext(
         spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+        user_id=1,
         client_factories={'clickup': lambda **_kwargs: client},
     )
     return ClickUpTool().bind(ctx, inst)

@@ -27,7 +27,7 @@ from libs.agent_spec import (
     load_example,
 )
 from libs.tools.base import Tool, ToolFunction
-from libs.tools.context import ToolContext
+from libs.tools.context import ToolContext, token_supplier_for
 from libs.tools.registry import register_tool
 
 from olib.py.django.test.cases import OTestCase
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 def _make_ctx(
     *,
-    user_id: int | None = None,
+    user_id: int = 1,
     agent_id: UUID | None = None,
     session_id: UUID | None = None,
     secret_supplier_factory: Callable[[str | None, str], Callable[[], str | None]] | None = None,
@@ -49,14 +49,16 @@ def _make_ctx(
         llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
         system_prompt='test',
     )
-    return ToolContext(
-        spec=spec,
-        user_id=user_id,
-        agent_id=agent_id,
-        session_id=session_id,
-        secret_supplier_factory=secret_supplier_factory,
-        client_factories=client_factories or {},
-    )
+    kwargs: dict[str, Any] = {
+        'spec': spec,
+        'user_id': user_id,
+        'agent_id': agent_id,
+        'session_id': session_id,
+        'client_factories': client_factories or {},
+    }
+    if secret_supplier_factory is not None:
+        kwargs['secret_supplier_factory'] = secret_supplier_factory
+    return ToolContext(**kwargs)
 
 
 class _EchoCredTool(Tool):
@@ -81,14 +83,11 @@ class _EchoCredTool(Tool):
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Echo whether a token resolved and surface the injected config."""
         config = instance.config if instance else {}
-        token_supplier: Callable[[], str | None]
-        if ctx.secret_supplier_factory and (instance and instance.credential_ref or self.credential_type):
-            token_supplier = ctx.secret_supplier_factory(
-                instance.credential_ref if instance else None,
-                self.credential_type or '',
-            )
-        else:
-            token_supplier = lambda: None
+        token_supplier = token_supplier_for(
+            ctx,
+            credential_type=self.credential_type,
+            credential_ref=instance.credential_ref if instance else None,
+        )
 
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
             if function != 'ping':
@@ -186,8 +185,8 @@ class TestBuildBoundTools(OTestCase):
         self.assertEqual(out['message_ids'], ['m-factory'])
         fake_client.list_messages.assert_called_once_with(query='in:inbox', max_results=100, page_token=None)
 
-    def test_gmail_tool_uses_injected_client_factory_without_user_supplier(self) -> None:
-        """Client factories bind even when env-only sessions have no Django user credential supplier."""
+    def test_gmail_tool_uses_injected_client_factory_with_noop_supplier(self) -> None:
+        """Client factories bind even when the secret supplier returns None."""
         instances = [
             ToolInstance(
                 id='gmail-personal',
@@ -201,7 +200,7 @@ class TestBuildBoundTools(OTestCase):
         fake_client.list_messages.return_value = {'message_ids': ['m-env-only'], 'next_page_token': None}
 
         ctx = _make_ctx(
-            user_id=None,
+            user_id=1,
             client_factories={'gmail': lambda **_kwargs: fake_client},
         )
         bound = build_bound_tools(instances, ctx=ctx)

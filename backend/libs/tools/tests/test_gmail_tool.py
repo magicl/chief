@@ -53,13 +53,14 @@ class TestGmailTool(OTestCase):
         inst = ToolInstance(id='gmail', type='gmail', config={'subject': 'me@example.com'})
         ctx = ToolContext(
             spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            user_id=1,
             secret_supplier_factory=lambda ref, typ: lambda: '{"sa": true}',
             client_factories={'gmail': cast(Callable[..., GmailClient], lambda **kw: fake)},
         )
         return tool.bind(ctx, inst)
 
     def test_functions_expose_full_surface_with_readonly_flags(self) -> None:
-        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'))
+        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'), user_id=1)
         fns = {f.name: f for f in GmailTool().functions(ctx)}
         self.assertEqual(
             set(fns),

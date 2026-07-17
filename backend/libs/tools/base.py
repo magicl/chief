@@ -86,6 +86,7 @@ class Tool(ABC):
 
         dummy_ctx = ToolContext(
             spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            user_id=0,
         )
         for fn in self.functions(dummy_ctx):
             if fn.name == function:
