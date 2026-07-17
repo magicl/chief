@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-AGENT_CONFIG_SPEC_VERSION = 4
+AGENT_CONFIG_SPEC_VERSION = 3
 
 _INSTANCE_ID_RE = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
@@ -219,7 +219,7 @@ class SkillSpec(BaseModel):
 
 
 class AgentConfigSpec(BaseModel):
-    schema_version: Literal[4] = 4
+    schema_version: Literal[3] = 3
     description: str | None = None
     llm: LLMSpec
     system_prompt: str

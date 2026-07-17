@@ -26,7 +26,7 @@ V0_CLOCK_SPEC = {
 }
 
 MINIMAL_SPEC_DICT = {
-    'schema_version': 4,
+    'schema_version': 3,
     'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
     'system_prompt': 'hello',
     'triggers': [{'name': 'manual', 'kind': 'manual'}],
@@ -36,7 +36,7 @@ MINIMAL_SPEC_DICT = {
 
 class TestAgentConfigSpec(OTestCase):
     def test_current_schema_version_constant(self) -> None:
-        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 4)
+        self.assertEqual(AGENT_CONFIG_SPEC_VERSION, 3)
 
     def test_tool_instance_requires_id_and_type(self) -> None:
         inst = ToolInstance(id='clock', type='clock', allow=['now'])
@@ -45,7 +45,7 @@ class TestAgentConfigSpec(OTestCase):
     def test_duplicate_instance_ids_rejected_at_spec_level(self) -> None:
         with self.assertRaises(ValidationError):
             AgentConfigSpec(
-                schema_version=4,
+                schema_version=3,
                 llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
                 system_prompt='hi',
                 tools=[
@@ -56,7 +56,7 @@ class TestAgentConfigSpec(OTestCase):
 
     def test_load_spec_upgrades_v0_dict(self) -> None:
         spec = load_spec(V0_CLOCK_SPEC, stored_version=0)
-        self.assertEqual(spec.schema_version, 4)
+        self.assertEqual(spec.schema_version, 3)
         self.assertEqual(spec.tools[0].id, 'clock')
 
     def test_integration_fills_tool_and_source(self) -> None:

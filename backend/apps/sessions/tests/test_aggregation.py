@@ -86,8 +86,8 @@ class TestAggregateHourlyUsage(OTestCase):
         agent = Agent.objects.create(user=user, name=identifier, identifier=identifier)
         config = AgentConfig.objects.create(
             agent=agent,
-            spec={'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'}, 'system_prompt': 'hi', 'schema_version': 4},
-            spec_version=4,
+            spec={'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'}, 'system_prompt': 'hi', 'schema_version': 3},
+            spec_version=3,
         )
         agent.current_config = config
         agent.save()

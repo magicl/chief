@@ -8,4 +8,3 @@ import importlib
 tool_instances = importlib.import_module('.001_tool_instances', __name__)
 trigger_prompts = importlib.import_module('.002_trigger_prompts', __name__)
 integrations = importlib.import_module('.003_integrations', __name__)
-session_limits = importlib.import_module('.004_session_limits', __name__)
