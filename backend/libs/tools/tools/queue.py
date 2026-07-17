@@ -7,14 +7,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from libs.tools.base import Tool, ToolFunction
+from libs.tools.context import ToolContext
 
-_QUEUE_ID_DESC = (
-    'Queue id from this agent\'s config (``queues[].id``). Lowercase slug, max 64 characters.'
-)
+if TYPE_CHECKING:
+    from libs.agent_spec.spec import ToolInstance
+
+_QUEUE_ID_DESC = 'Queue id from this agent\'s config (``queues[].id``). Lowercase slug, max 64 characters.'
 _EXTERNAL_ID_DESC = (
     'Optional deduplication key when enqueueing from a source adapter; max 255 characters. '
     'Omit for items enqueued directly in-session.'
@@ -26,10 +28,7 @@ def _payload_description() -> str:
     """Describe payload size limits using the queue command constant."""
     from apps.queues.services.commands import MAX_PAYLOAD_BYTES
 
-    return (
-        f'JSON object stored on the queue item. UTF-8 JSON encoding must be at most '
-        f'{MAX_PAYLOAD_BYTES} bytes.'
-    )
+    return f'JSON object stored on the queue item. UTF-8 JSON encoding must be at most ' f'{MAX_PAYLOAD_BYTES} bytes.'
 
 
 class QueueTool(Tool):
@@ -37,13 +36,12 @@ class QueueTool(Tool):
 
     def bind(
         self,
-        *,
-        user_id: int | None,
-        agent_id: UUID | None,
-        session_id: UUID | None,
+        ctx: ToolContext,
+        instance: ToolInstance | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Return an invoke callable closed over session and agent context."""
-        del user_id  # reserved for future credential-backed queue ops
+        agent_id = ctx.agent_id
+        session_id = ctx.session_id
 
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
             if function == 'list':
@@ -76,7 +74,7 @@ class QueueTool(Tool):
 
         return invoke
 
-    def functions(self) -> list[ToolFunction]:
+    def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         """LLM-visible queue tool definitions (handlers require ``bind``)."""
         return [
             ToolFunction(

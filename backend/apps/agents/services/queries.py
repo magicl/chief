@@ -14,7 +14,7 @@ from apps.agents.services.config_sync import config_source_label
 from apps.keys.services.queries import list_referenceable_credentials
 from apps.sessions.models import AgentSession
 from django.urls import reverse
-from libs.agent_spec import list_examples
+from libs.agent_spec import AgentConfigSpec, LLMSpec, list_examples
 from libs.agent_spec.trigger_prompts import (
     DEFAULT_AGENT_TRIGGER_PROMPT,
     DEFAULT_QUEUE_TRIGGER_PROMPT,
@@ -25,7 +25,13 @@ from libs.providers.llm.local_openai_provider import LocalOpenAIProvider
 from libs.providers.llm.openai_provider import OpenAIProvider
 from libs.providers.llm.registry import PROVIDERS
 from libs.sources.registry import all_adapters
+from libs.tools.context import ToolContext
 from libs.tools.registry import all_tools
+
+_DUMMY_CTX = ToolContext(
+    spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+    user_id=0,
+)
 
 TRIGGER_KINDS = ['schedule', 'manual', 'agent', 'queue']
 
@@ -119,7 +125,7 @@ def _tool_catalog() -> list[dict[str, Any]]:
             {
                 'type': name,
                 'credential_type': getattr(tool, 'credential_type', None),
-                'functions': [{'name': fn.name, 'readonly': fn.readonly} for fn in tool.functions()],
+                'functions': [{'name': fn.name, 'readonly': fn.readonly} for fn in tool.functions(_DUMMY_CTX)],
             },
         )
     return items

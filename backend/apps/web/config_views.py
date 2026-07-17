@@ -32,7 +32,7 @@ from apps.agents.services.queries import (
     get_config_editor_context,
     get_create_editor_context,
 )
-from apps.web.views import _owned_agent
+from apps.web.services.queries import get_owned_agent
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
 from django.http import (
@@ -157,8 +157,8 @@ def agent_create_mutate(request: HttpRequest) -> HttpResponse:
 @require_GET
 def agent_config(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Render the YAML config editor and helpers for an owned agent."""
-    agent = _owned_agent(request, agent_id)
     user = cast(AbstractBaseUser, request.user)
+    agent = get_owned_agent(user.pk, agent_id)
     context = get_config_editor_context(agent, user.pk)
     context['save_url'] = reverse('agent_config_save', kwargs={'agent_id': agent.id})
     context['mutate_url'] = reverse('agent_config_mutate', kwargs={'agent_id': agent.id})
@@ -179,7 +179,7 @@ def agent_config_catalog(request: HttpRequest) -> JsonResponse:
 @require_POST
 def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Validate posted YAML and persist a new immutable config revision."""
-    agent = _owned_agent(request, agent_id)
+    agent = get_owned_agent(cast(AbstractBaseUser, request.user).pk, agent_id)
     denied = _agent_write_denied(agent)
     if denied is not None:
         return denied
@@ -217,7 +217,7 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @require_POST
 def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Apply a helper mutation to posted YAML without persisting."""
-    agent = _owned_agent(request, agent_id)
+    agent = get_owned_agent(cast(AbstractBaseUser, request.user).pk, agent_id)
     denied = _agent_write_denied(agent)
     if denied is not None:
         return denied
@@ -238,7 +238,7 @@ def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @require_GET
 def agent_config_history(request: HttpRequest, agent_id: UUID, config_id: UUID) -> HttpResponse:
     """Show a read-only historical config revision with restore-to-editor action."""
-    agent = _owned_agent(request, agent_id)
+    agent = get_owned_agent(cast(AbstractBaseUser, request.user).pk, agent_id)
     config = get_object_or_404(AgentConfig, pk=config_id, agent=agent)
     spec_yaml = config.display_yaml()
     return render(

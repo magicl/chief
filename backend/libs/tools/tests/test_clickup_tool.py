@@ -9,11 +9,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
+from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
 from libs.clients.clickup import ClickUpClient
 from libs.clients.clickup.errors import ClickUpNotFoundError
+from libs.tools.context import ToolContext
 from libs.tools.tools.clickup import ClickUpTool
 
 from olib.py.django.test.cases import OTestCase
+
+
+def _make_ctx(**client_factories: Any) -> ToolContext:
+    """Build a ToolContext for ClickUp tests."""
+    spec = AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_')
+    return ToolContext(spec=spec, user_id=1, client_factories=client_factories)
 
 
 class _FakeClickUpClient:
@@ -39,14 +47,19 @@ class _FakeClickUpClient:
 
 class TestClickUpTool(OTestCase):
     def _bound(self, fake: _FakeClickUpClient) -> Callable[[str, dict[str, Any]], Any]:
-        return ClickUpTool().bind(
-            token_supplier=lambda: 'pk_test',
-            config={'team_id': '9'},
-            client_factory=cast(Callable[..., ClickUpClient], lambda **kw: fake),
+        inst = ToolInstance(id='clickup', type='clickup', config={'team_id': '9'})
+        ctx = _make_ctx(clickup=cast(Callable[..., ClickUpClient], lambda **kw: fake))
+        ctx = ToolContext(
+            spec=ctx.spec,
+            user_id=1,
+            secret_supplier_factory=lambda ref, typ: lambda: 'pk_test',
+            client_factories=ctx.client_factories,
         )
+        return ClickUpTool().bind(ctx, inst)
 
     def test_functions_expose_full_surface_with_readonly_flags(self) -> None:
-        fns = {f.name: f for f in ClickUpTool().functions()}
+        ctx = _make_ctx()
+        fns = {f.name: f for f in ClickUpTool().functions(ctx)}
         self.assertEqual(
             set(fns),
             {
@@ -81,10 +94,13 @@ class TestClickUpTool(OTestCase):
 
     def test_list_spaces_without_team_id_raises(self) -> None:
         fake = _FakeClickUpClient()
-        invoke = ClickUpTool().bind(
-            token_supplier=lambda: 'pk_test',
-            config={},
-            client_factory=cast(Callable[..., ClickUpClient], lambda **kw: fake),
+        inst = ToolInstance(id='clickup', type='clickup', config={})
+        ctx = ToolContext(
+            spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            user_id=1,
+            secret_supplier_factory=lambda ref, typ: lambda: 'pk_test',
+            client_factories={'clickup': cast(Callable[..., ClickUpClient], lambda **kw: fake)},
         )
+        invoke = ClickUpTool().bind(ctx, inst)
         with self.assertRaises(ValueError):
             invoke('list_spaces', {})

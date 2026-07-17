@@ -32,12 +32,6 @@ class TestProviderConfigFromSpec(OTransactionTestCase):
         cfg.secret_supplier = supplier
         self.assertEqual(cfg.secret_supplier(), 'sk-from-store')
 
-    def test_no_supplier_when_user_id_none(self) -> None:
-        llm = LLMSpec(provider='openai', model='gpt-5.4-mini')
-        cfg = provider_config_from_spec(llm, user_id=None)
-        self.assertIsNone(cfg.user_id)
-        self.assertIsNone(cfg.secret_supplier)
-
     def test_credential_ref_from_llm_spec(self) -> None:
         llm = LLMSpec(provider='openai', model='m', credential_ref='my-openai')
         cfg = provider_config_from_spec(llm, user_id=1, credential_ref=llm.credential_ref)
@@ -58,20 +52,18 @@ class TestProviderConfigFromSpec(OTransactionTestCase):
                 supplier()
 
 
-class TestEnvOnlyCredentialPath(OTransactionTestCase):
-    def test_memory_backend_with_no_user_id_skips_stored_credentials(self) -> None:
+class TestCredentialResolutionWithUser(OTransactionTestCase):
+    def test_supplier_prefers_system_default_then_env(self) -> None:
+        """With a user, LLM defaults still resolve system default → env fallback."""
         key = Fernet.generate_key().decode()
-        user = get_user_model().objects.create_user(username='env-only-user', password='x')
+        user = get_user_model().objects.create_user(username='cred-user', password='x')
         with override_settings(CREDENTIALS_KEY=key):
             commands.set_system_default('openai', 'sk-from-db')
-            backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=None)
+            backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=user.pk)
             cfg = provider_config_from_spec(backend.get_spec().llm, user_id=backend.user_id)
-            self.assertIsNone(cfg.secret_supplier)
+            supplier = cfg.secret_supplier
+            assert supplier is not None
+            self.assertEqual(supplier(), 'sk-from-db')
             with patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-env'}, clear=False):
-                provider_cfg_with_user = provider_config_from_spec(
-                    LLMSpec(provider='openai', model='gpt-5.4-mini'),
-                    user_id=user.pk,
-                )
-                supplier = provider_cfg_with_user.secret_supplier
-                assert supplier is not None
+                # System default wins over env when present.
                 self.assertEqual(supplier(), 'sk-from-db')

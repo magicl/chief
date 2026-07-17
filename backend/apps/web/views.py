@@ -15,11 +15,10 @@ from uuid import UUID
 
 from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
 from apps.agents.models import Agent
-from apps.agents.services.config_sync import config_source_label
 from apps.bus.client import async_client, key_prefix
 from apps.keys.credential_guides import credential_guides_for_ui
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
-from apps.keys.models import CredentialSource, UserCredential
+from apps.keys.models import CredentialSource
 from apps.keys.services import commands
 from apps.keys.services.queries import list_user_credentials
 from apps.keys.types import SERVICE_TYPES
@@ -32,6 +31,14 @@ from apps.runner.session_start import StartSessionError
 from apps.runner.start import start_manual_session
 from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession
+from apps.web.services.queries import (
+    get_agent_detail_data,
+    get_credential_for_write_check,
+    get_dashboard_data,
+    get_owned_agent,
+    get_owned_session,
+    get_session_llm_label,
+)
 from asgiref.sync import sync_to_async
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
@@ -42,39 +49,30 @@ from django.http import (
     HttpResponseBadRequest,
     StreamingHttpResponse,
 )
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
-from libs.agent_spec import list_examples
 
 logger = logging.getLogger(__name__)
 
 
-def _credential_write_denied(row: UserCredential | None) -> HttpResponseBadRequest | None:
+def _credential_write_denied(row: Any | None) -> HttpResponseBadRequest | None:
     """Return a clear bad request when disk owns the credential."""
     if row is not None and row.source == CredentialSource.DISK:
         return HttpResponseBadRequest('disk-sourced credential is read-only; edit the source file instead')
     return None
 
 
-def _owned_agent(request: HttpRequest, agent_id: UUID) -> Agent:
+def _require_authenticated_user_id(request: HttpRequest) -> int:
+    """Extract the authenticated user's pk, or raise Http404."""
     if not request.user.is_authenticated:
-        raise Http404('Agent not found')
-    return get_object_or_404(Agent, pk=agent_id, user_id=request.user.pk)
-
-
-def _owned_session(request: HttpRequest, session_id: UUID) -> AgentSession:
-    if not request.user.is_authenticated:
-        raise Http404('Session not found')
-    return get_object_or_404(
-        AgentSession.objects.select_related('agent', 'agent_config'),
-        pk=session_id,
-        agent__user_id=request.user.pk,
-    )
+        raise Http404('Not found')
+    return int(cast(AbstractBaseUser, request.user).pk)
 
 
 def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str, Any]:
+    """Build template context for the chat input box."""
     if session is None:
         return {
             'agent': agent,
@@ -90,43 +88,29 @@ def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str,
     }
 
 
-def _session_llm_label(session: AgentSession) -> str:
-    spec = session.agent_config.spec if session.agent_config else {}
-    llm = spec.get('llm', {})
-    provider = llm.get('provider', '')
-    model = llm.get('model', '')
-    if provider and model:
-        return f'{provider} / {model}'
-    return model or '—'
-
-
 def dashboard(request: HttpRequest) -> HttpResponse:
-    agents = Agent.objects.select_related('current_config', 'user').order_by('-id')
-    sessions = AgentSession.objects.select_related('agent').order_by('-created_at')
-    if request.user.is_authenticated:
-        agents = agents.filter(user=request.user)
-        sessions = sessions.filter(agent__user=request.user)
-    sessions = sessions[:20]
-    examples = list_examples() if request.user.is_authenticated else []
+    """Main dashboard listing agents and recent sessions."""
+    user_id = cast(AbstractBaseUser, request.user).pk if request.user.is_authenticated else None
+    data = get_dashboard_data(user_id=user_id)
     return render(
         request,
         'web/dashboard.html',
-        {'agents': agents, 'sessions': sessions, 'examples': examples},
+        {'agents': data.agents, 'sessions': data.sessions, 'examples': data.examples},
     )
 
 
 @login_required(login_url='/admin/login/')
 @require_GET
 def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
-    agent = _owned_agent(request, agent_id)
-    sessions = AgentSession.objects.filter(agent=agent).order_by('-created_at')
-    context = {
-        'agent': agent,
-        'sessions': sessions,
-        'source_label': config_source_label(agent.config_source),
-        'config_dirty': agent.current_config.dirty if agent.current_config else False,
+    """Agent overview with session list and chat input."""
+    data = get_agent_detail_data(_require_authenticated_user_id(request), agent_id)
+    context: dict[str, Any] = {
+        'agent': data.agent,
+        'sessions': data.sessions,
+        'source_label': data.source_label,
+        'config_dirty': data.config_dirty,
     }
-    context.update(_chatbox_context(agent=agent, session=None))
+    context.update(_chatbox_context(agent=data.agent, session=None))
     return render(request, 'web/agent_detail.html', context)
 
 
@@ -134,7 +118,8 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @csrf_protect
 @require_POST
 def agent_start_chat(request: HttpRequest, agent_id: UUID) -> HttpResponse:
-    agent = _owned_agent(request, agent_id)
+    """Start a new session with an initial chat message."""
+    agent = get_owned_agent(_require_authenticated_user_id(request), agent_id)
     content = request.POST.get('content', '').strip()
     if not content:
         return HttpResponseBadRequest('content required')
@@ -149,6 +134,7 @@ def agent_start_chat(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @csrf_protect
 @require_POST
 def delete_agent(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    """Delete an agent and all its sessions."""
     try:
         delete_agent_for_user(cast(AbstractBaseUser, request.user), agent_id)
     except AgentNotFoundError as exc:
@@ -160,7 +146,8 @@ def delete_agent(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @csrf_protect
 @require_POST
 def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
-    agent = get_object_or_404(Agent, pk=agent_id, user_id=request.user.pk)
+    """Start a new empty session for an agent."""
+    agent = get_owned_agent(_require_authenticated_user_id(request), agent_id)
     try:
         session = start_manual_session(agent)
     except StartSessionError as exc:
@@ -171,11 +158,12 @@ def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @login_required(login_url='/admin/login/')
 @require_GET
 def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
-    session = _owned_session(request, session_id)
-    context = {
+    """Session event log and chat continuation."""
+    session = get_owned_session(_require_authenticated_user_id(request), session_id)
+    context: dict[str, Any] = {
         'session': session,
         'agent': session.agent,
-        'llm_label': _session_llm_label(session),
+        'llm_label': get_session_llm_label(session),
     }
     context.update(_chatbox_context(agent=session.agent, session=session))
     return render(request, 'web/session_detail.html', context)
@@ -189,7 +177,8 @@ def _sse_event(data: dict[str, Any], *, event: str = 'session_event') -> str:
 @login_required(login_url='/admin/login/')
 async def session_events_sse(request: HttpRequest, session_id: UUID) -> StreamingHttpResponse:
     """Replay persisted events then tail pub/sub (dedupe by seq)."""
-    await sync_to_async(_owned_session)(request, session_id)
+    user_id = await sync_to_async(_require_authenticated_user_id)(request)
+    await sync_to_async(get_owned_session)(user_id, session_id)
 
     async def stream() -> AsyncIterator[str]:
         last_seq = 0
@@ -229,7 +218,6 @@ async def session_events_sse(request: HttpRequest, session_id: UUID) -> Streamin
                 await pubsub.close()
                 await client.close()
         except RuntimeError:
-            # No Redis — replay-only; nothing to tail.
             pass
 
     response = StreamingHttpResponse(stream(), content_type='text/event-stream')
@@ -257,7 +245,8 @@ async def sse_spike(request: HttpRequest) -> StreamingHttpResponse:
 @require_POST
 @login_required(login_url='/admin/login/')
 def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
-    _owned_session(request, session_id)
+    """Post a follow-up chat message to an existing session."""
+    get_owned_session(_require_authenticated_user_id(request), session_id)
     content = request.POST.get('content', '').strip()
     if not content:
         return HttpResponseBadRequest('content required')
@@ -269,7 +258,8 @@ def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
 @require_POST
 @login_required(login_url='/admin/login/')
 def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
-    session = _owned_session(request, session_id)
+    """Pause a running session."""
+    session = get_owned_session(_require_authenticated_user_id(request), session_id)
     push_control_and_maybe_dispatch(session_id, 'pause')
     session.refresh_from_db()
     return render(request, 'web/partials/session_status.html', {'session': session})
@@ -279,7 +269,8 @@ def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
 @require_POST
 @login_required(login_url='/admin/login/')
 def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
-    session = _owned_session(request, session_id)
+    """Resume a paused session."""
+    session = get_owned_session(_require_authenticated_user_id(request), session_id)
     maybe_dispatch_session(session_id)
     session.refresh_from_db()
     return render(request, 'web/partials/session_status.html', {'session': session})
@@ -289,7 +280,8 @@ def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
 @require_POST
 @login_required(login_url='/admin/login/')
 def session_abort(request: HttpRequest, session_id: UUID) -> HttpResponse:
-    session = _owned_session(request, session_id)
+    """Abort a session."""
+    session = get_owned_session(_require_authenticated_user_id(request), session_id)
     push_control_and_maybe_dispatch(session_id, 'abort')
     maybe_dispatch_session(session_id)
     session.refresh_from_db()
@@ -298,7 +290,6 @@ def session_abort(request: HttpRequest, session_id: UUID) -> HttpResponse:
 
 def render_event_partial(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """HTMX SSE swap target — individual event rows."""
-    # Events arrive via SSE client-side; this endpoint exists for future server push swaps.
     return HttpResponse('')
 
 
@@ -330,7 +321,7 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
     type_name = request.POST.get('type', '').strip()
     secret = request.POST.get('secret', '')
     user = cast(AbstractBaseUser, request.user)
-    row = UserCredential.objects.filter(user_id=user.pk, name=name).first()
+    row = get_credential_for_write_check(user.pk, name)
     denied = _credential_write_denied(row)
     if denied is not None:
         return denied
@@ -347,7 +338,7 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
 def settings_keys_delete_named(request: HttpRequest, name: str) -> HttpResponse:
     """Delete a UI-owned credential while preserving disk-owned credentials."""
     user = cast(AbstractBaseUser, request.user)
-    row = UserCredential.objects.filter(user_id=user.pk, name=name).first()
+    row = get_credential_for_write_check(user.pk, name)
     denied = _credential_write_denied(row)
     if denied is not None:
         return denied

@@ -10,7 +10,7 @@ from olib.py.django.test.cases import OTestCase
 
 class TestRepeatProvider(OTestCase):
     def test_collect_echoes_last_user_message(self) -> None:
-        provider = make_provider(ProviderLLMConfig(provider='repeat', model='repeat'))
+        provider = make_provider(ProviderLLMConfig(provider='repeat', model='repeat', user_id=0))
         result = provider.collect(
             [
                 {'role': 'system', 'content': 'You are helpful.'},
@@ -23,7 +23,7 @@ class TestRepeatProvider(OTestCase):
         self.assertEqual(result.content, 'repeat me')
 
     def test_stream_yields_user_message(self) -> None:
-        provider = make_provider(ProviderLLMConfig(provider='repeat', model='repeat'))
+        provider = make_provider(ProviderLLMConfig(provider='repeat', model='repeat', user_id=0))
         deltas = list(
             provider.stream(
                 [{'role': 'user', 'content': 'ping'}],

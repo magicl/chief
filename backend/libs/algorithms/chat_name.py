@@ -50,6 +50,7 @@ def generate_chat_name(
         provider=cfg.provider,
         model=cfg.model,
         temperature=cfg.temperature,
+        user_id=0,
     )
     try:
         provider = make_provider(provider_config)

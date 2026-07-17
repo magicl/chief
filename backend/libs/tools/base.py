@@ -9,7 +9,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from libs.agent_spec.spec import ToolInstance
+
+from libs.tools.context import ToolContext
 
 
 @dataclass(frozen=True)
@@ -59,13 +64,31 @@ class Tool(ABC):
 
     name: str
     credential_type: str | None = None
+    auto: bool = False
 
     @abstractmethod
-    def functions(self) -> list[ToolFunction]:
+    def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         raise NotImplementedError
 
+    def bind(
+        self, ctx: ToolContext, instance: ToolInstance | None = None
+    ) -> Callable[[str, dict[str, Any]], Any] | None:
+        """Return a bound invoke callable, or None to fall back to ``invoke``."""
+        return None
+
+    def should_include(self, ctx: ToolContext) -> bool:
+        """Whether this auto-tool should appear for the given context."""
+        return True
+
     def invoke(self, function: str, arguments: dict[str, Any]) -> Any:
-        for fn in self.functions():
+        """Default function dispatch. Used when bind() returns None."""
+        from libs.agent_spec.spec import AgentConfigSpec, LLMSpec
+
+        dummy_ctx = ToolContext(
+            spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            user_id=0,
+        )
+        for fn in self.functions(dummy_ctx):
             if fn.name == function:
                 return fn.handler(**arguments)
         raise ValueError(f'Unknown function {function!r} on tool {self.name!r}')

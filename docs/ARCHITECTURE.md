@@ -15,7 +15,7 @@ backend/
 ```
 
 **Direction:** apps orchestrate; libs compute. Apps import libs; libs never import
-`apps.*`. See `AGENTS.local.md` for the per-app import matrix.
+`apps.*`.
 
 | App | Role |
 |-----|------|
@@ -27,8 +27,98 @@ backend/
 | `apps.keys` | Encrypted credentials (system + user) |
 | `apps.web` | Dashboard, SSE, control endpoints |
 
-Each app exposes **`services/queries.py`** (read) and **`services/commands.py`**
-(write). Callers use services, not ad-hoc ORM updates.
+### App dependencies (import direction)
+
+| App | May import from |
+|-----|-----------------|
+| `apps.agents` | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), **`queues`** (materialize only) |
+| `apps.queues` | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only) |
+| `apps.sessions` | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
+| `apps.bus` | Django/stdlib only |
+| `apps.runner` | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
+| `apps.keys` | Django/stdlib, `cryptography` only |
+| `apps.web` | all of the above (keys: metadata + commands only) |
+
+Direction: `agents → sessions → runner → web`, with `bus` and `keys` as leaves (`keys`
+has no app imports; `web` must not import `resolve_*` from keys). **`apps.agents`**
+imports **`apps.queues`** only for config materialization (`sync_from_spec`).
+
+---
+
+## Three-layer request handling
+
+Views, services, and models form three distinct layers. Every request flows
+**view → service → ORM/model**; layers never skip.
+
+### Views (`apps.web`)
+
+Views handle HTTP concerns only: authentication, request parsing, response
+rendering. **Views must not contain ORM queries or direct model access.** They
+call service functions for all data and mutations.
+
+A view's responsibilities:
+
+- Enforce authentication (`@login_required` or explicit check)
+- Enforce ownership (via a service helper that returns the object or raises)
+- Parse request parameters
+- Call service queries/commands
+- Select template and build rendering context
+- Return the appropriate HTTP response type
+
+### Services (`apps/<app>/services/`)
+
+Each app exposes a **public API** for views, other apps, and Celery tasks:
+
+| Module | Purpose |
+|--------|---------|
+| `services/queries.py` | Read-only domain access (no bus publish, no task scheduling) |
+| `services/commands.py` | Mutations: DB writes, notifications, downstream `.delay()` |
+
+**Rules:**
+
+- Celery tasks, runner, and web views call **services**, not raw ORM updates
+  (when a service exists).
+- Tasks are **thin orchestrators**: query → lib function → command.
+- Commands that mutate session/agent state emit UI notifications (see Real-time
+  notifications below).
+- Service functions receive **user ids** or **model instances**, not
+  `HttpRequest` objects.
+- Ownership checks that multiple views share belong in a service helper (e.g.
+  `get_owned_agent(user_id, agent_id)` returns the agent or raises).
+
+### Models
+
+Standard Django models. Business logic lives in services, not on model methods
+(except trivial accessors / `__str__`).
+
+### Celery tasks
+
+- Each app that needs async work owns **`apps/<app>/tasks.py`**.
+- Register task modules in **`chief/tasks.py`** (imports only — see existing
+  `apps.runner.tasks` pattern).
+- **`apps.runner.tasks`**: long-lived session execution (`run_session`).
+- **`apps.sessions.tasks`**: short metadata side work (e.g. `generate_session_name`).
+- Tasks never call `publish_*` directly; commands own side effects.
+
+---
+
+## Real-time UI notifications (SSE)
+
+Session-scoped Redis pub/sub carries an envelope:
+
+- `session_event` — `AgentSessionEvent` payload (dedupe by `seq` in SSE)
+- `session_update` — partial session patch, e.g. `{"name": "..."}`
+
+Commands call `publish_session_update` after DB writes. The session detail page
+listens on the existing SSE connection and patches Alpine state.
+
+**Rules:**
+
+- Do not import `runner` or `web` from `agents` or `sessions`.
+- Provider-specific UI (e.g. listing models for dashboard buttons) belongs in
+  `web`, not `agents`.
+- Types referenced by `AgentConfigSpec` stay in `agents` even when `runner`
+  invokes them at runtime.
 
 ---
 
