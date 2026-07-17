@@ -46,7 +46,7 @@ def build_memory_session_runner(
     if user_id is None:
         user_id = (
             get_user_model()
-            .objects.create_user(username=f'usecase-{uuid4().hex}', password='x')
+            .objects.create_user(username=f'usecase-{uuid4().hex}', password=uuid4().hex)
             .pk
         )
     backend = MemorySessionBackend(spec, user_id=user_id)
