@@ -14,6 +14,7 @@ from uuid import UUID
 
 from apps.agents.models import AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue
+from apps.runner.budget_gate import budget_allows_dispatch
 from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.db import transaction
 from django.db.models import F
@@ -127,6 +128,11 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
         disable_schedule_trigger_beat(trigger.id)
         return False
 
+    # Budget check outside the atomic block to avoid holding the row lock during spend queries
+    if not budget_allows_dispatch(agent):
+        Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
+        return False
+
     session = None
     try:
         with transaction.atomic():
@@ -171,6 +177,10 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
     started = 0
 
     while True:
+        # Budget check outside the atomic block to avoid holding the row lock during spend queries
+        if not budget_allows_dispatch(trigger.agent):
+            break
+
         take_result = None
         session = None
         try:

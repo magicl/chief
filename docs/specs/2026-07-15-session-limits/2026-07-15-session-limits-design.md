@@ -2,7 +2,7 @@
 
 **Branch:** `feat/2026-07-15-session-limits`
 
-Status: **plan**
+Status: **implementing**
 
 **ClickUp:** https://app.clickup.com/t/868kcrc7c (iteration limits), https://app.clickup.com/t/868kcrcf9 (spend limits)
 **ClickUp branch field:** `feat/2026-07-15-session-limits`

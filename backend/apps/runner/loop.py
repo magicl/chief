@@ -26,14 +26,16 @@ from apps.runner.errors import (
     session_failure_from_provider_runtime_error,
 )
 from apps.runner.hooks import HookRegistry, HookSet
+from apps.runner.limits import SessionLimitChecker
 from apps.runner.llm_config import provider_config_from_spec
 from apps.runner.tool_definitions import build_tool_definitions
 from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
+from django.conf import settings
 from django.utils import timezone
 
 # isort: split
 
-from libs.agent_spec import AgentConfigSpec, ToolInstance
+from libs.agent_spec import AgentConfigSpec, ToolInstance, TriggerSpec
 from libs.providers.llm.base import LLMProvider, ProviderError, StreamResult
 from libs.providers.llm.errors import ProviderConfigurationError
 from libs.providers.llm.registry import make_provider
@@ -57,8 +59,14 @@ class SessionRunner:
         self,
         backend: SessionBackend,
         *,
+        agent_id: uuid.UUID | None = None,
         emit_restart: bool = False,
         client_factories: dict[str, Callable[..., Any]] | None = None,
+        _trigger_spec: TriggerSpec | None = None,
+        _agent_daily_limit: Decimal | None = None,
+        _agent_monthly_limit: Decimal | None = None,
+        _user_daily_limit: Decimal | None = None,
+        _user_monthly_limit: Decimal | None = None,
     ) -> None:
         """Create a runner for one session backend and initialize tool client wiring."""
         self.backend = backend
@@ -83,6 +91,17 @@ class SessionRunner:
         self.emit_restart = emit_restart
         self.hooks = HookRegistry()
 
+        self._limit_checker = SessionLimitChecker(
+            self.config_spec,
+            trigger_spec=_trigger_spec,
+            agent_id=agent_id,
+            user_id=self.backend.user_id,
+            agent_daily_limit=_agent_daily_limit,
+            agent_monthly_limit=_agent_monthly_limit,
+            user_daily_limit=_user_daily_limit,
+            user_monthly_limit=_user_monthly_limit,
+        )
+
     @classmethod
     def for_session(
         cls,
@@ -91,8 +110,54 @@ class SessionRunner:
         emit_restart: bool = False,
         client_factories: dict[str, Callable[..., Any]] | None = None,
     ) -> SessionRunner:
-        """Build a runner for a persisted Django session with optional tool client factories."""
-        return cls(DjangoSessionBackend(session), emit_restart=emit_restart, client_factories=client_factories)
+        """Build a runner for a persisted Django session with optional tool client factories.
+
+        Resolves agent-level spend limits, user-level SpendPolicy (with settings
+        fallback), and trigger-level narrowing so the SessionLimitChecker can
+        enforce rolling budgets and raise specific failure classes.
+        """
+        from apps.agents.models import SpendPolicy, Trigger
+
+        agent = session.agent
+        agent_id = agent.pk
+        user_id = agent.user_id
+
+        # Agent-level rolling limits
+        agent_daily_limit = agent.daily_spend_limit_usd
+        agent_monthly_limit = agent.monthly_spend_limit_usd
+
+        # User-level rolling limits (SpendPolicy → settings fallback)
+        user_daily_limit: Decimal | None = getattr(settings, 'DEFAULT_USER_DAILY_SPEND_LIMIT_USD', None)
+        user_monthly_limit: Decimal | None = getattr(settings, 'DEFAULT_USER_MONTHLY_SPEND_LIMIT_USD', None)
+        try:
+            policy = SpendPolicy.objects.get(user_id=user_id)
+            if policy.daily_spend_limit_usd is not None:
+                user_daily_limit = policy.daily_spend_limit_usd
+            if policy.monthly_spend_limit_usd is not None:
+                user_monthly_limit = policy.monthly_spend_limit_usd
+        except SpendPolicy.DoesNotExist:
+            pass
+
+        # Trigger-level narrowing (max_iterations / max_cost_usd)
+        trigger_spec: TriggerSpec | None = None
+        if session.trigger_ref:
+            try:
+                trigger = Trigger.objects.get(pk=session.trigger_ref)
+                trigger_spec = TriggerSpec(**trigger.spec)
+            except Trigger.DoesNotExist:
+                pass
+
+        return cls(
+            DjangoSessionBackend(session),
+            agent_id=agent_id,
+            emit_restart=emit_restart,
+            client_factories=client_factories,
+            _agent_daily_limit=agent_daily_limit,
+            _agent_monthly_limit=agent_monthly_limit,
+            _user_daily_limit=user_daily_limit,
+            _user_monthly_limit=user_monthly_limit,
+            _trigger_spec=trigger_spec,
+        )
 
     def add_hook(self, hooks: HookSet) -> None:
         """Attach observability callbacks to this runner instance."""
@@ -139,6 +204,12 @@ class SessionRunner:
                         self._record_failure(session_failure_from_provider_error(exc))
                         return
 
+                try:
+                    self._limit_checker.check()
+                except SessionFailure as exc:
+                    self._record_failure(exc)
+                    return
+
                 self.hooks.fire('on_generate_start', messages, tool_definitions)
                 result = provider.collect(messages, tool_definitions)
                 self.hooks.fire('on_generate_end', result)
@@ -146,7 +217,9 @@ class SessionRunner:
                     self._record_provider_error(result.error)
                     return
 
-                self._emit_output(provider, result)
+                cost = self._emit_output(provider, result)
+                self._limit_checker.record_iteration()
+                self._limit_checker.record_cost(cost)
 
                 if result.tool_calls:
                     for call in result.tool_calls:
@@ -196,8 +269,8 @@ class SessionRunner:
 
         self.control.pending_inputs.clear()
 
-    def _emit_output(self, provider: LLMProvider, result: StreamResult) -> None:
-        """Record provider output and usage details as a session event."""
+    def _emit_output(self, provider: LLMProvider, result: StreamResult) -> Decimal | None:
+        """Record provider output and usage details as a session event. Returns computed cost."""
         usage = result.usage
         cost = provider.compute_cost_usd(usage, latency_ms=result.latency_ms) if usage else None
         event = self._append_event(
@@ -210,6 +283,7 @@ class SessionRunner:
             latency_ms=result.latency_ms,
         )
         self.backend.publish_event(event)
+        return cost
 
     def _handle_tool_call(self, call: dict[str, Any]) -> None:
         """Invoke one requested tool call and record its call/result events."""

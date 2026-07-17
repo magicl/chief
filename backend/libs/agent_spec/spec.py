@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-AGENT_CONFIG_SPEC_VERSION = 3
+AGENT_CONFIG_SPEC_VERSION = 4
 
 _INSTANCE_ID_RE = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
@@ -23,6 +24,34 @@ class LLMSpec(BaseModel):
     credential_ref: str | None = None
 
 
+class SessionLimitsSpec(BaseModel):
+    """Per-session hard limits declared in agent config YAML."""
+
+    max_iterations: int | None = None
+    max_cost_usd: Decimal | None = None
+
+    @field_validator('max_iterations')
+    @classmethod
+    def _positive_iterations(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError('max_iterations must be >= 1')
+        return v
+
+    @field_validator('max_cost_usd', mode='before')
+    @classmethod
+    def _parse_cost(cls, v: Any) -> Decimal | None:
+        if v is None:
+            return None
+        return Decimal(str(v))
+
+    @field_validator('max_cost_usd')
+    @classmethod
+    def _positive_cost(cls, v: Decimal | None) -> Decimal | None:
+        if v is not None and v <= 0:
+            raise ValueError('max_cost_usd must be > 0')
+        return v
+
+
 class TriggerSpec(BaseModel):
     name: str
     kind: Literal['schedule', 'manual', 'agent', 'queue']
@@ -30,6 +59,29 @@ class TriggerSpec(BaseModel):
     queue: str | None = None
     prompt: str | None = None
     max_sessions: int | None = None
+    max_iterations: int | None = None
+    max_cost_usd: Decimal | None = None
+
+    @field_validator('max_iterations')
+    @classmethod
+    def _positive_iterations(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError('max_iterations must be >= 1')
+        return v
+
+    @field_validator('max_cost_usd', mode='before')
+    @classmethod
+    def _parse_cost(cls, v: Any) -> Decimal | None:
+        if v is None:
+            return None
+        return Decimal(str(v))
+
+    @field_validator('max_cost_usd')
+    @classmethod
+    def _positive_cost(cls, v: Decimal | None) -> Decimal | None:
+        if v is not None and v <= 0:
+            raise ValueError('max_cost_usd must be > 0')
+        return v
 
     @model_validator(mode='before')
     @classmethod
@@ -167,10 +219,11 @@ class SkillSpec(BaseModel):
 
 
 class AgentConfigSpec(BaseModel):
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     description: str | None = None
     llm: LLMSpec
     system_prompt: str
+    limits: SessionLimitsSpec = SessionLimitsSpec()
     integrations: list[IntegrationSpec] = []
     triggers: list[TriggerSpec] = []
     tools: list[ToolInstance] = []
