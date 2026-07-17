@@ -56,7 +56,7 @@ class TestSessionIterationLimit(OTestCase):
 
     def test_halts_at_iteration_limit(self) -> None:
         spec = self._spec_with_limits(max_iterations=2)
-        backend = MemorySessionBackend(spec)
+        backend = MemorySessionBackend(spec, user_id=1)
         backend.push_mailbox({'action': 'chat', 'content': 'go'})
         responses = [
             _tool_response('one'),
@@ -77,7 +77,7 @@ class TestSessionIterationLimit(OTestCase):
             system_prompt='hello',
             tools=[ToolInstance(id='clock', type='clock')],
         )
-        backend = MemorySessionBackend(spec)
+        backend = MemorySessionBackend(spec, user_id=1)
         backend.push_mailbox({'action': 'chat', 'content': 'go'})
         responses = [
             _tool_response('one'),
@@ -99,7 +99,7 @@ class TestSessionSpendLimit(OTestCase):
             limits=SessionLimitsSpec(max_cost_usd=Decimal('0.001')),
             tools=[ToolInstance(id='clock', type='clock')],
         )
-        backend = MemorySessionBackend(spec)
+        backend = MemorySessionBackend(spec, user_id=1)
         backend.push_mailbox({'action': 'chat', 'content': 'go'})
         responses = [
             _tool_response('expensive'),

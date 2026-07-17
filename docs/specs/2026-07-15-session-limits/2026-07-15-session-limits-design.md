@@ -341,7 +341,7 @@ Before dispatching a new session:
 Example agent config with limits:
 
 ```yaml
-schema_version: 4
+schema_version: 3
 llm:
   provider: anthropic
   model: claude-sonnet-4-20250514
@@ -375,7 +375,7 @@ Agent-level and user-level rolling budgets are configured via Django model field
 
 ## Migration Path
 
-1. Add `SessionLimitsSpec` to the spec schema + trigger fields (bump `AGENT_CONFIG_SPEC_VERSION` to 4 with a spec migration that defaults missing `limits` to empty).
+1. Add `SessionLimitsSpec` to the spec schema + trigger fields as backward-compatible optional defaults (`limits: {}`) — **no `schema_version` bump** (per ARCHITECTURE.md).
 2. Django migration: `Agent.daily_spend_limit_usd`, `Agent.monthly_spend_limit_usd` (nullable).
 3. Django migration: `SpendPolicy` model.
 4. Django migration: `HourlyUsage` model.
