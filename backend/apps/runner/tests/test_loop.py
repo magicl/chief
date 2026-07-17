@@ -22,7 +22,7 @@ class TestSessionRunner(OTestCase):
         spec = load_example('clock-assistant').model_copy()
         if llm is not None:
             spec.llm = llm
-        return MemorySessionBackend(spec)
+        return MemorySessionBackend(spec, user_id=1)
 
     def test_run_waits_without_user_input(self) -> None:
         backend = self._backend()
@@ -105,15 +105,15 @@ class TestSessionRunner(OTestCase):
         failure = next(event for event in backend.events() if event.kind == AgentSessionEventKind.FAILURE)
         self.assertEqual(failure.payload['code'], 'unsupported_llm_provider')
 
-    def test_env_only_backend_passes_no_supplier_to_provider_config(self) -> None:
-        backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=None)
+    def test_backend_always_wires_supplier_to_provider_config(self) -> None:
+        backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=1)
         backend.push_mailbox({'action': 'chat', 'content': 'ping'})
         with patch('apps.runner.loop.make_provider') as mock_make:
             mock_make.return_value = FakeProvider.for_responses([StreamResult(content='pong')])
             SessionRunner(backend).run()
         cfg = mock_make.call_args[0][0]
-        self.assertIsNone(cfg.user_id)
-        self.assertIsNone(cfg.secret_supplier)
+        self.assertEqual(cfg.user_id, 1)
+        self.assertIsNotNone(cfg.secret_supplier)
 
     def test_tool_call_invokes_bound_instance(self) -> None:
         backend = self._backend()

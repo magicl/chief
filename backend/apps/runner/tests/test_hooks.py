@@ -23,7 +23,7 @@ from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 class TestSessionRunnerHooks(OTestCase):
     def test_hooks_fire_for_generate_tool_and_run(self) -> None:
         """Hooks observe generate, tool call, and run lifecycle without altering control flow."""
-        backend = MemorySessionBackend(load_example('clock-assistant').model_copy())
+        backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=1)
         backend.push_mailbox({'action': 'chat', 'content': 'time?'})
         tool_call = StreamResult(content='', tool_calls=[{'name': 'clock__now', 'arguments': {}, 'id': 'clock-1'}])
         follow_up = StreamResult(content='done')
@@ -76,7 +76,7 @@ class TestSessionRunnerHooks(OTestCase):
 
     def test_hook_failure_does_not_fail_session(self) -> None:
         """Observability hook raises are swallowed so the session still completes."""
-        backend = MemorySessionBackend(load_example('clock-assistant').model_copy())
+        backend = MemorySessionBackend(load_example('clock-assistant').model_copy(), user_id=1)
         backend.push_mailbox({'action': 'chat', 'content': 'ping'})
 
         def fail_run_start() -> None:

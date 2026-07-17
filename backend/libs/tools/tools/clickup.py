@@ -11,7 +11,7 @@ examples). `ClickUpError`s map to the same `{ok, error}` failure result as the G
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from libs.clients.clickup.client import ClickUpClient
 from libs.clients.clickup.errors import (
@@ -21,6 +21,10 @@ from libs.clients.clickup.errors import (
 )
 from libs.clients.clickup.protocol import ClickUpClientProtocol
 from libs.tools.base import Tool, ToolFunction
+from libs.tools.context import ToolContext, token_supplier_for
+
+if TYPE_CHECKING:
+    from libs.agent_spec.spec import ToolInstance
 
 _TASK_ID_DESC = 'ClickUp task id (from `list_tasks`/queue item `ref.resource_id`).'
 _LIST_ID_DESC = 'ClickUp list id to create/list tasks in.'
@@ -43,13 +47,21 @@ class ClickUpTool(Tool):
 
     def bind(
         self,
-        *,
-        token_supplier: Callable[[], str | None],
-        config: dict[str, Any] | None = None,
-        client_factory: Callable[..., ClickUpClientProtocol] | None = None,
+        ctx: ToolContext,
+        instance: ToolInstance | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
-        """Return an invoke closed over a ClickUpClient (`client_factory` is a test seam)."""
-        cfg = config or {}
+        """Return an invoke closed over a ClickUpClient.
+
+        Credentials come from ``ctx.secret_supplier_factory``; per-instance
+        config and client factory overrides from ``instance`` / ``ctx``.
+        """
+        cfg = instance.config if instance else {}
+        token_supplier = token_supplier_for(
+            ctx,
+            credential_type=self.credential_type,
+            credential_ref=instance.credential_ref if instance else None,
+        )
+        client_factory = ctx.client_factories.get(self.name)
         factory: Callable[..., ClickUpClientProtocol] = client_factory or ClickUpClient
         client = factory(token_supplier=token_supplier, config=cfg)
         team_id = cfg.get('team_id')
@@ -97,7 +109,7 @@ class ClickUpTool(Tool):
             return {'ok': True, **client.delete_task(arguments['task_id'])}
         raise ValueError(f'Unknown function {function!r} on tool {self.name!r}')
 
-    def functions(self) -> list[ToolFunction]:
+    def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         """LLM-visible ClickUp functions (handlers require ``bind``)."""
         task_only = {
             'type': 'object',

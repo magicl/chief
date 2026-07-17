@@ -107,6 +107,6 @@ class SessionBackend(ABC):
 
     @property
     @abstractmethod
-    def user_id(self) -> int | None:
-        """Session owner for credential resolution; None means env-only (no DB lookup)."""
+    def user_id(self) -> int:
+        """Session owner for credential resolution. Every agent run has a user."""
         raise NotImplementedError

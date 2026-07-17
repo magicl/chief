@@ -210,6 +210,14 @@ def _apply_integration(entry: dict[str, Any], integrations: dict[str, dict[str, 
     return out
 
 
+class SkillSpec(BaseModel):
+    """Named prompt block loadable on demand via the load_skill tool."""
+
+    id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
+    description: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
 class AgentConfigSpec(BaseModel):
     schema_version: Literal[4] = 4
     description: str | None = None
@@ -220,6 +228,7 @@ class AgentConfigSpec(BaseModel):
     triggers: list[TriggerSpec] = []
     tools: list[ToolInstance] = []
     queues: list[QueueSpec] = []
+    skills: list[SkillSpec] = []
 
     @model_validator(mode='before')
     @classmethod
@@ -262,6 +271,9 @@ class AgentConfigSpec(BaseModel):
             source_ids = [s.id for s in queue.sources]
             if len(source_ids) != len(set(source_ids)):
                 raise ValueError(f'duplicate source id in queue {queue.id!r}')
+        skill_ids = [s.id for s in self.skills]
+        if len(skill_ids) != len(set(skill_ids)):
+            raise ValueError('duplicate skill id')
         return self
 
     @model_validator(mode='after')

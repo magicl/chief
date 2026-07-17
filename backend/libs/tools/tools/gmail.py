@@ -12,12 +12,16 @@ The full surface (including send/trash) is exposed; per-instance allow/deny gate
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from libs.clients.gmail.client import GmailClient
 from libs.clients.gmail.errors import GmailAuthError, GmailError, GmailNotFoundError
 from libs.clients.gmail.protocol import GmailClientProtocol
 from libs.tools.base import Tool, ToolFunction
+from libs.tools.context import ToolContext, token_supplier_for
+
+if TYPE_CHECKING:
+    from libs.agent_spec.spec import ToolInstance
 
 _MESSAGE_ID_DESC = 'Gmail message id (from `list`/queue item `ref.resource_id`).'
 
@@ -39,17 +43,23 @@ class GmailTool(Tool):
 
     def bind(
         self,
-        *,
-        token_supplier: Callable[[], str | None],
-        config: dict[str, Any] | None = None,
-        client_factory: Callable[..., GmailClientProtocol] | None = None,
+        ctx: ToolContext,
+        instance: ToolInstance | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Return an invoke closed over a per-mailbox GmailClient.
 
-        ``client_factory`` is a test seam; production uses the real GmailClient.
+        Credentials come from ``ctx.secret_supplier_factory``; per-instance
+        config and client factory overrides from ``instance`` / ``ctx``.
         """
+        config = instance.config if instance else {}
+        token_supplier = token_supplier_for(
+            ctx,
+            credential_type=self.credential_type,
+            credential_ref=instance.credential_ref if instance else None,
+        )
+        client_factory = ctx.client_factories.get(self.name)
         factory: Callable[..., GmailClientProtocol] = client_factory or GmailClient
-        client = factory(token_supplier=token_supplier, config=config or {})
+        client = factory(token_supplier=token_supplier, config=config)
 
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
             try:
@@ -96,7 +106,7 @@ class GmailTool(Tool):
             return {'ok': True, **client.send_message(**arguments)}
         raise ValueError(f'Unknown function {function!r} on tool {self.name!r}')
 
-    def functions(self) -> list[ToolFunction]:
+    def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         """LLM-visible Gmail functions (handlers require ``bind``)."""
         msg_only = {
             'type': 'object',

@@ -1,0 +1,26 @@
+# title: Skills demo
+# description: Minimal agent with skills and the clock tool, demonstrating on-demand skill loading.
+schema_version: 3
+description: Skills demo agent
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+system_prompt: |
+  You are a helpful assistant. Load relevant skills before acting on topics they cover.
+skills:
+  - id: greeting-style
+    description: "How to greet users based on time of day"
+    content: |
+      Greeting rules:
+      - Before 12:00 UTC: "Good morning"
+      - 12:00-17:00 UTC: "Good afternoon"
+      - After 17:00 UTC: "Good evening"
+      Always include the user's name if known.
+triggers:
+  - name: manual
+    kind: manual
+tools:
+  - id: clock
+    type: clock
+    allow:
+      - now

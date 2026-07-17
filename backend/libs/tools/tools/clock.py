@@ -4,15 +4,22 @@
 # ~
 """Clock tool — read-only UTC time for demos and smoke tests."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from libs.tools.base import Tool, ToolFunction
+from libs.tools.context import ToolContext
+
+if TYPE_CHECKING:
+    from libs.agent_spec.spec import ToolInstance
 
 
 class ClockTool(Tool):
     name = 'clock'
 
-    def functions(self) -> list[ToolFunction]:
+    def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         """Return the clock tool's LLM-visible sub-functions."""
         return [
             ToolFunction(

@@ -34,17 +34,16 @@ def _wrap_secret_supplier(supplier: Callable[[], str | None]) -> Callable[[], st
 def provider_config_from_spec(
     llm: LLMSpec,
     *,
-    user_id: int | None,
+    user_id: int,
     credential_ref: str | None = None,
 ) -> ProviderLLMConfig:
     """Build provider config for the runner boundary.
 
-    When ``user_id`` is ``None``, no ``secret_supplier`` is attached and providers
-    fall back to env vars. When set, credentials resolve from ``apps.keys`` at call
-    time via ``make_secret_supplier``.
+    Credentials resolve from ``apps.keys`` at call time via ``make_secret_supplier``
+    (system default → env fallback for LLM providers). Every agent run has a user.
     """
     supplier = None
-    if user_id is not None and is_registered_type(llm.provider):
+    if is_registered_type(llm.provider):
         supplier = _wrap_secret_supplier(
             make_secret_supplier(
                 user_id,
