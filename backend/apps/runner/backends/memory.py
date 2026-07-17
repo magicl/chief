@@ -24,14 +24,13 @@ class MemorySessionBackend(SessionBackend):
         self,
         spec: AgentConfigSpec,
         *,
+        user_id: int,
         session_id: uuid.UUID | None = None,
-        user_id: int | None = None,
     ) -> None:
         """In-memory backend for CLI runs and tests.
 
-        ``user_id`` selects encrypted credential resolution. ``None`` (default) uses
-        env vars only — no ``apps.keys`` DB lookup. Pass an explicit pk or use
-        ``run_agent --user-id`` to exercise stored credentials.
+        ``user_id`` is required: credential resolution always goes through
+        ``apps.keys`` (which still falls back to env for LLM defaults).
         """
         self._session_id = session_id or uuid.uuid4()
         self._spec = spec
@@ -47,8 +46,8 @@ class MemorySessionBackend(SessionBackend):
         return self._session_id
 
     @property
-    def user_id(self) -> int | None:
-        """Session owner for credential resolution; None means env-only."""
+    def user_id(self) -> int:
+        """Session owner for credential resolution."""
         return self._user_id
 
     @property
@@ -120,7 +119,7 @@ def memory_backend_for_turn(
     spec: AgentConfigSpec,
     *,
     input_text: str,
-    user_id: int | None = None,
+    user_id: int,
 ) -> MemorySessionBackend:
     """Single-turn in-memory session preloaded with one user message."""
     backend = MemorySessionBackend(spec, user_id=user_id)

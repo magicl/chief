@@ -18,5 +18,5 @@ class ProviderLLMConfig(BaseModel):
     model: str
     temperature: float | None = None
     credential_ref: str | None = None
-    user_id: int | None = None
+    user_id: int
     secret_supplier: Callable[[], str | None] | None = None

@@ -10,6 +10,8 @@ from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
+from libs.agent_spec import AgentConfigSpec, LLMSpec
+from libs.tools.context import ToolContext
 from libs.tools.tools.queue import QueueTool
 
 from olib.py.django.test.cases import OTestCase
@@ -20,11 +22,13 @@ class TestQueueTool(OTestCase):
         self.tool = QueueTool()
         self.session_id = uuid4()
         self.agent_id = uuid4()
-        self.invoke = self.tool.bind(
+        ctx = ToolContext(
+            spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
             user_id=1,
             agent_id=self.agent_id,
             session_id=self.session_id,
         )
+        self.invoke = self.tool.bind(ctx)
 
     @patch('apps.queues.services.queries.list_queues')
     @patch('apps.agents.models.Agent.objects.get')
@@ -114,8 +118,9 @@ class TestQueueTool(OTestCase):
 
     def test_functions_include_list_and_put_without_owner_agent(self) -> None:
         """Tool schema exposes list and agent-scoped put without cross-agent owner_agent."""
-        names = {fn.name for fn in self.tool.functions()}
+        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'), user_id=1)
+        names = {fn.name for fn in self.tool.functions(ctx)}
         self.assertEqual(names, {'list', 'put', 'take', 'complete', 'fail'})
-        put_fn = next(fn for fn in self.tool.functions() if fn.name == 'put')
+        put_fn = next(fn for fn in self.tool.functions(ctx) if fn.name == 'put')
         self.assertEqual(put_fn.parameters['required'], ['queue', 'payload'])
         self.assertNotIn('owner_agent', put_fn.parameters['properties'])

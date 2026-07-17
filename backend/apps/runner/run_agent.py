@@ -48,7 +48,7 @@ def run_agent_turn(
     *,
     input_text: str,
     spec: AgentConfigSpec,
-    user_id: int | None = None,
+    user_id: int,
 ) -> MemorySessionBackend:
     backend = memory_backend_for_turn(spec, input_text=input_text, user_id=user_id)
     SessionRunner(backend).run()
@@ -66,6 +66,9 @@ def write_run_agent_events(backend: MemorySessionBackend, stream: _TextStream) -
 
 
 def run_agent_from_options(options: dict[str, Any], *, stream: _TextStream) -> None:
+    user_id = options.get('user_id')
+    if user_id is None:
+        raise ValueError('Pass --user-id (every agent run requires an owning user)')
     spec = resolve_run_agent_spec(
         provider=options.get('provider'),
         model=options.get('model'),
@@ -77,6 +80,6 @@ def run_agent_from_options(options: dict[str, Any], *, stream: _TextStream) -> N
     backend = run_agent_turn(
         input_text=options['input'],
         spec=spec,
-        user_id=options.get('user_id'),
+        user_id=user_id,
     )
     write_run_agent_events(backend, stream)

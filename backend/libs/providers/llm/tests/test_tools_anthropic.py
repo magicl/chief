@@ -9,8 +9,9 @@ from apps.runner.tool_definitions import build_tool_definitions
 
 # isort: split
 
-from libs.agent_spec import ToolInstance
+from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
 from libs.providers.llm.anthropic_provider import AnthropicProvider
+from libs.tools.context import ToolContext
 from pydantic import TypeAdapter
 
 from olib.py.django.test.cases import OTestCase
@@ -21,8 +22,10 @@ _STREAM_EVENT_ADAPTER: TypeAdapter[RawMessageStreamEvent] = TypeAdapter(RawMessa
 class TestToolsAnthropicProvider(OTestCase):
     def test_format_tools_uses_wire_safe_names(self) -> None:
         provider = AnthropicProvider('claude-haiku-4-5')
+        ctx = ToolContext(spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'), user_id=1)
         definitions = build_tool_definitions(
             [ToolInstance(id='clock', type='clock', allow=['now'])],
+            ctx=ctx,
             is_allowed=lambda *_args, **_kwargs: True,
         )
         tools = provider.format_tools(definitions)

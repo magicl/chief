@@ -27,8 +27,8 @@ class Command(BaseCommand):
         parser.add_argument(
             '--user-id',
             type=int,
-            default=None,
-            help='Resolve encrypted credentials for this user (default: env-only, no DB lookup)',
+            required=True,
+            help='Owning user for credential resolution (required for every agent run)',
         )
 
     def handle(self, *args: Any, **options: Any) -> None:

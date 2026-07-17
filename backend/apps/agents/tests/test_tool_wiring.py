@@ -2,9 +2,11 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+from __future__ import annotations
+
 from collections.abc import Callable
-from typing import Any
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 from apps.agents.ingest import create_agent_from_spec, persist_agent_config
 from apps.agents.tool_wiring import build_bound_tools
@@ -19,21 +21,51 @@ from libs.agent_spec import (
     AgentConfigSpec,
     LLMSpec,
     QueueSpec,
+    SkillSpec,
     SourceSpec,
     ToolInstance,
     load_example,
 )
 from libs.tools.base import Tool, ToolFunction
+from libs.tools.context import ToolContext, token_supplier_for
 from libs.tools.registry import register_tool
 
 from olib.py.django.test.cases import OTestCase
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+
+def _make_ctx(
+    *,
+    user_id: int = 1,
+    agent_id: UUID | None = None,
+    session_id: UUID | None = None,
+    secret_supplier_factory: Callable[[str | None, str], Callable[[], str | None]] | None = None,
+    client_factories: dict[str, Callable[..., Any]] | None = None,
+) -> ToolContext:
+    """Build a ToolContext with a minimal spec for tests."""
+    spec = AgentConfigSpec(
+        llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+        system_prompt='test',
+    )
+    kwargs: dict[str, Any] = {
+        'spec': spec,
+        'user_id': user_id,
+        'agent_id': agent_id,
+        'session_id': session_id,
+        'client_factories': client_factories or {},
+    }
+    if secret_supplier_factory is not None:
+        kwargs['secret_supplier_factory'] = secret_supplier_factory
+    return ToolContext(**kwargs)
 
 
 class _EchoCredTool(Tool):
     name = 'echo_cred'
     credential_type = 'gmail'
 
-    def functions(self) -> list[ToolFunction]:
+    def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         return [
             ToolFunction(
                 name='ping',
@@ -46,18 +78,22 @@ class _EchoCredTool(Tool):
 
     def bind(
         self,
-        *,
-        token_supplier: Callable[[], str | None],
-        config: dict[str, Any] | None = None,
+        ctx: ToolContext,
+        instance: ToolInstance | None = None,
     ) -> Callable[[str, dict[str, Any]], Any]:
         """Echo whether a token resolved and surface the injected config."""
-        cfg = config or {}
+        config = instance.config if instance else {}
+        token_supplier = token_supplier_for(
+            ctx,
+            credential_type=self.credential_type,
+            credential_ref=instance.credential_ref if instance else None,
+        )
 
         def invoke(function: str, arguments: dict[str, Any]) -> Any:
             if function != 'ping':
                 raise ValueError(function)
             token = token_supplier()
-            return {'token_set': token is not None, 'subject': cfg.get('subject')}
+            return {'token_set': token is not None, 'subject': config.get('subject')}
 
         return invoke
 
@@ -72,15 +108,16 @@ class TestBuildBoundTools(OTestCase):
 
     def test_clock_instance_invokes_without_credentials(self) -> None:
         instances = [ToolInstance(id='clock', type='clock', allow=['now'])]
-        bound = build_bound_tools(instances, user_id=1)
+        ctx = _make_ctx(user_id=1)
+        bound = build_bound_tools(instances, ctx=ctx)
         self.assertIn('clock', bound)
         result = bound['clock'].invoke('now', {})
         self.assertIsInstance(result, str)
 
     def test_credential_tool_uses_supplier(self) -> None:
         instances = [ToolInstance(id='gmail-a', type='echo_cred', allow=['ping'])]
-        with patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: 'tok'):
-            bound = build_bound_tools(instances, user_id=1)
+        ctx = _make_ctx(user_id=1, secret_supplier_factory=lambda ref, typ: lambda: 'tok')
+        bound = build_bound_tools(instances, ctx=ctx)
         out = bound['gmail-a'].invoke('ping', {})
         self.assertEqual(out, {'token_set': True, 'subject': None})
 
@@ -96,12 +133,13 @@ class TestBuildBoundTools(OTestCase):
         ]
         fake_client = MagicMock()
         fake_client.list_tasks.return_value = {'tasks': [{'id': 't1'}], 'last_page': True}
-        with (
-            patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: 'pk_test'),
-            patch('libs.tools.tools.clickup.ClickUpClient', return_value=fake_client),
-        ):
-            bound = build_bound_tools(instances, user_id=1)
-            out = bound['clickup'].invoke('list_tasks', {'list_id': '901'})
+        ctx = _make_ctx(
+            user_id=1,
+            secret_supplier_factory=lambda ref, typ: lambda: 'pk_test',
+            client_factories={'clickup': lambda **_kwargs: fake_client},
+        )
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['clickup'].invoke('list_tasks', {'list_id': '901'})
         self.assertEqual(out['tasks'], [{'id': 't1'}])
 
     def test_gmail_tool_wires_with_config_and_credential(self) -> None:
@@ -116,12 +154,13 @@ class TestBuildBoundTools(OTestCase):
         ]
         fake_client = MagicMock()
         fake_client.list_messages.return_value = {'message_ids': ['m1'], 'next_page_token': None}
-        with (
-            patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: '{"sa": true}'),
-            patch('libs.tools.tools.gmail.GmailClient', return_value=fake_client),
-        ):
-            bound = build_bound_tools(instances, user_id=1)
-            out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
+        ctx = _make_ctx(
+            user_id=1,
+            secret_supplier_factory=lambda ref, typ: lambda: '{"sa": true}',
+            client_factories={'gmail': lambda **_kwargs: fake_client},
+        )
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
         self.assertEqual(out['message_ids'], ['m1'])
 
     def test_gmail_tool_uses_injected_client_factory(self) -> None:
@@ -136,18 +175,18 @@ class TestBuildBoundTools(OTestCase):
         ]
         fake_client = MagicMock()
         fake_client.list_messages.return_value = {'message_ids': ['m-factory'], 'next_page_token': None}
-        with patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: '{"sa": true}'):
-            bound = build_bound_tools(
-                instances,
-                user_id=1,
-                client_factories={'gmail': lambda **_kwargs: fake_client},
-            )
-            out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
+        ctx = _make_ctx(
+            user_id=1,
+            secret_supplier_factory=lambda ref, typ: lambda: '{"sa": true}',
+            client_factories={'gmail': lambda **_kwargs: fake_client},
+        )
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
         self.assertEqual(out['message_ids'], ['m-factory'])
         fake_client.list_messages.assert_called_once_with(query='in:inbox', max_results=100, page_token=None)
 
-    def test_gmail_tool_uses_injected_client_factory_without_user_supplier(self) -> None:
-        """Client factories bind even when env-only sessions have no Django user credential supplier."""
+    def test_gmail_tool_uses_injected_client_factory_with_noop_supplier(self) -> None:
+        """Client factories bind even when the secret supplier returns None."""
         instances = [
             ToolInstance(
                 id='gmail-personal',
@@ -160,11 +199,11 @@ class TestBuildBoundTools(OTestCase):
         fake_client = MagicMock()
         fake_client.list_messages.return_value = {'message_ids': ['m-env-only'], 'next_page_token': None}
 
-        bound = build_bound_tools(
-            instances,
-            user_id=None,
+        ctx = _make_ctx(
+            user_id=1,
             client_factories={'gmail': lambda **_kwargs: fake_client},
         )
+        bound = build_bound_tools(instances, ctx=ctx)
         out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
 
         self.assertEqual(out['message_ids'], ['m-env-only'])
@@ -179,10 +218,44 @@ class TestBuildBoundTools(OTestCase):
                 config={'subject': 'me@example.com'},
             ),
         ]
-        with patch('apps.agents.tool_wiring.make_secret_supplier', return_value=lambda: 'tok'):
-            bound = build_bound_tools(instances, user_id=1)
+        ctx = _make_ctx(user_id=1, secret_supplier_factory=lambda ref, typ: lambda: 'tok')
+        bound = build_bound_tools(instances, ctx=ctx)
         out = bound['gmail-a'].invoke('ping', {})
         self.assertEqual(out, {'token_set': True, 'subject': 'me@example.com'})
+
+    def test_auto_tool_included_when_should_include_true(self) -> None:
+        """Auto-tools appear in bound map when their should_include returns True."""
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='test',
+            skills=[SkillSpec(id='s1', description='d', content='c')],
+        )
+        ctx = ToolContext(spec=spec, user_id=1)
+        bound = build_bound_tools([], ctx=ctx)
+        self.assertIn('load_skill', bound)
+        self.assertTrue(bound['load_skill'].is_auto)
+
+    def test_auto_tool_excluded_when_should_include_false(self) -> None:
+        """Auto-tools are absent from bound map when should_include returns False."""
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='test',
+        )
+        ctx = ToolContext(spec=spec, user_id=1)
+        bound = build_bound_tools([], ctx=ctx)
+        self.assertNotIn('load_skill', bound)
+
+    def test_auto_tool_invoke_returns_skill_content(self) -> None:
+        """Auto-bound load_skill returns skill content via invoke."""
+        spec = AgentConfigSpec(
+            llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+            system_prompt='test',
+            skills=[SkillSpec(id='triage', description='Triage rules', content='Priority logic')],
+        )
+        ctx = ToolContext(spec=spec, user_id=1)
+        bound = build_bound_tools([], ctx=ctx)
+        result = bound['load_skill'].invoke('load', {'name': 'triage'})
+        self.assertEqual(result, {'skill': 'triage', 'content': 'Priority logic'})
 
     def test_queue_tool_round_trip_take_and_complete(self) -> None:
         user = get_user_model().objects.create_user(username='queue-wire-user', password='x')
@@ -213,12 +286,12 @@ class TestBuildBoundTools(OTestCase):
 
         commands.put_item(queue=queue, payload={'task': 'one'})
 
-        bound = build_bound_tools(
-            spec.tools,
+        ctx = _make_ctx(
             user_id=user.pk,
             agent_id=agent.id,
             session_id=session.id,
         )
+        bound = build_bound_tools(spec.tools, ctx=ctx)
         take_out = bound['q1'].invoke('take', {'queue': 'inbox'})
         self.assertIn('item_id', take_out)
         item_id = take_out['item_id']
