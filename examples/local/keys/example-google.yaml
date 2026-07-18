@@ -1,0 +1,19 @@
+# Copy this file and replace every REPLACE-* placeholder. These values are not credentials.
+name: work-google
+type: google
+owner: your-username
+# Store the complete downloaded service-account key JSON, not only its private key.
+value: |
+  {
+    "type": "service_account",
+    "project_id": "REPLACE-WITH-GOOGLE-CLOUD-PROJECT-ID",
+    "private_key_id": "REPLACE-WITH-SERVICE-ACCOUNT-KEY-ID",
+    "private_key": "REPLACE-WITH-COMPLETE-PEM-PRIVATE-KEY-FROM-DOWNLOAD",
+    "client_email": "REPLACE-WITH-SERVICE-ACCOUNT@REPLACE-WITH-PROJECT.iam.gserviceaccount.com",
+    "client_id": "REPLACE-WITH-NUMERIC-SERVICE-ACCOUNT-CLIENT-ID",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/REPLACE-WITH-URL-ENCODED-SERVICE-ACCOUNT",
+    "universe_domain": "googleapis.com"
+  }

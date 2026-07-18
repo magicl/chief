@@ -10,7 +10,7 @@ import base64
 from unittest.mock import MagicMock
 
 from googleapiclient.errors import HttpError
-from libs.clients.gmail.client import GmailClient
+from libs.clients.gmail.client import GmailClient, _build_service
 from libs.clients.gmail.errors import GmailAPIError, GmailAuthError, GmailNotFoundError
 
 from olib.py.django.test.cases import OTestCase
@@ -141,8 +141,15 @@ class TestGmailClient(OTestCase):
 
     def test_missing_credential_raises_auth_failure(self) -> None:
         client = _client_with_service(MagicMock(), token=None)
-        with self.assertRaises(GmailAuthError):
+        with self.assertRaisesMessage(GmailAuthError, 'no Google service-account credential resolved'):
             client.list_messages(query='in:inbox')
+
+    def test_invalid_json_names_google_service_account_credential(self) -> None:
+        with self.assertRaisesMessage(
+            GmailAuthError,
+            'Google service-account credential is not valid JSON',
+        ):
+            _build_service('not-json', 'me@example.com')
 
     def test_http_404_maps_to_not_found(self) -> None:
         service = MagicMock()

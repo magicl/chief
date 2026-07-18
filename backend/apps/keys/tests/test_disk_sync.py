@@ -273,7 +273,20 @@ class TestKeyDiskSync(OTestCase):
             report = sync_keys_dir()
 
         self.assertEqual(report.failed, 1)
+        self.assertEqual(report.items[0].detail, 'unknown credential type: mystery')
         self.assertFalse(UserCredential.objects.exists())
+
+    def test_gmail_type_reports_safe_rename_guidance(self) -> None:
+        self.write_key(type_name='gmail', value='ultra-secret')
+
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR') as captured:
+            report = sync_keys_dir()
+
+        self.assertEqual(
+            report.items[0].detail,
+            "credential type 'gmail' was renamed to 'google'; update type: google",
+        )
+        self.assertNotIn('ultra-secret', '\n'.join(captured.output))
 
     def test_invalid_yaml_does_not_disable_other_present_key(self) -> None:
         self.write_key()
@@ -285,6 +298,10 @@ class TestKeyDiskSync(OTestCase):
             report = sync_keys_dir()
 
         self.assertEqual(report.failed, 1)
+        self.assertEqual(
+            next(item.detail for item in report.items if not item.success),
+            'ParserError',
+        )
         row = UserCredential.objects.get(user=self.user, name='work-openai')
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
         self.assertNotIn('ultra-secret', '\n'.join(captured.output))

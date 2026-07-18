@@ -49,5 +49,5 @@ class TestTokenSupplierFor(OTestCase):
             user_id=1,
             secret_supplier_factory=lambda ref, typ: lambda: f'{ref}:{typ}',
         )
-        supplier = token_supplier_for(ctx, credential_type='gmail', credential_ref='gmail-personal')
-        self.assertEqual(supplier(), 'gmail-personal:gmail')
+        supplier = token_supplier_for(ctx, credential_type='google', credential_ref='gmail-personal')
+        self.assertEqual(supplier(), 'gmail-personal:google')

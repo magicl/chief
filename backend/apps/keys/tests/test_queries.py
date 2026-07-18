@@ -77,7 +77,7 @@ class TestCredentialQueries(OTransactionTestCase):
         user = get_user_model().objects.create_user(username='q-user4', password='x')
         commands.upsert_user_named(user.pk, 'my-clickup', 'clickup', 'tok')
         with self.assertRaises(KeyTypeMismatchError):
-            queries.resolve_secret(user.pk, 'my-clickup', expected_type='gmail')
+            queries.resolve_secret(user.pk, 'my-clickup', expected_type='google')
 
     def test_list_metadata_never_includes_plaintext(self) -> None:
         user = get_user_model().objects.create_user(username='q-user5', password='x')
@@ -89,9 +89,9 @@ class TestCredentialQueries(OTransactionTestCase):
     def test_no_cross_user_leakage(self) -> None:
         u1 = get_user_model().objects.create_user(username='q-u1', password='x')
         u2 = get_user_model().objects.create_user(username='q-u2', password='x')
-        commands.upsert_user_named(u1.pk, 'private', 'gmail', 'tok1')
+        commands.upsert_user_named(u1.pk, 'private', 'google', 'tok1')
         with self.assertRaises(KeyNotFoundError):
-            queries.resolve_secret(u2.pk, 'private', expected_type='gmail')
+            queries.resolve_secret(u2.pk, 'private', expected_type='google')
 
     @expectLogItems([ExpectLogItem('apps.keys.crypto', logging.WARNING, r'credential decrypt failed', count=1)])
     def test_resolve_raises_when_master_key_rotated(self) -> None:
@@ -107,8 +107,8 @@ class TestCredentialQueries(OTransactionTestCase):
     def test_list_referenceable_credentials_merges_scopes(self) -> None:
         user = get_user_model().objects.create_user(username='q-ref', password='x')
         commands.set_system_default('openai', 'sk-sys')
-        commands.upsert_user_named(user.pk, 'gmail-personal', 'gmail', 'tok')
-        refs = queries.list_referenceable_credentials(user.pk, type='gmail')
+        commands.upsert_user_named(user.pk, 'gmail-personal', 'google', 'tok')
+        refs = queries.list_referenceable_credentials(user.pk, type='google')
         self.assertEqual(len(refs), 1)
         self.assertEqual(refs[0].name, 'gmail-personal')
         all_refs = queries.list_referenceable_credentials(user.pk)

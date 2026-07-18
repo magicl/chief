@@ -1,0 +1,11 @@
+# Copy this file and replace every REPLACE-* placeholder. These values are not credentials.
+name: team-dropbox
+type: dropbox
+owner: your-username
+# Chief requires an externally provisioned offline refresh token; it does not run OAuth consent.
+value: |
+  {
+    "app_key": "REPLACE-WITH-DROPBOX-APP-KEY",
+    "app_secret": "REPLACE-WITH-DROPBOX-APP-SECRET",
+    "refresh_token": "REPLACE-WITH-DROPBOX-OFFLINE-REFRESH-TOKEN"
+  }

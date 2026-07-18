@@ -39,7 +39,7 @@ def _failure(exc: GmailError) -> dict[str, Any]:
 
 class GmailTool(Tool):
     name = 'gmail'
-    credential_type = 'gmail'
+    credential_type = 'google'
 
     def bind(
         self,

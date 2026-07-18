@@ -24,6 +24,7 @@ dependencies = [
   "django-celery-beat==2.8.1",
   "google-api-python-client==2.80.0",
   "google-auth==2.36.0",
+  "dropbox",
   "httpx==0.28.1",
   "ruamel.yaml==0.19.1",
 ]

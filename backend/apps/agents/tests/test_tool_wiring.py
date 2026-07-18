@@ -63,7 +63,7 @@ def _make_ctx(
 
 class _EchoCredTool(Tool):
     name = 'echo_cred'
-    credential_type = 'gmail'
+    credential_type = 'google'
 
     def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
         return [
@@ -154,14 +154,16 @@ class TestBuildBoundTools(OTestCase):
         ]
         fake_client = MagicMock()
         fake_client.list_messages.return_value = {'message_ids': ['m1'], 'next_page_token': None}
+        secret_factory = MagicMock(return_value=lambda: '{"sa": true}')
         ctx = _make_ctx(
             user_id=1,
-            secret_supplier_factory=lambda ref, typ: lambda: '{"sa": true}',
+            secret_supplier_factory=secret_factory,
             client_factories={'gmail': lambda **_kwargs: fake_client},
         )
         bound = build_bound_tools(instances, ctx=ctx)
         out = bound['gmail-personal'].invoke('list', {'query': 'in:inbox'})
         self.assertEqual(out['message_ids'], ['m1'])
+        secret_factory.assert_called_once_with('gmail-personal', 'google')
 
     def test_gmail_tool_uses_injected_client_factory(self) -> None:
         instances = [
@@ -208,6 +210,96 @@ class TestBuildBoundTools(OTestCase):
 
         self.assertEqual(out['message_ids'], ['m-env-only'])
         fake_client.list_messages.assert_called_once_with(query='in:inbox', max_results=100, page_token=None)
+
+    def test_google_drive_tool_wires_materialized_instance(self) -> None:
+        """Wire Drive with merged config, typed credentials, and instance identity."""
+        config = {
+            'subject': 'worker@example.com',
+            'roots': [{'id': 'my-drive', 'file_id': 'root-1'}],
+        }
+        instances = [
+            ToolInstance(
+                id='drive',
+                type='google_drive',
+                credential_ref='work-google',
+                allow=['list_roots'],
+                config=config,
+            ),
+        ]
+        resolved: list[tuple[str | None, str]] = []
+        supplier = lambda: '{"service_account": true}'
+
+        def resolve_supplier(ref: str | None, typ: str) -> Callable[[], str | None]:
+            """Record the typed credential lookup and return its supplier."""
+            resolved.append((ref, typ))
+            return supplier
+
+        secret_factory = MagicMock(side_effect=resolve_supplier)
+        fake_client = MagicMock()
+        fake_client.list_roots.return_value = {'items': [{'id': 'root-1'}], 'next_cursor': None}
+        client_factory = MagicMock(return_value=fake_client)
+        ctx = _make_ctx(
+            user_id=1,
+            secret_supplier_factory=secret_factory,
+            client_factories={'google_drive': client_factory},
+        )
+
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['drive'].invoke('list_roots', {})
+
+        self.assertEqual(out['items'], [{'id': 'root-1'}])
+        self.assertEqual(resolved, [('work-google', 'google')])
+        client_factory.assert_called_once()
+        factory_kwargs = client_factory.call_args.kwargs
+        self.assertEqual(set(factory_kwargs), {'token_supplier', 'config', 'instance_id'})
+        self.assertEqual(factory_kwargs['token_supplier'](), '{"service_account": true}')
+        self.assertEqual(factory_kwargs['config'], config)
+        self.assertEqual(factory_kwargs['instance_id'], 'drive')
+
+    def test_dropbox_tool_wires_materialized_instance(self) -> None:
+        """Wire Dropbox with merged config, typed credentials, and instance identity."""
+        config = {
+            'namespace_id': 'team-space',
+            'roots': [{'id': 'shared', 'path': '/Shared'}],
+        }
+        instances = [
+            ToolInstance(
+                id='files',
+                type='dropbox',
+                credential_ref='work-dropbox',
+                allow=['list_roots'],
+                config=config,
+            ),
+        ]
+        resolved: list[tuple[str | None, str]] = []
+        supplier = lambda: '{"refresh_token": true}'
+
+        def resolve_supplier(ref: str | None, typ: str) -> Callable[[], str | None]:
+            """Record the typed credential lookup and return its supplier."""
+            resolved.append((ref, typ))
+            return supplier
+
+        secret_factory = MagicMock(side_effect=resolve_supplier)
+        fake_client = MagicMock()
+        fake_client.list_roots.return_value = {'items': [{'id': 'root-1'}], 'next_cursor': None}
+        client_factory = MagicMock(return_value=fake_client)
+        ctx = _make_ctx(
+            user_id=1,
+            secret_supplier_factory=secret_factory,
+            client_factories={'dropbox': client_factory},
+        )
+
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['files'].invoke('list_roots', {})
+
+        self.assertEqual(out['items'], [{'id': 'root-1'}])
+        self.assertEqual(resolved, [('work-dropbox', 'dropbox')])
+        client_factory.assert_called_once()
+        factory_kwargs = client_factory.call_args.kwargs
+        self.assertEqual(set(factory_kwargs), {'token_supplier', 'config', 'instance_id'})
+        self.assertEqual(factory_kwargs['token_supplier'](), '{"refresh_token": true}')
+        self.assertEqual(factory_kwargs['config'], config)
+        self.assertEqual(factory_kwargs['instance_id'], 'files')
 
     def test_credential_tool_receives_instance_config(self) -> None:
         instances = [

@@ -15,7 +15,8 @@ SERVICE_TYPES: frozenset[str] = frozenset(
         'openai',
         'anthropic',
         'local_openai',
-        'gmail',
+        'google',
+        'dropbox',
         'clickup',
         'obsidian',
     }
@@ -23,7 +24,7 @@ SERVICE_TYPES: frozenset[str] = frozenset(
 
 LLM_SERVICE_TYPES: frozenset[str] = frozenset({'openai', 'anthropic', 'local_openai'})
 
-EXTERNAL_SERVICE_TYPES: frozenset[str] = frozenset({'gmail', 'clickup', 'obsidian'})
+EXTERNAL_SERVICE_TYPES: frozenset[str] = frozenset({'google', 'dropbox', 'clickup', 'obsidian'})
 
 LLM_ENV_FALLBACK: dict[str, str] = {
     'openai': 'OPENAI_API_KEY',
@@ -44,6 +45,8 @@ def is_registered_type(type_name: str) -> bool:
 
 def validate_type(type_name: str) -> str:
     """Validate and return ``type_name``, or raise ``KeyValidationError``."""
+    if type_name == 'gmail':
+        raise KeyValidationError("credential type 'gmail' was renamed to 'google'; update type: google")
     if not is_registered_type(type_name):
         raise KeyValidationError(f'unknown credential type: {type_name}')
     return type_name

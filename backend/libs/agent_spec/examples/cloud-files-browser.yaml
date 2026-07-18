@@ -1,0 +1,31 @@
+# title: Cloud files browser
+# description: Metadata-only navigation and search across explicitly approved Drive and Dropbox roots.
+schema_version: 4
+description: Browse approved cloud metadata without reading file content
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+system_prompt: |
+  Use only the configured cloud metadata tools. Never claim to have read file contents.
+integrations:
+  - id: work-google
+    type: google_drive
+    credential_ref: work-google
+    config:
+      subject: agent@example.com
+      roots:
+        - {id: my-drive, file_id: root, corpus: user}
+        - {id: company, file_id: shared-drive-root-id, drive_id: shared-drive-id}
+  - id: team-dropbox
+    type: dropbox
+    credential_ref: team-dropbox
+    config:
+      namespace_id: optional-team-namespace-id
+      roots:
+        - {id: projects, path: /Projects}
+tools:
+  - {id: drive, integration: work-google}
+  - {id: dropbox, integration: team-dropbox}
+triggers:
+  - name: manual
+    kind: manual

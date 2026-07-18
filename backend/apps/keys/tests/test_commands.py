@@ -52,7 +52,7 @@ class TestCredentialCommands(OTestCase):
     def test_upsert_named_rejects_reserved_prefix(self) -> None:
         user = get_user_model().objects.create_user(username='cmd-user2', password='x')
         with self.assertRaises(KeyValidationError):
-            commands.upsert_user_named(user.pk, 'default:evil', 'gmail', 'token')
+            commands.upsert_user_named(user.pk, 'default:evil', 'google', 'token')
 
     @patch('apps.bus.resources.publish_resource_update')
     def test_upsert_named_publishes_after_commit(self, publish: MagicMock) -> None:

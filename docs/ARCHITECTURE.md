@@ -321,7 +321,7 @@ user-resource hints.
 
 ## External integrations
 
-**Spec detail:** [Gmail](specs/2026-07-06-gmail-integration/2026-07-06-gmail-integration-design.md) · [ClickUp](specs/2026-07-06-clickup-integration/2026-07-06-clickup-integration-design.md)
+**Spec detail:** [Gmail](specs/2026-07-06-gmail-integration/2026-07-06-gmail-integration-design.md) · [ClickUp](specs/2026-07-06-clickup-integration/2026-07-06-clickup-integration-design.md) · [Cloud file metadata](specs/2026-07-18-cloud-file-integrations/2026-07-18-cloud-file-integrations-design.md)
 
 Each external service follows the same three-component anatomy:
 
@@ -330,6 +330,15 @@ Each external service follows the same three-component anatomy:
 | **Client** | `libs/clients/<service>/` | Low-level API wrapper; credentials injected at call time |
 | **Source adapter** | `libs/sources/adapters/` | Polls external items → enqueues queue payloads |
 | **Tool** | `libs/tools/tools/` | Agent-callable functions gated by `allow` / `deny` |
+
+Current integration components:
+
+| Integration | Client | Tool | Source adapter |
+|-------------|--------|------|----------------|
+| Gmail | `libs/clients/gmail/` | `libs/tools/tools/gmail.py` | `libs/sources/adapters/gmail.py` |
+| ClickUp | `libs/clients/clickup/` | `libs/tools/tools/clickup.py` | `libs/sources/adapters/clickup.py` |
+| Google Drive | `libs/clients/google_drive/` | `libs/tools/tools/google_drive.py` | None — interactive metadata tool only |
+| Dropbox | `libs/clients/dropbox/` | `libs/tools/tools/dropbox.py` | None — interactive metadata tool only |
 
 **`ToolInstance.config`** / **`SourceSpec.config`** hold non-secret addressing
 (mailbox, team id, query filters). Shared connection details can be declared once
@@ -349,12 +358,18 @@ known ids per source so adapters can skip expensive fetches. Set **`dedupe: fals
 derive `external_id` from a change token (Gmail `historyId`, ClickUp `date_updated`) so
 updates can re-enter the queue.
 
-**Gmail (service account + domain-wide delegation):** store the SA JSON as a
-`type=gmail` credential; set **`config.subject`** on an integration (or on both the
-tool and source) to select the impersonated mailbox. Operators must create a Google
-Cloud service account, enable the Gmail API, grant **domain-wide delegation** on that
-SA, and authorize the client scopes (`gmail.modify`, `gmail.send`) in the Google
-Workspace admin console for the SA's client id. Example:
+**Google service account and delegation:** `type=google` is the canonical credential
+type consumed by the Gmail tool, Gmail source adapter, and Google Drive tool. The
+integration, tool, and source identifier remains **`gmail`**; only its credential type
+changed. Store the shared complete service-account JSON as a `google` credential and set
+**`config.subject`** on an integration (or on both the Gmail tool and source) to select
+the impersonated mailbox. Enable the Gmail API and/or Drive API as needed.
+**Domain-wide delegation is required when Gmail is enabled** and whenever Drive
+impersonates a Google Workspace user. It is unnecessary only for non-delegated Drive
+access using the service-account identity. In Google Workspace Admin, authorize only the
+union of scopes required by enabled tools: Gmail scopes (`gmail.modify`, `gmail.send`)
+only when Gmail is enabled, and the Drive scope (`drive.metadata.readonly`) only when
+Drive is enabled. Example:
 [`backend/libs/agent_spec/examples/gmail-triage.yaml`](../backend/libs/agent_spec/examples/gmail-triage.yaml).
 
 **ClickUp (personal API token):** store the token as a `type=clickup` credential;
@@ -363,3 +378,19 @@ addressing. The `libs/clients/clickup` client wraps the REST API via **`httpx`**
 source adapter polls a configured **`list_id`** (with optional status filters) into the
 queue. Example:
 [`backend/libs/agent_spec/examples/clickup-inbox.yaml`](../backend/libs/agent_spec/examples/clickup-inbox.yaml).
+
+**Google Drive and Dropbox metadata tools:** both tools require a non-empty
+**`config.roots`** list of operator-approved aliases and expose only `list_roots`,
+`list_folder`, `get_metadata`, and `search`. They return metadata, never file content,
+and do not expose upload, mutation, sharing, download, preview, or export operations.
+Normalized **`web_url`** is nullable: Drive may return its metadata `webViewLink`;
+Dropbox always returns null because creating or retrieving a shared link is outside the
+approved metadata-only scope.
+
+Drive resolves every configured locator, including the special `file_id: root`, to its
+current canonical provider ID before ancestry authorization. Dropbox applies an optional
+`config.namespace_id` path root before resolving configured paths, then authorizes using
+provider-returned **`path_lower`** segments rather than Python lowercasing or raw string
+prefixes. Both clients recheck returned metadata against the selected root. These
+integrations intentionally have no source adapters or queue ingestion path. Example:
+[`backend/libs/agent_spec/examples/cloud-files-browser.yaml`](../backend/libs/agent_spec/examples/cloud-files-browser.yaml).

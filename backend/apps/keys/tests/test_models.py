@@ -44,13 +44,13 @@ class TestCredentialModels(OTransactionTestCase):
         UserCredential.objects.create(
             user=user,
             name='gmail-personal',
-            type='gmail',
+            type='google',
             encrypted_value=b'x',
         )
         with self.assertRaises(IntegrityError):
             UserCredential.objects.create(
                 user=user,
                 name='gmail-personal',
-                type='gmail',
+                type='google',
                 encrypted_value=b'y',
             )
