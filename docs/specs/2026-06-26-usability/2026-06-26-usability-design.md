@@ -1,5 +1,7 @@
 # Chief — Usability
 
+Status: **done**
+
 SPEC:
 
 - [x] **New agent → agent screen**: When clicking a new-agent button on the Chief page, go directly into that agent (no intermediate stop).

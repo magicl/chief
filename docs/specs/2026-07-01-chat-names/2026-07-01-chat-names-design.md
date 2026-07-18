@@ -1,6 +1,6 @@
 # Chief — Chat names (02)
 
-Status: **spec only** (no implementation yet)
+Status: **done**
 
 Companion to `../2026-06-23-design/2026-06-23-design-design.md`. When a user starts a new chat, the session
 currently shows an opaque id prefix (`a1b2c3d4`). This spec adds automatic

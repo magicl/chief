@@ -4,7 +4,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **1 
 
 **Branch:** `feat/2026-07-03-key-management`
 
-Status: **spec only**
+Status: **done**
 
 Architecture reference (secrets rules): [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) ·
 also linked from `AGENTS.local.md`.

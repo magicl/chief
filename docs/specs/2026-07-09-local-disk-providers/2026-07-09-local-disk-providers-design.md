@@ -4,7 +4,9 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **10
 
 **Branch:** `feat/2026-07-09-local-disk-providers`
 
-Status: **design revised** (post-impl revision — package layout + review fixes)
+Status: **done**
+
+Post-implementation revision: package layout and review fixes.
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) ·
 Credentials from [Key management (spec 1)](../2026-07-03-key-management/2026-07-03-key-management-design.md) ·

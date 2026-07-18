@@ -1,5 +1,7 @@
 # Chief — Design
 
+Status: **done**
+
 ## Overview
 
 Chief is an agent orchestrator. The primary goal is to allow multiple agents to be specified and sit and wait for things to be done, then do them.

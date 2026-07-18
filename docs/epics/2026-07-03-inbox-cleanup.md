@@ -1,6 +1,8 @@
 # Epic: Inbox cleanup (U1)
 
-Status: **in progress** · Roadmap: [U1](../ROADMAP.md)
+Status: **in progress**
+
+Roadmap: [U1](../ROADMAP.md)
 
 Minimize time spent shuffling email: untagged messages are triaged automatically
 (tag, route, or dismiss) with **one agent session per message** so context never
@@ -21,7 +23,7 @@ Methodology: [`writing-epics`](../../olib/ai/skills/writing-epics/SKILL.md) · E
 - [x] 7. ClickUp library and tool — [spec](../specs/2026-07-06-clickup-integration/)
 - ~~8. Obsidian library and tool~~ — **cancelled** (out of U1; no spec folder)
 - [ ] 9. Inbox triage agent
-- [ ] 10. Local disk providers (keys + agent configs) — [spec](../specs/2026-07-09-local-disk-providers/)
+- [x] 10. Local disk providers (keys + agent configs) — [spec](../specs/2026-07-09-local-disk-providers/)
 - [x] 11. Usecase tests and evals — [spec](../specs/2026-07-11-usecase-tests-evals/)
 
 Build order (implementation): **1 → 2 → 3 → 4 → 5 → 6 → 7 → 10 → 9 → 11** (spec 8 cancelled)

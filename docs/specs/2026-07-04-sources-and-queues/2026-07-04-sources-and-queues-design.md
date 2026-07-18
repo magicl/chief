@@ -4,7 +4,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **3 
 
 **Branch:** `feat/2026-07-04-sources-and-queues`
 
-Status: **spec only**
+Status: **done**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Agent config schema
 (spec 2) · Key management (spec 1).
