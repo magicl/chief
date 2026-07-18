@@ -59,7 +59,7 @@ def _build_service(raw_credential: str, subject: str) -> Any:
     try:
         info = json.loads(raw_credential)
     except (ValueError, TypeError) as exc:
-        raise GmailAuthError('gmail credential is not valid service-account JSON') from exc
+        raise GmailAuthError('Google service-account credential is not valid JSON') from exc
     try:
         creds = service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
             info, scopes=list(SCOPES)
@@ -91,7 +91,7 @@ class GmailClient:
             raise GmailAuthError('config.subject (mailbox to impersonate) is required')
         raw = self._token_supplier()
         if not raw:
-            raise GmailAuthError('no gmail credential resolved')
+            raise GmailAuthError('no Google service-account credential resolved')
         return self._service_factory(raw, subject)
 
     def _execute(self, request: Any) -> Any:

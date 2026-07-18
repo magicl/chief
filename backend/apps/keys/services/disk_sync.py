@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 from apps.bus.resources import publish_resource_update_after_commit
+from apps.keys.exceptions import KeyValidationError
 from apps.keys.models import CredentialSource, CredentialStatus, UserCredential
 from apps.keys.services.commands import upsert_user_named_from_disk
 from apps.keys.services.owner import resolve_owner
@@ -71,6 +72,9 @@ def sync_key_path(
         )
         if seen_identities is not None:
             seen_identities.add(identity)
+    except KeyValidationError as exc:
+        logger.error('Credential file validation failed for %s (%s)', source_path, type(exc).__name__)
+        return SyncItemResult(source_path=source_path, success=False, detail=str(exc))
     except (OSError, UnicodeError, yaml.YAMLError, ValueError, IntegrityError) as exc:
         # YAML parser messages can quote source lines, including credential values.
         logger.error('Credential file sync failed for %s (%s)', source_path, type(exc).__name__)

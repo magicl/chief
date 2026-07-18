@@ -68,6 +68,10 @@ class TestGmailSourceAdapter(OTestCase):
         with self.assertRaises(ValueError):
             self.adapter.validate_config({'subject': 'me@example.com'})
 
+    def test_uses_shared_google_credential_type(self) -> None:
+        self.assertEqual(self.adapter.credential_type, 'google')
+        self.assertEqual(self.adapter.adapter_type, 'gmail')
+
     def test_poll_enqueues_envelope_with_ref(self) -> None:
         seen: list[tuple[dict[str, Any], str]] = []
 

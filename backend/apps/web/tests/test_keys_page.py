@@ -45,33 +45,34 @@ class TestKeysPage(OTransactionTestCase):
         self.assertIn(b'Choose a type above', response.content)
         self.assertIn(b'credential-guides-data', response.content)
 
-    def test_shows_gmail_setup_instructions_in_page_data(self) -> None:
+    def test_shows_google_setup_instructions_in_page_data(self) -> None:
         self.client.force_login(self.user)
         response = self.client.get(reverse('settings_keys'))
         self.assertIn(b'domain-wide delegation', response.content)
         self.assertIn(b'gmail.modify', response.content)
+        self.assertIn(b'drive.metadata.readonly', response.content)
 
     def test_post_add_named(self) -> None:
         self.client.force_login(self.user)
         response = self.client.post(
             reverse('settings_keys_add_named'),
-            {'name': 'gmail-personal', 'type': 'gmail', 'secret': 'tok'},
+            {'name': 'gmail-personal', 'type': 'google', 'secret': 'tok'},
         )
         self.assertEqual(response.status_code, 302)
         response = self.client.get(reverse('settings_keys'))
         self.assertIn(b'gmail-personal', response.content)
 
-    def test_post_add_multiline_gmail_json(self) -> None:
+    def test_post_add_multiline_google_json(self) -> None:
         self.client.force_login(self.user)
         secret = '{\n  "type": "service_account",\n  "client_email": "sa@example.com"\n}\n'
         response = self.client.post(
             reverse('settings_keys_add_named'),
-            {'name': 'gmail-sa', 'type': 'gmail', 'secret': secret},
+            {'name': 'google-sa', 'type': 'google', 'secret': secret},
         )
         self.assertEqual(response.status_code, 302)
         from apps.keys.services.queries import resolve_secret
 
-        stored = resolve_secret(self.user.pk, 'gmail-sa', expected_type='gmail')
+        stored = resolve_secret(self.user.pk, 'google-sa', expected_type='google')
         self.assertIn('\n', stored)
         self.assertIn('service_account', stored)
 

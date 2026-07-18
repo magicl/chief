@@ -71,6 +71,10 @@ class TestGmailTool(OTestCase):
         self.assertFalse(fns['archive'].readonly)
         self.assertFalse(fns['send'].readonly)
 
+    def test_uses_shared_google_credential_type(self) -> None:
+        self.assertEqual(GmailTool.credential_type, 'google')
+        self.assertEqual(GmailTool.name, 'gmail')
+
     def test_list_maps_to_client(self) -> None:
         fake = _FakeGmailClient()
         invoke = self._bound(fake)

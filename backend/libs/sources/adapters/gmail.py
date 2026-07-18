@@ -84,7 +84,7 @@ def _inline_body(message: dict[str, Any], *, include_body: bool) -> str | None:
 
 class GmailSourceAdapter(SourceAdapter):
     adapter_type = 'gmail'
-    credential_type = 'gmail'
+    credential_type = 'google'
 
     def validate_config(self, config: dict[str, Any]) -> None:
         """Require non-empty ``subject`` and ``query``; validate optional fields."""

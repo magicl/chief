@@ -23,7 +23,11 @@ class CredentialGuide:
     input_placeholder: str
 
 
-_GMAIL_SCOPES = 'https://www.googleapis.com/auth/gmail.modify,https://www.googleapis.com/auth/gmail.send'
+_GOOGLE_SCOPES = (
+    'https://www.googleapis.com/auth/gmail.modify,'
+    'https://www.googleapis.com/auth/gmail.send,'
+    'https://www.googleapis.com/auth/drive.metadata.readonly'
+)
 
 _GUIDES: dict[str, CredentialGuide] = {
     'openai': CredentialGuide(
@@ -58,19 +62,33 @@ _GUIDES: dict[str, CredentialGuide] = {
         input_label='API key',
         input_placeholder='local-openai-key',
     ),
-    'gmail': CredentialGuide(
-        label='Gmail (service account)',
+    'google': CredentialGuide(
+        label='Google (service account)',
         find_steps=(
-            'In Google Cloud Console, create a service account and enable the Gmail API.',
+            'In Google Cloud Console, create a service account and enable the Gmail API and/or Google Drive API '
+            'as needed for the enabled tools.',
             'Create a JSON key for that service account and download it.',
-            'Enable domain-wide delegation on the service account; note the numeric Client ID.',
-            'In Google Workspace Admin → Security → API controls → Domain-wide delegation, '
-            'authorize that Client ID with the scopes listed below.',
-            'Paste the full JSON key below (not just the private key).',
+            'Domain-wide delegation is required when Gmail is enabled and whenever Drive impersonates a Google '
+            'Workspace user. It is unnecessary only for non-delegated Drive access using the service-account identity.',
+            'For domain-wide delegation, use Google Workspace Admin → Security → API controls to authorize '
+            'only the union of scopes required by the enabled tools: Gmail scopes only when Gmail is enabled, '
+            'and the Drive scope only when Drive is enabled.',
+            'Paste the full JSON service-account key below (not just the private key).',
         ),
-        scopes=_GMAIL_SCOPES,
+        scopes=_GOOGLE_SCOPES,
         input_label='Service account JSON',
         input_placeholder='{"type": "service_account", "project_id": "…", …}',
+    ),
+    'dropbox': CredentialGuide(
+        label='Dropbox',
+        find_steps=(
+            'Create a Dropbox API app and grant the files.metadata.read scope.',
+            'Provision an offline refresh token externally; Chief does not run the OAuth consent flow.',
+            'Paste JSON containing the app key, app secret, and refresh token below.',
+        ),
+        scopes='files.metadata.read',
+        input_label='Dropbox app credential JSON',
+        input_placeholder='{"app_key": "…", "app_secret": "…", "refresh_token": "…"}',
     ),
     'clickup': CredentialGuide(
         label='ClickUp',
