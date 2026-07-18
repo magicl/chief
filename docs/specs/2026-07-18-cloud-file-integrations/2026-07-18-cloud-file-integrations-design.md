@@ -1,7 +1,7 @@
 # Dropbox and Google Drive metadata integrations — Design
 
 **Branch:** `feat/2026-07-18-cloud-file-integrations`
-Status: **implementing**
+Status: **review**
 
 **ClickUp:** https://app.clickup.com/t/868kduv64
 **ClickUp branch field:** `feat/2026-07-18-cloud-file-integrations`
