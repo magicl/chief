@@ -4,7 +4,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **2 
 
 **Branch:** `feat/2026-07-03-agent-config-schema`
 
-Status: **spec only**
+Status: **done**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Credential rules from
 [Key management](../2026-07-03-key-management/2026-07-03-key-management-design.md).

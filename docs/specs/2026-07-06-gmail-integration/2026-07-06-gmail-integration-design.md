@@ -4,7 +4,7 @@ Epic: [Inbox cleanup (U1)](../../epics/2026-07-03-inbox-cleanup.md) · Spec **6 
 
 **Branch:** `feat/2026-07-06-service-integrations`
 
-Status: **spec only**
+Status: **done**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Credentials from
 [Key management (spec 1)](../2026-07-03-key-management/2026-07-03-key-management-design.md) ·

@@ -1,7 +1,7 @@
 # Docker Compose local directory convention
 
 **Branch:** `feat/2026-07-18-compose-local-dir`
-Status: **review**
+Status: **done**
 
 ## Goal
 
