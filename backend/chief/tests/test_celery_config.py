@@ -18,3 +18,11 @@ class TestCeleryBeatScheduler(OTestCase):
             app.conf.beat_scheduler,
             'django_celery_beat.schedulers:DatabaseScheduler',
         )
+
+    def test_local_sync_schedule_runs_exact_task_every_five_seconds(self) -> None:
+        """Configure one exact finite local-provider task on the Beat cadence."""
+        schedule = app.conf.beat_schedule['local-sync-reconcile']
+
+        self.assertEqual(schedule['task'], 'apps.local_sync.tasks.reconcile_local_providers')
+        self.assertEqual(schedule['schedule'], 5.0)
+        self.assertEqual(schedule['options'], {'expires': 5.0})

@@ -23,25 +23,31 @@ backend/
 | `apps.queues` | Agent-scoped queues, sources, items, poll/release tasks |
 | `apps.sessions` | Sessions, event log, session services/tasks |
 | `apps.runner` | Celery step loop, LLM + tool invocation |
-| `apps.bus` | Redis pub/sub + mailbox |
+| `apps.bus` | Foundational Redis pub/sub, resource publishers, leases, and mailbox |
 | `apps.keys` | Encrypted credentials (system + user) |
+| `apps.local_sync` | Finite cross-domain local-provider reconciliation |
 | `apps.web` | Dashboard, SSE, control endpoints |
 
 ### App dependencies (import direction)
 
 | App | May import from |
 |-----|-----------------|
-| `apps.agents` | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), **`queues`** (materialize only) |
+| `apps.agents` | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), foundational `bus` publishers, **`queues`** (materialize only) |
 | `apps.queues` | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only) |
 | `apps.sessions` | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
-| `apps.bus` | Django/stdlib only |
+| `apps.bus` | Django/stdlib only; domain-free |
 | `apps.runner` | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
-| `apps.keys` | Django/stdlib, `cryptography` only |
-| `apps.web` | all of the above (keys: metadata + commands only) |
+| `apps.keys` | Django/stdlib, `cryptography`, foundational `bus` publishers |
+| `apps.local_sync` | `agents`, `keys`, `bus`, `libs.file` |
+| `apps.web` | Domain apps and foundational `bus` (keys: metadata + commands only); not `local_sync` |
 
-Direction: `agents → sessions → runner → web`, with `bus` and `keys` as leaves (`keys`
-has no app imports; `web` must not import `resolve_*` from keys). **`apps.agents`**
-imports **`apps.queues`** only for config materialization (`sync_from_spec`).
+Import edges point from the importer toward its dependencies. `bus` stays foundational
+and domain-free: it imports no domain app, while `agents` and `keys` may import its
+publisher helpers. `keys` imports only `bus` among apps. **`apps.agents`** imports
+**`apps.queues`** only for config materialization (`sync_from_spec`). `local_sync` is
+an outer, cross-domain reconciler that may import `agents`, `keys`, `bus`, and
+`libs.file`; no domain app imports `local_sync`. `web` remains the outer HTTP
+transport and must not import `resolve_*` from keys.
 
 ---
 
@@ -112,6 +118,23 @@ Session-scoped Redis pub/sub carries an envelope:
 Commands call `publish_session_update` after DB writes. The session detail page
 listens on the existing SSE connection and patches Alpine state.
 
+List resources use a separate user-scoped Redis channel:
+**`{CACHE_PREFIX}user:{user_id}:resources`**. Agent and key commands publish the
+canonical, secret-free envelope
+`{"channel": "resource_update", "resource": "agents"|"keys"}` with
+`transaction.on_commit`. These messages are best-effort refetch hints only: Postgres
+is authoritative, and no model data or credential material belongs in the envelope.
+
+Authenticated pages connect to **`/events/`**, whose SSE stream derives the user id
+from the session and subscribes only to that user's channel. The shared page script
+keeps at most one `EventSource`, closes it on `pagehide`, and reopens it on a
+BFCache-restored `pageshow`. A validated `resource_update` triggers
+`chief:agents-changed` or `chief:keys-changed`; htmx then refetches
+`/partials/agents/` or `/partials/keys/` and swaps the relevant list contents.
+Redis pub/sub is not replayed, so clients must tolerate lost or coalesced hints:
+each partial refetch reads current Postgres state, and a later hint or navigation
+converges the page.
+
 **Rules:**
 
 - Do not import `runner` or `web` from `agents` or `sessions`.
@@ -138,7 +161,8 @@ listens on the existing SSE connection and patches Alpine state.
 Libs stay Django-free. When a lib needs credentials, the **app boundary injects**
 callables (`token_supplier`, `secret_supplier`) — libs do not import `apps.keys`.
 Disk parsers in `providers/key` and `providers/data` depend on `libs/file`; Django
-apps own user lookup, ORM ingest, and boot/watch orchestration.
+apps own user lookup and ORM ingest, while `apps.local_sync` owns finite
+local-provider reconciliation.
 
 `libs/agent_spec` holds the **config language** only (types, validation, dict
 upgrades). It does not touch the database or call other apps. Today this package
@@ -167,10 +191,15 @@ Docker Compose fixes this layout at the repository's `.local/` directory: it rea
 `/mnt/local` in the backend, worker, and beat containers. `CHIEF_LOCAL_DIR`
 remains the generic application setting for non-Compose environments.
 
-When `CHIEF_LOCAL_DIR` is configured, the web process performs a best-effort boot
-sync (keys first, then agents) and starts the local watcher. Boot sync failures are
-logged without aborting startup, and ORM sync is skipped for migration/static
-management commands. Celery workers watch only when `CHIEF_LOCAL_WATCH=true`.
+Celery Beat enqueues one finite reconciliation task every five seconds; stale Beat
+deliveries expire after five seconds. A token-owned Redis lease prevents overlapping
+runs. During a run, synchronous progress checkpoints atomically renew the lease and
+verify ownership; a failed ownership check raises immediately and the task boundary
+logs the run failure.
+Each scan reconciles keys before agents because agent materialization may resolve
+credentials. Unset `CHIEF_LOCAL_DIR` and a configured but missing root are no-ops.
+Postgres remains runtime truth; web and runtime consumers never read provider files
+directly. `AppConfig.ready()` performs no local-provider filesystem or ORM work.
 
 ### Schema evolution
 
@@ -284,7 +313,9 @@ Architectural rules (all features must follow):
 
 **Import boundary:** `apps.web` uses metadata queries + commands only (no `resolve_*`).
 `apps.runner`, `apps.agents`, and tasks use `resolve_*` / `make_secret_supplier`.
-`apps.keys` is a leaf (Django, stdlib, `cryptography` only).
+`apps.keys` remains a domain leaf with no domain app imports; besides Django, stdlib,
+and `cryptography`, it may import foundational `apps.bus` publishers for committed
+user-resource hints.
 
 ---
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from apps.agents.materialize import materialize_agent_config
 from apps.agents.models import Agent, AgentConfig
+from apps.bus.resources import publish_resource_update_after_commit
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 
@@ -66,7 +67,7 @@ def persist_agent_config(
     dirty: bool = False,
     raw_yaml: str | None = None,
 ) -> AgentConfig:
-    """Validate spec and persist ``AgentConfig`` plus derived trigger rows."""
+    """Persist and materialize a revision, then notify after commit."""
     validate_spec_tools(spec)
     if spec.schema_version != AGENT_CONFIG_SPEC_VERSION:
         raise IngestError('spec schema_version mismatch')
@@ -86,6 +87,7 @@ def persist_agent_config(
 
     agent.current_config = config
     agent.save(update_fields=['current_config'])
+    publish_resource_update_after_commit(agent.user_id, 'agents')
     return config
 
 

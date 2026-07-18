@@ -78,6 +78,48 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% if user.is_authenticated %}
+  <script>
+    let resourceEvents = null;
+    // Open at most one resource stream and attach its validated htmx bridge.
+    const openResourceEvents = () => {
+      if (resourceEvents !== null) {
+        return;
+      }
+      resourceEvents = new EventSource("{{ url('resource_events_sse') }}");
+      resourceEvents.addEventListener('resource_update', (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const eventName = {
+            agents: 'chief:agents-changed',
+            keys: 'chief:keys-changed',
+          }[message.resource];
+          if (message.channel === 'resource_update' && eventName) {
+            htmx.trigger(document.body, eventName);
+          }
+        } catch {
+          // Invalid hints are non-authoritative and contain nothing safe to log.
+        }
+      });
+    };
+    // Close the current source and clear the guard for a possible BFCache restore.
+    const closeResourceEvents = () => {
+      if (resourceEvents === null) {
+        return;
+      }
+      resourceEvents.close();
+      resourceEvents = null;
+    };
+    openResourceEvents();
+    window.addEventListener('pagehide', closeResourceEvents);
+    // Scripts do not rerun after BFCache restoration, so reopen only persisted pages.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        openResourceEvents();
+      }
+    });
+  </script>
+  {% endif %}
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

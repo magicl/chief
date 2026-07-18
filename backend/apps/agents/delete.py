@@ -9,6 +9,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from apps.agents.models import Agent
+from apps.bus.resources import publish_resource_update_after_commit
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 
@@ -19,9 +20,11 @@ class AgentNotFoundError(LookupError):
 
 @transaction.atomic
 def delete_agent_for_user(user: AbstractBaseUser, agent_id: UUID) -> None:
-    """Delete an agent and all related rows (sessions cascade from the agent)."""
+    """Delete an owned agent and notify that owner after commit."""
     try:
         agent = Agent.objects.get(pk=agent_id, user_id=user.pk)
     except Agent.DoesNotExist as exc:
         raise AgentNotFoundError(str(agent_id)) from exc
+    owner_id = agent.user_id
     agent.delete()
+    publish_resource_update_after_commit(owner_id, 'agents')

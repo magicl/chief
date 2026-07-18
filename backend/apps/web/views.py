@@ -122,6 +122,18 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url='/admin/login/')
 @require_GET
+def dashboard_agents_partial(request: HttpRequest) -> HttpResponse:
+    """Render the authenticated user's current agent-list fragment."""
+    data = get_dashboard_data(user_id=_require_authenticated_user_id(request))
+    return render(
+        request,
+        'web/partials/agent_list.html',
+        {'agents': data.agents, 'examples': data.examples},
+    )
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
 def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Agent overview with session list and chat input."""
     data = get_agent_detail_data(_require_authenticated_user_id(request), agent_id)
@@ -335,6 +347,14 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
             .replace('&', '\\u0026'),
         },
     )
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def settings_keys_partial(request: HttpRequest) -> HttpResponse:
+    """Render credential metadata for the authenticated user's key-list fragment."""
+    named_keys = list_user_credentials(_require_authenticated_user_id(request))
+    return render(request, 'web/partials/key_list.html', {'named_keys': named_keys})
 
 
 @login_required(login_url='/admin/login/')

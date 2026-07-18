@@ -4,6 +4,7 @@
 # ~
 """Verify Docker Compose local-provider configuration conventions."""
 
+import re
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -15,7 +16,7 @@ class TestComposeLocalProviderConfig(OTestCase):
     """Check that Compose uses one fixed local-provider directory."""
 
     def test_compose_uses_fixed_local_provider_directory(self) -> None:
-        """All consumers mount .local and hide mount paths from user settings."""
+        """All consumers mount .local without user-configurable assignment lines."""
         repository_root = Path(__file__).resolve().parents[3]
         compose_path = repository_root / 'infra/docker/docker-compose.yml'
         compose_source = compose_path.read_text()
@@ -49,4 +50,6 @@ class TestComposeLocalProviderConfig(OTestCase):
             'CHIEF_AGENTS_DIR',
             'CHIEF_KEYS_DIR',
         ):
-            self.assertNotIn(setting_name, env_example)
+            self.assertIsNone(
+                re.search(rf'^\s*{re.escape(setting_name)}\s*=', env_example, flags=re.MULTILINE),
+            )

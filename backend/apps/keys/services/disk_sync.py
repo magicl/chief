@@ -7,46 +7,20 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from apps.bus.resources import publish_resource_update_after_commit
 from apps.keys.models import CredentialSource, CredentialStatus, UserCredential
 from apps.keys.services.commands import upsert_user_named_from_disk
 from apps.keys.services.owner import resolve_owner
 from apps.keys.types import validate_type
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+from libs.file.sync import SyncItemResult, SyncProgressCallback, SyncReport
 from libs.providers.key.disk_parse import parse_key_file
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class SyncItemResult:
-    """Describe whether one local file synchronized successfully."""
-
-    source_path: str
-    success: bool
-    detail: str = ''
-
-
-@dataclass
-class SyncReport:
-    """Collect per-file synchronization outcomes and soft-disable count."""
-
-    items: list[SyncItemResult] = field(default_factory=list)
-    disabled: int = 0
-
-    @property
-    def succeeded(self) -> int:
-        """Return the number of successfully synchronized files."""
-        return sum(item.success for item in self.items)
-
-    @property
-    def failed(self) -> int:
-        """Return the number of files that could not be synchronized."""
-        return sum(not item.success for item in self.items)
 
 
 def _configured_root() -> Path | None:
@@ -87,7 +61,7 @@ def sync_key_path(
                 parsed.name,
             )
             return SyncItemResult(source_path=source_path, success=False, detail='duplicate identity')
-        upsert_user_named_from_disk(
+        _, changed = upsert_user_named_from_disk(
             owner.pk,
             parsed.name,
             type_name,
@@ -101,20 +75,34 @@ def sync_key_path(
         # YAML parser messages can quote source lines, including credential values.
         logger.error('Credential file sync failed for %s (%s)', source_path, type(exc).__name__)
         return SyncItemResult(source_path=source_path, success=False, detail=type(exc).__name__)
-    return SyncItemResult(source_path=source_path, success=True)
+    return SyncItemResult(source_path=source_path, success=True, user_id=owner.pk, changed=changed)
 
 
-def soft_disable_missing_disk_keys(*, present_paths: set[str]) -> int:
-    """Disable active disk credentials whose bound files are no longer present."""
+@transaction.atomic
+def soft_disable_missing_disk_keys(*, present_paths: set[str]) -> tuple[int, set[int]]:
+    """Disable absent disk keys and return row count plus distinct owners."""
     missing = UserCredential.objects.filter(
         source=CredentialSource.DISK,
         status=CredentialStatus.ACTIVE,
     ).exclude(source_path__in=present_paths)
-    return missing.update(status=CredentialStatus.DISABLED)
+    missing_rows = list(missing.select_for_update().values_list('pk', 'user_id'))
+    if not missing_rows:
+        return 0, set()
+
+    missing_pks = [pk for pk, _ in missing_rows]
+    user_ids = {user_id for _, user_id in missing_rows}
+    UserCredential.objects.filter(pk__in=missing_pks).update(status=CredentialStatus.DISABLED)
+    for user_id in sorted(user_ids):
+        publish_resource_update_after_commit(user_id, 'keys')
+    return len(missing_rows), user_ids
 
 
-def sync_keys_dir(*, root: Path | None = None) -> SyncReport:
-    """Synchronize all key YAML files under a local root or configured root."""
+def sync_keys_dir(
+    *,
+    root: Path | None = None,
+    progress: SyncProgressCallback | None = None,
+) -> SyncReport:
+    """Synchronize key files with optional generic progress checkpoints."""
     resolved_root = root if root is not None else _configured_root()
     if resolved_root is None or not resolved_root.is_dir():
         return SyncReport()
@@ -127,8 +115,16 @@ def sync_keys_dir(*, root: Path | None = None) -> SyncReport:
 
     present_paths = {_relative_path(path, resolved_root) for path in paths}
     seen_identities: set[tuple[int, str]] = set()
-    report = SyncReport(
-        items=[sync_key_path(path, root=resolved_root, seen_identities=seen_identities) for path in sorted(paths)],
-    )
-    report.disabled = soft_disable_missing_disk_keys(present_paths=present_paths)
+    report = SyncReport()
+    for path in sorted(paths):
+        if progress is not None:
+            progress()
+        report.items.append(sync_key_path(path, root=resolved_root, seen_identities=seen_identities))
+        if progress is not None:
+            progress()
+    if progress is not None:
+        progress()
+    disabled_count, disabled_user_ids = soft_disable_missing_disk_keys(present_paths=present_paths)
+    report.disabled = disabled_count
+    report.disabled_user_ids = disabled_user_ids
     return report

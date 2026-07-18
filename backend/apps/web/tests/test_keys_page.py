@@ -3,6 +3,7 @@
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
 import logging
+from unittest.mock import patch
 
 from apps.keys.services import commands
 from django.contrib.auth import get_user_model
@@ -15,6 +16,11 @@ from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
 class TestKeysPage(OTransactionTestCase):
     def setUp(self) -> None:
+        """Create a client and suppress resource transport outside event tests."""
+        super().setUp()
+        publisher = patch('apps.bus.resources.publish_resource_update')
+        publisher.start()
+        self.addCleanup(publisher.stop)
         self.client = Client()
         User = get_user_model()
         self.user = User.objects.create_user(username='keys-user', password='test')
@@ -79,7 +85,7 @@ class TestKeysPage(OTransactionTestCase):
 
     def test_disk_key_shows_source_without_delete_control(self) -> None:
         self.client.force_login(self.user)
-        commands.upsert_user_named_from_disk(
+        _, changed = commands.upsert_user_named_from_disk(
             self.user.pk,
             'disk-openai',
             'openai',
@@ -87,6 +93,7 @@ class TestKeysPage(OTransactionTestCase):
             source_path='keys/disk-openai.yaml',
             source_rev='sha256:disk',
         )
+        self.assertTrue(changed)
 
         response = self.client.get(reverse('settings_keys'))
 
@@ -100,7 +107,7 @@ class TestKeysPage(OTransactionTestCase):
     def test_disabled_disk_key_shows_disabled_status(self) -> None:
         """Render disabled metadata instead of treating encrypted content as set."""
         self.client.force_login(self.user)
-        commands.upsert_user_named_from_disk(
+        _, changed = commands.upsert_user_named_from_disk(
             self.user.pk,
             'disk-openai',
             'openai',
@@ -108,6 +115,7 @@ class TestKeysPage(OTransactionTestCase):
             source_path='keys/disk-openai.yaml',
             source_rev='sha256:disk',
         )
+        self.assertTrue(changed)
         self.user.credentials.filter(name='disk-openai').update(status='disabled')
 
         response = self.client.get(reverse('settings_keys'))
@@ -117,7 +125,7 @@ class TestKeysPage(OTransactionTestCase):
     @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /settings/keys/named/', count=1)])
     def test_post_add_cannot_replace_disk_key(self) -> None:
         self.client.force_login(self.user)
-        commands.upsert_user_named_from_disk(
+        _, changed = commands.upsert_user_named_from_disk(
             self.user.pk,
             'disk-openai',
             'openai',
@@ -125,6 +133,7 @@ class TestKeysPage(OTransactionTestCase):
             source_path='keys/disk-openai.yaml',
             source_rev='sha256:disk',
         )
+        self.assertTrue(changed)
 
         response = self.client.post(
             reverse('settings_keys_add_named'),
@@ -149,7 +158,7 @@ class TestKeysPage(OTransactionTestCase):
     )
     def test_post_delete_cannot_remove_disk_key(self) -> None:
         self.client.force_login(self.user)
-        commands.upsert_user_named_from_disk(
+        _, changed = commands.upsert_user_named_from_disk(
             self.user.pk,
             'disk-openai',
             'openai',
@@ -157,6 +166,7 @@ class TestKeysPage(OTransactionTestCase):
             source_path='keys/disk-openai.yaml',
             source_rev='sha256:disk',
         )
+        self.assertTrue(changed)
 
         response = self.client.post(
             reverse('settings_keys_delete_named', kwargs={'name': 'disk-openai'}),

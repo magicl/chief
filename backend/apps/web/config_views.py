@@ -11,12 +11,11 @@ from dataclasses import asdict
 from typing import Any, cast
 from uuid import UUID
 
-from apps.agents.ingest import persist_agent_config
 from apps.agents.models import Agent, AgentConfig, AgentConfigSource
 from apps.agents.services.config_commands import (
     ConfigCommandError,
     create_from_yaml,
-    update_agent_profile,
+    save_agent_profile_and_config,
 )
 from apps.agents.services.config_mutations import (
     ConfigMutationError,
@@ -194,11 +193,15 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     new_name = request.POST.get('name', '').strip()
     new_identifier = request.POST.get('identifier', '').strip()
     try:
-        update_agent_profile(
+        save_agent_profile_and_config(
             agent,
             cast(AbstractBaseUser, request.user).pk,
+            spec,
             name=new_name,
             identifier=new_identifier,
+            source_rev=source_rev,
+            dirty=dirty,
+            raw_yaml=spec_yaml,
         )
     except ConfigCommandError as exc:
         path = 'identifier' if 'identifier' in str(exc) or 'already exists' in str(exc) else 'name'
@@ -206,7 +209,6 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
             {'errors': [{'path': path, 'message': str(exc)}]},
             status=400,
         )
-    persist_agent_config(agent, spec, source_rev=source_rev, dirty=dirty, raw_yaml=spec_yaml)
     if request.headers.get('Accept', '').find('application/json') >= 0:
         return JsonResponse({'ok': True, 'source_rev': source_rev, 'dirty': dirty})
     return redirect('agent_config', agent_id=agent.id)

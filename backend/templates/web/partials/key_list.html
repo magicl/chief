@@ -1,0 +1,28 @@
+<table>
+  <thead>
+    <tr><th>Name</th><th>Type</th><th>Source</th><th>Status</th><th>Updated</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for key in named_keys %}
+    <tr>
+      <td><code>{{ key.name }}</code></td>
+      <td>{{ key.type }}</td>
+      <td>
+        {% if key.source == 'disk' %}<span class="pill monitor">Disk</span>{% else %}<span class="pill routine">UI</span>{% endif %}
+      </td>
+      <td>{% if key.status == 'disabled' %}<span class="pill waiting">Disabled</span>{% elif key.is_set %}<span class="pill succeeded">Set</span>{% else %}<span class="pill waiting">Not set</span>{% endif %}</td>
+      <td class="muted">{% if key.updated_at %}{{ key.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+      <td>
+        {% if key.source != 'disk' %}
+        <form method="post" action="{{ url('settings_keys_delete_named', kwargs={'name': key.name}) }}">
+          <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+          <button type="submit" style="padding:.3rem .6rem;">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty">No named keys yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

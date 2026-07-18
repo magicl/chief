@@ -22,6 +22,13 @@ from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
 
 class TestCredentialQueries(OTransactionTestCase):
+    def setUp(self) -> None:
+        """Suppress resource transport while testing credential query behavior."""
+        super().setUp()
+        publisher = patch('apps.bus.resources.publish_resource_update')
+        publisher.start()
+        self.addCleanup(publisher.stop)
+
     def test_resolve_default_falls_back_to_system_then_env(self) -> None:
         user = get_user_model().objects.create_user(username='q-user2', password='x')
         commands.set_system_default('openai', 'sk-system')

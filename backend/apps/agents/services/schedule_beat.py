@@ -13,6 +13,7 @@ from uuid import UUID
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from django_celery_beat.models import CrontabSchedule, PeriodicTask
 from libs.agent_spec.cron import parse_cron_fields
+from libs.file.sync import SyncProgressCallback
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +100,12 @@ def sync_schedule_trigger(trigger_id: UUID) -> None:
         disable_schedule_trigger_beat(trigger.id)
 
 
-def sync_agent_schedule_triggers(agent_id: UUID) -> None:
-    """Rebuild or disable beat tasks for all schedule triggers owned by an agent."""
+def sync_agent_schedule_triggers(
+    agent_id: UUID,
+    *,
+    progress: SyncProgressCallback | None = None,
+) -> None:
+    """Rebuild one agent's Beat tasks with optional trigger checkpoints."""
     try:
         agent = Agent.objects.get(pk=agent_id)
     except Agent.DoesNotExist:
@@ -115,7 +120,11 @@ def sync_agent_schedule_triggers(agent_id: UUID) -> None:
         .values_list('id', flat=True)
     )
     for trigger_id in stale_ids:
+        if progress is not None:
+            progress()
         disable_schedule_trigger_beat(trigger_id)
+        if progress is not None:
+            progress()
 
     if agent.current_config_id is None:
         return
@@ -125,10 +134,14 @@ def sync_agent_schedule_triggers(agent_id: UUID) -> None:
         agent_config_id=agent.current_config_id,
         kind=TriggerKind.SCHEDULE,
     ):
+        if progress is not None:
+            progress()
         if agent.status == AgentStatus.ACTIVE and trigger.status == TriggerStatus.ACTIVE:
             upsert_schedule_trigger_beat(trigger)
         else:
             disable_schedule_trigger_beat(trigger.id)
+        if progress is not None:
+            progress()
 
 
 def sync_all_schedule_triggers() -> None:
