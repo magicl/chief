@@ -45,4 +45,4 @@ existing retry, watcher, and management-command behavior.
 
 ## Links
 
-- PR: Pending.
+- PR: https://github.com/magicl/chief/pull/11
