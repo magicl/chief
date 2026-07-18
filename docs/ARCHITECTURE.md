@@ -162,6 +162,11 @@ source of truth, and disk-sourced items are read-only in the UI; update their YA
 files instead. Both globs are **non-recursive** in v1: nested directories under
 `keys/` and `agents/` are not scanned.
 
+Docker Compose fixes this layout at the repository's `.local/` directory: it reads
+`.local/keys/*.yaml` and `.local/agents/*.yaml`, mounting `.local/` at
+`/mnt/local` in the backend, worker, and beat containers. `CHIEF_LOCAL_DIR`
+remains the generic application setting for non-Compose environments.
+
 When `CHIEF_LOCAL_DIR` is configured, the web process performs a best-effort boot
 sync (keys first, then agents) and starts the local watcher. Boot sync failures are
 logged without aborting startup, and ORM sync is skipped for migration/static

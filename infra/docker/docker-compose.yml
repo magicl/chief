@@ -76,11 +76,12 @@ services:
       - ../../.output/env.compose.backend
       - path: ../../.env.local
         required: false
+    environment:
+      CHIEF_LOCAL_DIR: /mnt/local
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
-      - ../../.local/agents:${CHIEF_AGENTS_DIR:-/mnt/local/agents}
-      - ../../.local/keys:${CHIEF_KEYS_DIR:-/mnt/local/keys}
+      - ../../.local:/mnt/local
     depends_on:
       chief-postgres:
         condition: service_healthy
@@ -111,7 +112,8 @@ services:
         - path: ../../backend/Dockerfile.dev
           action: rebuild
     environment:
-      - ENTRYPOINT=celery-worker
+      ENTRYPOINT: celery-worker
+      CHIEF_LOCAL_DIR: /mnt/local
     env_file:
       - ../../.output/env.compose.backend
       - path: ../../.env.local
@@ -119,8 +121,7 @@ services:
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
-      - ../../.local/agents:${CHIEF_AGENTS_DIR:-/mnt/local/agents}
-      - ../../.local/keys:${CHIEF_KEYS_DIR:-/mnt/local/keys}
+      - ../../.local:/mnt/local
     depends_on:
       chief-backend:
         condition: service_started
@@ -143,7 +144,8 @@ services:
         - path: ../../backend/Dockerfile.dev
           action: rebuild
     environment:
-      - ENTRYPOINT=celery-beat
+      ENTRYPOINT: celery-beat
+      CHIEF_LOCAL_DIR: /mnt/local
     env_file:
       - ../../.output/env.compose.backend
       - path: ../../.env.local
@@ -151,8 +153,7 @@ services:
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
-      - ../../.local/agents:${CHIEF_AGENTS_DIR:-/mnt/local/agents}
-      - ../../.local/keys:${CHIEF_KEYS_DIR:-/mnt/local/keys}
+      - ../../.local:/mnt/local
     depends_on:
       chief-redis:
         condition: service_started
