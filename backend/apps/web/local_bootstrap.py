@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -27,6 +28,7 @@ _ORM_UNSAFE_COMMANDS = frozenset({'migrate', 'makemigrations', 'collectstatic'})
 _DEFAULT_BOOT_SYNC_ATTEMPTS = 3
 _DEFAULT_BOOT_SYNC_DELAY_S = 0.5
 _DEFAULT_FULL_RESYNC_INTERVAL_S = 30.0
+_provider_sync_lock = threading.Lock()
 
 
 def resolve_local_root() -> Path | None:
@@ -147,7 +149,8 @@ class PollingWatcher:
         for path in due:
             del self._pending[path]
             try:
-                sync_path(path, root=self.root)
+                with _provider_sync_lock:
+                    sync_path(path, root=self.root)
             # Watch threads must survive transient database failures.
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error('Local disk path sync failed for %s (%s)', path, type(exc).__name__)
@@ -161,8 +164,9 @@ class PollingWatcher:
             return
         self._next_full_resync = now + self.full_resync_interval
         try:
-            sync_all()
-            _mark_root_synced(self.root)
+            with _provider_sync_lock:
+                sync_all()
+                _mark_root_synced(self.root)
         # Periodic resync must not stop change detection on transient failures.
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error('Local disk full resync failed (%s)', type(exc).__name__)
@@ -243,23 +247,53 @@ def _sync_root_once(
     compose start does not leave existing files unloaded until an edit or restart.
     """
     resolved = root.resolve()
-    with _bootstrap_lock:
-        if resolved in _synced_roots:
-            return
-    last_exc_name = 'Exception'
-    for attempt in range(max(attempts, 1)):
-        try:
-            sync_all()
-        # Startup must continue when the database is unavailable or not migrated.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            last_exc_name = type(exc).__name__
-            if attempt + 1 >= attempts:
-                logger.error('Local disk boot sync failed (%s)', last_exc_name)
+    # Serialize boot and watcher writes so asynchronous ASGI startup preserves
+    # the original sync-before-watch ordering at the ORM boundary.
+    with _provider_sync_lock:
+        with _bootstrap_lock:
+            if resolved in _synced_roots:
                 return
-            time.sleep(delay_s)
-            continue
-        _mark_root_synced(resolved)
+        last_exc_name = 'Exception'
+        for attempt in range(max(attempts, 1)):
+            try:
+                sync_all()
+            # Startup must continue when the database is unavailable or not migrated.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                last_exc_name = type(exc).__name__
+                if attempt + 1 >= attempts:
+                    logger.error('Local disk boot sync failed (%s)', last_exc_name)
+                    return
+                time.sleep(delay_s)
+                continue
+            _mark_root_synced(resolved)
+            return
+
+
+def _sync_root_in_thread(root: Path) -> None:
+    """Run one boot sync with explicit thread-local database cleanup."""
+    close_old_connections()
+    try:
+        _sync_root_once(root)
+    finally:
+        close_old_connections()
+
+
+def _sync_root_async_safe(root: Path) -> None:
+    """Run boot sync off-thread only when the caller owns an active event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        _sync_root_once(root)
         return
+
+    # Uvicorn imports the ASGI application from its event-loop thread, where
+    # Django rejects synchronous ORM access.
+    threading.Thread(
+        target=_sync_root_in_thread,
+        args=(root,),
+        name='chief-local-disk-boot',
+        daemon=True,
+    ).start()
 
 
 def maybe_start_local_disk(*, force_watch: bool | None = None) -> None:
@@ -279,7 +313,7 @@ def maybe_start_local_disk(*, force_watch: bool | None = None) -> None:
     if _is_orm_unsafe_command() or _is_runserver_parent():
         return
 
-    _sync_root_once(root)
+    _sync_root_async_safe(root)
     should_watch = bool(getattr(settings, 'CHIEF_LOCAL_WATCH', False))
     if force_watch is not None:
         should_watch = force_watch

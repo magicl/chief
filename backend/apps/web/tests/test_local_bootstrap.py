@@ -2,7 +2,9 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+import asyncio
 import sys
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -36,6 +38,30 @@ class FakeClock:
     def advance(self, seconds: float) -> None:
         """Advance fake monotonic time by the requested duration."""
         self.now += seconds
+
+
+class TrackingLock:
+    """Expose when a second thread attempts to enter a real lock."""
+
+    def __init__(self) -> None:
+        """Create the wrapped lock and acquisition rendezvous."""
+        self._lock = threading.Lock()
+        self._count_lock = threading.Lock()
+        self._attempts = 0
+        self.second_attempt = threading.Event()
+
+    def __enter__(self) -> None:
+        """Record each acquisition attempt before waiting for ownership."""
+        with self._count_lock:
+            self._attempts += 1
+            if self._attempts == 2:
+                self.second_attempt.set()
+        self._lock.acquire()
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        """Release the wrapped lock after the protected operation."""
+        del exc_type, exc_value, traceback
+        self._lock.release()
 
 
 class TestLocalDiskPaths(OTestCase):
@@ -241,6 +267,129 @@ class TestLocalDiskBootstrap(OTestCase):
 
             sync_all_mock.assert_called_once_with()
             start_watcher.assert_called_once_with(Path(root).resolve())
+
+    def test_boot_sync_leaves_running_event_loop_thread(self) -> None:
+        """Move ORM boot synchronization off a thread running an asyncio loop."""
+        caller_thread = threading.get_ident()
+        sync_threads: list[int] = []
+        spawned_threads: list[threading.Thread] = []
+
+        class RecordingThread(threading.Thread):
+            """Retain spawned bootstrap threads so the test can join them."""
+
+            def start(self) -> None:
+                """Record this thread before starting it normally."""
+                spawned_threads.append(self)
+                super().start()
+
+        def record_sync_thread() -> SyncReport:
+            """Record where the simulated ORM synchronization executes."""
+            sync_threads.append(threading.get_ident())
+            return SyncReport()
+
+        async def start_bootstrap() -> None:
+            """Start local-disk bootstrap from an ASGI-style event loop."""
+            maybe_start_local_disk(force_watch=False)
+
+        with TemporaryDirectory() as root:
+            with (
+                override_settings(CHIEF_LOCAL_DIR=root),
+                patch('apps.web.local_bootstrap.sync_all', side_effect=record_sync_thread),
+                patch('apps.web.local_bootstrap.close_old_connections') as close_connections,
+                patch('apps.web.local_bootstrap.threading.Thread', RecordingThread),
+            ):
+                asyncio.run(start_bootstrap())
+                self.assertEqual(len(spawned_threads), 1)
+                spawned_threads[0].join(timeout=1.0)
+                self.assertFalse(spawned_threads[0].is_alive())
+
+        self.assertEqual(len(sync_threads), 1)
+        self.assertNotEqual(sync_threads[0], caller_thread)
+        self.assertEqual(close_connections.call_count, 2)
+
+    def test_concurrent_boot_calls_sync_once(self) -> None:
+        """Coalesce boot calls that arrive before the first sync completes."""
+        sync_started = threading.Event()
+        release_sync = threading.Event()
+        second_sync_started = threading.Event()
+        sync_calls = 0
+        sync_lock = TrackingLock()
+
+        def blocking_sync() -> SyncReport:
+            """Hold the first sync open so a concurrent caller can enter."""
+            nonlocal sync_calls
+            sync_calls += 1
+            if sync_calls > 1:
+                second_sync_started.set()
+            sync_started.set()
+            release_sync.wait(timeout=1.0)
+            return SyncReport()
+
+        with TemporaryDirectory() as root:
+            with (
+                override_settings(CHIEF_LOCAL_DIR=root),
+                patch('apps.web.local_bootstrap.sync_all', side_effect=blocking_sync),
+                patch('apps.web.local_bootstrap._provider_sync_lock', sync_lock),
+            ):
+                first = threading.Thread(target=maybe_start_local_disk, kwargs={'force_watch': False})
+                second = threading.Thread(target=maybe_start_local_disk, kwargs={'force_watch': False})
+                first.start()
+                self.assertTrue(sync_started.wait(timeout=1.0))
+                second.start()
+                self.assertTrue(sync_lock.second_attempt.wait(timeout=1.0))
+                self.assertFalse(second_sync_started.is_set())
+                release_sync.set()
+                first.join(timeout=1.0)
+                second.join(timeout=1.0)
+                self.assertFalse(first.is_alive())
+                self.assertFalse(second.is_alive())
+
+        self.assertEqual(sync_calls, 1)
+
+    def test_watcher_sync_waits_for_boot_sync(self) -> None:
+        """Serialize watcher writes behind an in-progress boot synchronization."""
+        clock = FakeClock()
+        boot_started = threading.Event()
+        release_boot = threading.Event()
+        path_synced = threading.Event()
+        sync_lock = TrackingLock()
+
+        def blocking_boot_sync() -> SyncReport:
+            """Hold boot sync open while the watcher attempts a path sync."""
+            boot_started.set()
+            release_boot.wait(timeout=1.0)
+            return SyncReport()
+
+        def record_path_sync(path: Path, *, root: Path) -> SyncReport:
+            """Record when the watcher reaches provider synchronization."""
+            del path, root
+            path_synced.set()
+            return SyncReport()
+
+        with TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            watcher = PollingWatcher(root, debounce=0, clock=clock)
+            watcher.handle_fs_event(root / 'agents' / 'example.yaml')
+            with (
+                override_settings(CHIEF_LOCAL_DIR=root_text),
+                patch('apps.web.local_bootstrap.sync_all', side_effect=blocking_boot_sync),
+                patch('apps.web.local_bootstrap.sync_path', side_effect=record_path_sync),
+                patch('apps.web.local_bootstrap._provider_sync_lock', sync_lock),
+            ):
+                boot_thread = threading.Thread(target=maybe_start_local_disk, kwargs={'force_watch': False})
+                watch_thread = threading.Thread(target=watcher.flush_pending)
+                boot_thread.start()
+                self.assertTrue(boot_started.wait(timeout=1.0))
+                watch_thread.start()
+                self.assertTrue(sync_lock.second_attempt.wait(timeout=1.0))
+                self.assertFalse(path_synced.is_set())
+                release_boot.set()
+                boot_thread.join(timeout=1.0)
+                watch_thread.join(timeout=1.0)
+                self.assertFalse(boot_thread.is_alive())
+                self.assertFalse(watch_thread.is_alive())
+
+        self.assertTrue(path_synced.is_set())
 
     @override_settings(CHIEF_LOCAL_WATCH=True)
     def test_worker_flag_enables_watch(self) -> None:
