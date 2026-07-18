@@ -40,6 +40,8 @@ regression test proving production validation comes from `env_secret`.
 | # | Severity | Status | Location | Finding | Notes |
 |---|----------|--------|----------|---------|-------|
 
+No findings.
+
 ## Links
 
 - olib PR: pending
