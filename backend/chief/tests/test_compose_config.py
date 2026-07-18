@@ -2,7 +2,7 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Verify Docker Compose local-provider configuration conventions."""
+"""Verify Docker Compose and container entrypoint conventions."""
 
 import re
 from pathlib import Path
@@ -53,3 +53,16 @@ class TestComposeLocalProviderConfig(OTestCase):
             self.assertIsNone(
                 re.search(rf'^\s*{re.escape(setting_name)}\s*=', env_example, flags=re.MULTILINE),
             )
+
+
+class TestCeleryEntrypointLogging(OTestCase):
+    """Check terminal logging thresholds for Compose Celery processes."""
+
+    def test_celery_processes_suppress_info_logging(self) -> None:
+        """Run worker and beat at WARNING so routine INFO records stay hidden."""
+        repository_root = Path(__file__).resolve().parents[3]
+        entrypoint_source = (repository_root / 'backend/entrypoint.sh').read_text()
+
+        self.assertIn('celery -A chief worker --loglevel=WARNING', entrypoint_source)
+        self.assertIn('celery -A chief beat --loglevel=WARNING', entrypoint_source)
+        self.assertNotIn('--loglevel=INFO', entrypoint_source)
