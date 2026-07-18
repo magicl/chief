@@ -44,5 +44,5 @@ No findings.
 
 ## Links
 
-- olib PR: pending
+- olib PR: https://github.com/magicl/olib/pull/37
 - PR: pending
