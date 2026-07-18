@@ -10,6 +10,11 @@ For working examples, see [`backend/libs/agent_spec/examples/`](../../backend/li
 
 ## Agent file format
 
+With Docker Compose, place agent files in `.local/agents/*.yaml` and key files in
+`.local/keys/*.yaml`. Compose mounts `.local/` at `/mnt/local` in each consuming
+container. `CHIEF_LOCAL_DIR` remains the generic application setting for
+non-Compose environments.
+
 An agent is a single YAML file with two layers:
 
 1. **Envelope** — metadata fields that identify the agent on disk.
@@ -292,8 +297,10 @@ and sources without embedding them in agent YAML.
 
 ### Key file format
 
-Key files live in `$CHIEF_LOCAL_DIR/keys/` (default: `~/.chief/keys/`).
-Each is a YAML file:
+Under Docker Compose, key files live in `.local/keys/*.yaml` (mapped to
+`/mnt/local/keys/*.yaml`); agent files live in `.local/agents/*.yaml` (mapped to
+`/mnt/local/agents/*.yaml`). Outside Compose, both locations derive from the
+generic `CHIEF_LOCAL_DIR` application setting. Each key is a YAML file:
 
 ```yaml
 name: my-openai-key
