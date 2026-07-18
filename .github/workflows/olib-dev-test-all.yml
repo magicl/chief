@@ -33,4 +33,4 @@ jobs:
         run: |
           ./olib/scripts/init.sh --py --js --rust --cpp --go
       - name: Dev test-all
-        run: ./olib/scripts/orunr dev test-all --full-log-on-failure
+        run: ./olib/scripts/orunr dev test-all --parallel 4 --full-log-on-failure
