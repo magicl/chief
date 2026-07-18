@@ -42,7 +42,15 @@ def parse_key_file(path: Path, *, root: Path) -> KeyDiskFile:
 
     type_name = _required_string(loaded, 'type').strip()
     owner = _required_string(loaded, 'owner').strip()
-    value = _required_string(loaded, 'value')
+    if 'value' not in loaded:
+        raise ValueError('value is required')
+    raw_value = loaded['value']
+    if raw_value is None:
+        value = ''
+    elif isinstance(raw_value, str):
+        value = raw_value
+    else:
+        raise ValueError('value must be a string')
     raw_name = loaded.get('name', path.stem)
     if not isinstance(raw_name, str) or not raw_name.strip():
         raise ValueError('name must be a non-empty string')

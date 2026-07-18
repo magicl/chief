@@ -28,10 +28,10 @@ from apps.keys.types import (
 from django.db import transaction
 
 
-def _validate_secret(secret: str) -> str:
-    """Strip outer whitespace and validate secret length for storage."""
+def _validate_secret(secret: str, *, allow_empty: bool = False) -> str:
+    """Normalize a secret and enforce storage limits plus caller emptiness policy."""
     normalized = secret.strip('\r\n\t ')
-    if not normalized:
+    if not normalized and not allow_empty:
         raise KeyValidationError('secret must not be empty')
     if len(normalized.encode('utf-8')) > MAX_SECRET_BYTES:
         raise KeyValidationError('secret exceeds maximum length')
@@ -96,7 +96,7 @@ def upsert_user_named_from_disk(
     """Return metadata plus whether create, replacement, or restore changed the list."""
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
-    validated_secret = _validate_secret(secret)
+    validated_secret = _validate_secret(secret, allow_empty=True)
 
     with transaction.atomic():
         row = (
