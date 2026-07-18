@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 
+from apps.bus.resources import publish_resource_update_after_commit
 from apps.keys import crypto
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
 from apps.keys.models import (
@@ -59,7 +60,7 @@ def _unset_system_default_flag(type_name: str, *, except_pk: uuid.UUID | None = 
 
 
 def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> KeyMetadata:
-    """Create or replace a database-owned active user credential and return metadata."""
+    """Create or replace a database-owned key and notify after commit."""
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
     validated_secret = _validate_secret(secret)
@@ -79,6 +80,7 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
                 'status': CredentialStatus.ACTIVE,
             },
         )
+        publish_resource_update_after_commit(user_id, 'keys')
     return _user_metadata(row)
 
 
@@ -90,8 +92,8 @@ def upsert_user_named_from_disk(
     *,
     source_path: str,
     source_rev: str,
-) -> KeyMetadata:
-    """Create or refresh a disk-owned credential without replacing database-owned data."""
+) -> tuple[KeyMetadata, bool]:
+    """Return metadata plus whether create, replacement, or restore changed the list."""
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
     validated_secret = _validate_secret(secret)
@@ -114,7 +116,7 @@ def upsert_user_named_from_disk(
             and row.source_rev == source_rev
             and row.status == CredentialStatus.ACTIVE
         ):
-            return _user_metadata(row)
+            return _user_metadata(row), False
 
         encrypted_value = crypto.encrypt(validated_secret)
         if row is None:
@@ -144,14 +146,17 @@ def upsert_user_named_from_disk(
                     'updated_at',
                 ]
             )
-    return _user_metadata(row)
+        publish_resource_update_after_commit(user_id, 'keys')
+    return _user_metadata(row), True
 
 
+@transaction.atomic
 def delete_user_credential(user_id: int, name: str) -> None:
-    """Delete a named user credential. Raises KeyNotFoundError if missing."""
+    """Delete a user key and notify after commit, preserving KeyNotFoundError."""
     deleted, _ = UserCredential.objects.filter(user_id=user_id, name=name).delete()
     if not deleted:
         raise KeyNotFoundError(f'credential not found: {name}')
+    publish_resource_update_after_commit(user_id, 'keys')
 
 
 def set_system_default(type_name: str, secret: str) -> KeyMetadata:

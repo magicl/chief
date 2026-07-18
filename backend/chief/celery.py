@@ -13,6 +13,11 @@ app = initCelery('chief')
 app.conf.beat_scheduler = settings.CELERY_BEAT_SCHEDULER
 
 app.conf.beat_schedule = {
+    'local-sync-reconcile': {
+        'task': 'apps.local_sync.tasks.reconcile_local_providers',
+        'schedule': 5.0,
+        'options': {'expires': 5.0},
+    },
     'queues-release-stale-items': {
         'task': 'apps.queues.tasks.release_stale_items',
         'schedule': 120.0,

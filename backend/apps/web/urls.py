@@ -2,11 +2,14 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from apps.web import config_views, views
+from apps.web import config_views, resource_events, views
 from django.urls import path
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('events/', resource_events.resource_events_sse, name='resource_events_sse'),
+    path('partials/agents/', views.dashboard_agents_partial, name='dashboard_agents_partial'),
+    path('partials/keys/', views.settings_keys_partial, name='settings_keys_partial'),
     path('agents/create/', config_views.agent_create, name='agent_create'),
     path('agents/create/mutate/', config_views.agent_create_mutate, name='agent_create_mutate'),
     path('agents/<uuid:agent_id>/', views.agent_detail, name='agent_detail'),

@@ -17,10 +17,11 @@ from apps.agents.services.config_validation import (
     validate_agent_config_yaml,
 )
 from apps.agents.services.schedule_beat import sync_agent_schedule_triggers
-from apps.keys.services.disk_sync import SyncItemResult, SyncReport
+from apps.bus.resources import publish_resource_update_after_commit
 from apps.keys.services.owner import resolve_owner
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from libs.file.sync import SyncItemResult, SyncProgressCallback, SyncReport
 from libs.providers.data.agent_disk_parse import AgentDiskFile, parse_agent_file
 
 logger = logging.getLogger(__name__)
@@ -41,8 +42,8 @@ def _relative_path(path: Path, root: Path) -> str:
 
 
 @transaction.atomic
-def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
-    """Validate and persist one disk agent without overwriting another provider."""
+def _persist_parsed_agent(parsed: AgentDiskFile) -> tuple[int, bool]:
+    """Persist one disk agent and return its owner plus visible mutation state."""
     spec = validate_agent_config_yaml(parsed.body_yaml)
     owner = resolve_owner(parsed.owner)
     if owner is None:
@@ -60,7 +61,7 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
             source_rev=parsed.source_rev,
             raw_yaml=parsed.body_yaml,
         )
-        return
+        return owner.pk, True
     if agent.config_source != AgentConfigSource.DISK:
         raise ValueError('agent is owned by another config source')
 
@@ -77,7 +78,8 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
     if changed_fields:
         agent.save(update_fields=changed_fields)
 
-    if agent.current_config is None or agent.current_config.source_rev != parsed.source_rev:
+    config_changed = agent.current_config is None or agent.current_config.source_rev != parsed.source_rev
+    if config_changed:
         persist_agent_config(
             agent,
             spec,
@@ -90,14 +92,37 @@ def _persist_parsed_agent(parsed: AgentDiskFile) -> None:
     # the same bytes must therefore rebuild beat even when no revision is persisted.
     if was_disabled:
         sync_agent_schedule_triggers(agent.id)
+    changed = bool(changed_fields) or config_changed
+    if changed and not config_changed:
+        publish_resource_update_after_commit(owner.pk, 'agents')
+    return owner.pk, changed
 
 
-def sync_agent_path(path: Path, *, root: Path) -> SyncItemResult:
+def sync_agent_path(
+    path: Path,
+    *,
+    root: Path,
+    seen_identities: set[tuple[int, str]] | None = None,
+) -> SyncItemResult:
     """Parse and synchronize one agent file while containing file-level failures."""
     source_path = _relative_path(path, root)
     try:
         parsed = parse_agent_file(path, root=root)
-        _persist_parsed_agent(parsed)
+        owner = resolve_owner(parsed.owner)
+        if owner is None:
+            raise ValueError('owner not found')
+        identity = (int(owner.pk), parsed.identifier)
+        if seen_identities is not None and identity in seen_identities:
+            logger.error(
+                'Duplicate agent identity for %s (owner=%s identifier=%s)',
+                source_path,
+                parsed.owner,
+                parsed.identifier,
+            )
+            return SyncItemResult(source_path=source_path, success=False, detail='duplicate identity')
+        user_id, changed = _persist_parsed_agent(parsed)
+        if seen_identities is not None:
+            seen_identities.add(identity)
     except (
         OSError,
         UnicodeError,
@@ -110,30 +135,53 @@ def sync_agent_path(path: Path, *, root: Path) -> SyncItemResult:
         # Parser details can quote YAML source lines, so logs include only safe metadata.
         logger.error('Agent file sync failed for %s (%s)', source_path, type(exc).__name__)
         return SyncItemResult(source_path=source_path, success=False, detail=type(exc).__name__)
-    return SyncItemResult(source_path=source_path, success=True)
+    return SyncItemResult(
+        source_path=source_path,
+        success=True,
+        user_id=user_id,
+        changed=changed,
+    )
 
 
-def soft_disable_missing_disk_agents(*, present_paths: set[str]) -> int:
-    """Disable active disk agents whose bound files are no longer present."""
-    missing_ids = list(
+@transaction.atomic
+def soft_disable_missing_disk_agents(
+    *,
+    present_paths: set[str],
+    progress: SyncProgressCallback | None = None,
+) -> tuple[int, set[int]]:
+    """Disable missing agents with optional schedule-sync checkpoints."""
+    missing_rows = list(
         Agent.objects.filter(
             config_source=AgentConfigSource.DISK,
             status=AgentStatus.ACTIVE,
         )
         .exclude(source_path__in=present_paths)
-        .values_list('id', flat=True),
+        .select_for_update()
+        .values_list('id', 'user_id'),
     )
-    if not missing_ids:
-        return 0
+    if not missing_rows:
+        return 0, set()
 
+    missing_ids = [agent_id for agent_id, _ in missing_rows]
+    user_ids = {user_id for _, user_id in missing_rows}
     Agent.objects.filter(id__in=missing_ids).update(status=AgentStatus.DISABLED)
     for agent_id in missing_ids:
-        sync_agent_schedule_triggers(agent_id)
-    return len(missing_ids)
+        if progress is not None:
+            progress()
+        sync_agent_schedule_triggers(agent_id, progress=progress)
+        if progress is not None:
+            progress()
+    for user_id in sorted(user_ids):
+        publish_resource_update_after_commit(user_id, 'agents')
+    return len(missing_rows), user_ids
 
 
-def sync_agents_dir(*, root: Path | None = None) -> SyncReport:
-    """Synchronize all agent YAML files under a local root or configured root."""
+def sync_agents_dir(
+    *,
+    root: Path | None = None,
+    progress: SyncProgressCallback | None = None,
+) -> SyncReport:
+    """Synchronize agent files with optional generic progress checkpoints."""
     resolved_root = root if root is not None else _configured_root()
     if resolved_root is None or not resolved_root.is_dir():
         return SyncReport()
@@ -145,6 +193,20 @@ def sync_agents_dir(*, root: Path | None = None) -> SyncReport:
         paths.update(directory.glob('*.yml'))
 
     present_paths = {_relative_path(path, resolved_root) for path in paths}
-    report = SyncReport(items=[sync_agent_path(path, root=resolved_root) for path in sorted(paths)])
-    report.disabled = soft_disable_missing_disk_agents(present_paths=present_paths)
+    seen_identities: set[tuple[int, str]] = set()
+    report = SyncReport()
+    for path in sorted(paths):
+        if progress is not None:
+            progress()
+        report.items.append(sync_agent_path(path, root=resolved_root, seen_identities=seen_identities))
+        if progress is not None:
+            progress()
+    if progress is not None:
+        progress()
+    disabled_count, disabled_user_ids = soft_disable_missing_disk_agents(
+        present_paths=present_paths,
+        progress=progress,
+    )
+    report.disabled = disabled_count
+    report.disabled_user_ids = disabled_user_ids
     return report

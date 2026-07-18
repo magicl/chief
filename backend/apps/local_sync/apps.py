@@ -2,11 +2,13 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+"""Django app declaration for local-provider reconciliation."""
+
 from django.apps import AppConfig
 
 
-class RunnerConfig(AppConfig):
-    """Declare the runner app without process-startup side effects."""
+class LocalSyncConfig(AppConfig):
+    """Declare the cross-domain local provider reconciliation app."""
 
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'apps.runner'
+    name = 'apps.local_sync'

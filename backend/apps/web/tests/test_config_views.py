@@ -6,6 +6,7 @@
 
 import json
 import logging
+from unittest.mock import MagicMock, patch
 
 from apps.agents.models import Agent
 from apps.agents.services.config_commands import create_from_example
@@ -66,6 +67,65 @@ class AgentConfigWebTests(OTestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.name, 'Renamed agent')
         self.assertEqual(self.agent.identifier, 'renamed-agent')
+
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_combined_save_publishes_one_config_event(
+        self,
+        publish: MagicMock,
+    ) -> None:
+        """Coalesce profile and config changes into the config commit hint."""
+        url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                {
+                    'spec_yaml': spec_yaml,
+                    'name': 'Combined save',
+                    'identifier': 'combined-save',
+                },
+                HTTP_ACCEPT='application/json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        publish.assert_called_once_with(self.user.pk, 'agents')
+
+    @expectLogItems(
+        [
+            ExpectLogItem(
+                'django.request', logging.ERROR, r'Internal Server Error: /agents/[0-9a-f-]+/config/save/', count=1
+            )
+        ]
+    )
+    @patch('apps.bus.resources.publish_resource_update')
+    @patch('apps.agents.ingest.materialize_agent_config')
+    def test_combined_save_rolls_back_profile_after_materialization_failure(
+        self,
+        materialize: MagicMock,
+        publish: MagicMock,
+    ) -> None:
+        """Keep the existing profile and suppress events when config save fails."""
+        materialize.side_effect = RuntimeError('materialization failed')
+        url = reverse('agent_config_save', kwargs={'agent_id': self.agent.id})
+        spec_yaml = dump_agent_config_spec(load_example('clock-assistant'))
+
+        with self.assertRaises(RuntimeError):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(
+                    url,
+                    {
+                        'spec_yaml': spec_yaml,
+                        'name': 'Must roll back',
+                        'identifier': 'must-roll-back',
+                    },
+                    HTTP_ACCEPT='application/json',
+                )
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.name, 'Cfg agent')
+        self.assertEqual(self.agent.identifier, 'cfg-agent')
+        publish.assert_not_called()
 
     @expectLogItems(
         [ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/config/save/', count=1)]

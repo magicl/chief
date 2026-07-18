@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import re
 
-from apps.agents.ingest import create_agent_from_spec
-from apps.agents.models import Agent
+from apps.agents.ingest import create_agent_from_spec, persist_agent_config
+from apps.agents.models import Agent, AgentConfig
 from apps.agents.services.config_sync import spec_content_hash
 from apps.agents.services.config_validation import validate_agent_config_yaml
+from apps.bus.resources import publish_resource_update_after_commit
 from django.contrib.auth.models import AbstractBaseUser
-from libs.agent_spec import load_example_text
+from django.db import transaction
+from libs.agent_spec import AgentConfigSpec, load_example_text
 
 _IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 
@@ -137,8 +139,9 @@ def update_agent_profile(
     *,
     name: str | None = None,
     identifier: str | None = None,
-) -> None:
-    """Update display name and/or slug identifier for an owned agent."""
+    publish_update: bool = True,
+) -> bool:
+    """Apply visible profile changes and optionally schedule one refresh hint."""
     updates: list[str] = []
     if name is not None:
         cleaned_name = name.strip()
@@ -158,6 +161,39 @@ def update_agent_profile(
             updates.append('identifier')
     if updates:
         agent.save(update_fields=updates)
+        if publish_update:
+            publish_resource_update_after_commit(user_id, 'agents')
+        return True
+    return False
+
+
+@transaction.atomic
+def save_agent_profile_and_config(
+    agent: Agent,
+    user_id: int,
+    spec: AgentConfigSpec,
+    *,
+    name: str | None,
+    identifier: str | None,
+    source_rev: str,
+    dirty: bool = False,
+    raw_yaml: str | None = None,
+) -> AgentConfig:
+    """Atomically save profile fields and one materialized config revision."""
+    update_agent_profile(
+        agent,
+        user_id,
+        name=name,
+        identifier=identifier,
+        publish_update=False,
+    )
+    return persist_agent_config(
+        agent,
+        spec,
+        source_rev=source_rev,
+        dirty=dirty,
+        raw_yaml=raw_yaml,
+    )
 
 
 def rename_agent(agent: Agent, user_id: int, new_identifier: str) -> None:

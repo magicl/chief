@@ -2,6 +2,8 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+from unittest.mock import MagicMock, patch
+
 from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
 from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
@@ -41,3 +43,16 @@ class TestDeleteAgent(OTestCase):
         agent = create_from_example(owner, 'clock-assistant')
         with self.assertRaises(AgentNotFoundError):
             delete_agent_for_user(other, agent.id)
+
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_delete_publishes_owner_after_commit(self, publish: MagicMock) -> None:
+        """Capture the owner before deletion and publish one committed hint."""
+        user = get_user_model().objects.create_user(username='delete-publish')
+        with self.captureOnCommitCallbacks(execute=True):
+            agent = create_from_example(user, 'minimal')
+        publish.reset_mock()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            delete_agent_for_user(user, agent.id)
+
+        publish.assert_called_once_with(user.pk, 'agents')

@@ -4,6 +4,8 @@
 # ~
 """Tests for agent config ingest."""
 
+from unittest.mock import MagicMock, patch
+
 from apps.agents.ingest import (
     IngestError,
     create_agent_from_spec,
@@ -14,6 +16,7 @@ from apps.agents.models import Agent, AgentConfig, Trigger
 from apps.agents.services.config_commands import create_from_example
 from apps.queues.models import Queue, Source
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from libs.agent_spec import (
     AGENT_CONFIG_SPEC_VERSION,
     AgentConfigSpec,
@@ -25,7 +28,7 @@ from libs.agent_spec import (
     load_example,
 )
 
-from olib.py.django.test.cases import OTestCase
+from olib.py.django.test.cases import OTestCase, OTransactionTestCase
 
 CLOCK_SPEC = load_example('clock-assistant')
 
@@ -59,6 +62,21 @@ class ValidateSpecToolsTests(OTestCase):
 
 
 class CreateAgentFromSpecTests(OTestCase):
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_create_publishes_one_committed_agent_event(self, publish: MagicMock) -> None:
+        """Rely on nested config persistence for one committed create event."""
+        user = get_user_model().objects.create_user(username='ingest-publish')
+
+        with self.captureOnCommitCallbacks(execute=True):
+            create_agent_from_spec(
+                user,
+                CLOCK_SPEC.model_copy(),
+                name='Published agent',
+                identifier='published-agent',
+            )
+
+        publish.assert_called_once_with(user.pk, 'agents')
+
     def test_create_defaults_to_active_with_blank_source_path(self) -> None:
         user = get_user_model().objects.create_user(username='ingest-defaults', password='x')
         agent = create_agent_from_spec(
@@ -133,3 +151,45 @@ class CreateAgentFromSpecTests(OTestCase):
 
         queue = Queue.objects.get(agent=agent, queue_id='inbox')
         self.assertTrue(Source.objects.filter(queue=queue, source_id='poll-a').exists())
+
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_existing_agent_config_publishes_after_commit(self, publish: MagicMock) -> None:
+        """Notify the owner after an existing agent revision commits."""
+        user = get_user_model().objects.create_user(username='ingest-config-publish')
+        agent = Agent.objects.create(user=user, name='Existing', identifier='existing')
+
+        with self.captureOnCommitCallbacks(execute=True):
+            persist_agent_config(agent, CLOCK_SPEC.model_copy(), source_rev='ui:next')
+
+        publish.assert_called_once_with(user.pk, 'agents')
+
+
+class AgentIngestCommitTimingTests(OTransactionTestCase):
+    """Verify agent config hints follow the outer transaction outcome."""
+
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_outer_rollback_suppresses_config_publication(self, publish: MagicMock) -> None:
+        """Discard the event and config revision when an outer write rolls back."""
+        user = get_user_model().objects.create_user(username='ingest-rollback')
+        agent = Agent.objects.create(user=user, name='Rollback', identifier='rollback')
+
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                persist_agent_config(agent, CLOCK_SPEC.model_copy(), source_rev='ui:rollback')
+                publish.assert_not_called()
+                raise RuntimeError('roll back')
+
+        self.assertFalse(AgentConfig.objects.filter(agent=agent).exists())
+        publish.assert_not_called()
+
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_publisher_failure_does_not_fail_committed_config(self, publish: MagicMock) -> None:
+        """Keep a committed revision when the refresh transport is unavailable."""
+        user = get_user_model().objects.create_user(username='ingest-publisher-failure')
+        agent = Agent.objects.create(user=user, name='Robust', identifier='robust')
+        publish.side_effect = RuntimeError('transport unavailable')
+
+        config = persist_agent_config(agent, CLOCK_SPEC.model_copy(), source_rev='ui:robust')
+
+        self.assertTrue(AgentConfig.objects.filter(pk=config.pk).exists())
+        publish.assert_called_once_with(user.pk, 'agents')

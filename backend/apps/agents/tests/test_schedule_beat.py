@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from apps.agents.ingest import persist_agent_config
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerStatus
 from apps.agents.services.schedule_beat import (
     SCHEDULE_DISPATCH_TASK,
     periodic_task_name,
+    sync_agent_schedule_triggers,
     sync_schedule_trigger,
 )
 from django.contrib.auth import get_user_model
@@ -131,6 +133,28 @@ class TestScheduleBeatSync(OTestCase):
 
         task = PeriodicTask.objects.get(name=periodic_task_name(trigger.id))
         self.assertFalse(task.enabled)
+
+    def test_agent_sync_checkpoints_surround_each_schedule_trigger(self) -> None:
+        """Invoke generic maintenance around each trigger synchronization."""
+        agent, trigger = self._agent_with_schedule()
+        calls: list[str] = []
+
+        def record_progress() -> None:
+            """Record one generic maintenance checkpoint."""
+            calls.append('progress')
+
+        def record_trigger(_trigger: Trigger) -> None:
+            """Record one current-trigger synchronization."""
+            calls.append('trigger')
+
+        with patch(
+            'apps.agents.services.schedule_beat.upsert_schedule_trigger_beat',
+            side_effect=record_trigger,
+        ):
+            sync_agent_schedule_triggers(agent.id, progress=record_progress)
+
+        self.assertEqual(trigger.agent_id, agent.id)
+        self.assertEqual(calls, ['progress', 'trigger', 'progress'])
 
     def test_reuses_existing_crontab_schedule_rows(self) -> None:
         before = CrontabSchedule.objects.count()

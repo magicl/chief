@@ -4,66 +4,14 @@
 {% block title %}Chief{% endblock %}
 
 {% block content %}
-<section class="card">
-  <div class="section-header">
-    <h2>Agents</h2>
-    {% if user.is_authenticated %}
-    <div class="create-agents">
-      <a href="{{ url('agent_create') }}" class="primary" style="text-decoration:none;">Create agent</a>
-      {% for ex in examples %}
-      <a href="{{ url('agent_create') }}?example={{ ex.slug }}" class="primary" style="text-decoration:none;">{{ ex.title }}</a>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </div>
-  {% if agents %}
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Model</th>
-        <th>Owner</th>
-        <th>Description</th>
-        {% if user.is_authenticated %}<th></th>{% endif %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for agent in agents %}
-      <tr>
-        <td>
-          {% if user.is_authenticated %}
-          <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}">{{ agent.name }}</a>
-          {% else %}
-          {{ agent.name }}
-          {% endif %}
-        </td>
-        <td class="muted">
-          {% if agent.current_config %}
-            {{ agent.current_config.spec['llm']['provider'] }} / {{ agent.current_config.spec['llm']['model'] }}
-          {% else %}
-            —
-          {% endif %}
-        </td>
-        <td>{{ agent.user.username }}</td>
-        <td class="muted">{{ agent.current_config.spec.get('description', '—') if agent.current_config else '—' }}</td>
-        {% if user.is_authenticated %}
-        <td class="agent-actions">
-          <a href="{{ url('agent_config', kwargs={'agent_id': agent.id}) }}" style="color:#9ec5ff; font-size:.85rem;">Config</a>
-          <form method="post" action="{{ url('delete_agent', kwargs={'agent_id': agent.id}) }}">
-            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-            <button type="submit" class="danger">Delete</button>
-          </form>
-        </td>
-        {% endif %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% elif user.is_authenticated %}
-  <p class="empty">No agents yet. <a href="{{ url('agent_create') }}">Create one</a> from an example.</p>
-  {% else %}
-  <p class="empty">No agents yet. <a href="/admin/login/?next=/">Log in</a> to create one.</p>
-  {% endif %}
+<section
+  id="agent-list"
+  class="card"
+  hx-get="{{ url('dashboard_agents_partial') }}"
+  hx-trigger="chief:agents-changed from:body"
+  hx-swap="innerHTML"
+>
+  {% include "web/partials/agent_list.html" %}
 </section>
 
 {% if user.is_authenticated %}
