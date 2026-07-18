@@ -136,6 +136,17 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-first')
         self.assertNotEqual(bytes(row.encrypted_value), b'sk-first')
 
+    def test_empty_value_creates_disk_credential(self) -> None:
+        """Accept a required credential value field whose YAML value is empty."""
+        self.write_key(value='')
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 0)
+        row = UserCredential.objects.get(user=self.user, name='work-openai')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), '')
+
     @patch('apps.bus.resources.publish_resource_update')
     def test_content_change_updates_ciphertext_and_revision(self, publish: MagicMock) -> None:
         """Report and publish replacement of changed disk content."""
