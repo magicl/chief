@@ -20,9 +20,9 @@ elif [[ $ENTRYPOINT == "celery-worker" ]]; then
 	export C_FORCE_ROOT=true
 	# Agent sessions are long-lived and I/O-bound; use threads so concurrent
 	# sessions don't each occupy a prefork worker slot.
-	exec celery -A chief worker --loglevel=INFO --pool=threads --concurrency=16
+	exec celery -A chief worker --loglevel=WARNING --pool=threads --concurrency=16
 elif [[ $ENTRYPOINT == "celery-beat" ]]; then
-	exec celery -A chief beat --loglevel=INFO --pidfile /tmp/celery-beat.pid -s /tmp/celery-beat-schedule
+	exec celery -A chief beat --loglevel=WARNING --pidfile /tmp/celery-beat.pid -s /tmp/celery-beat-schedule
 else
 	echo "invalid entrypoint selection for entrypoint.sh: $ENTRYPOINT"
 	exit 1

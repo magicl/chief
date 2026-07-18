@@ -46,7 +46,7 @@ Agent session tasks are long-lived and I/O-bound. The dev worker uses a thread p
 so several concurrent sessions do not each occupy a prefork slot:
 
 ```bash
-celery -A chief worker --loglevel=INFO --pool=threads --concurrency=16
+celery -A chief worker --loglevel=WARNING --pool=threads --concurrency=16
 ```
 
 (`backend/entrypoint.sh` passes these flags for the `celery-worker` container.)
