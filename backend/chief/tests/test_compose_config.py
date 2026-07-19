@@ -187,6 +187,27 @@ class TestComposeLocalProviderConfig(OTestCase):
             )
 
 
+class TestComposeRichContentAssets(OTestCase):
+    """Check that static Nginx serves the external generated renderer lane."""
+
+    def test_static_service_mounts_generated_renderer_read_only(self) -> None:
+        """The rich-content target has exactly one read-only external-assets mount."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+        rich_content_target = '/etc/storage/public/static/web/rich-content'
+        rich_content_mounts = []
+        for mount in compose['services']['chief-static']['volumes']:
+            volume_parts = mount.split(':', maxsplit=2)
+            if len(volume_parts) >= 2 and volume_parts[1] == rich_content_target:
+                rich_content_mounts.append(mount)
+
+        self.assertEqual(
+            rich_content_mounts,
+            ['/mnt/infra-assets/chief/js/gen:/etc/storage/public/static/web/rich-content:ro'],
+        )
+
+
 class TestCeleryEntrypointLogging(OTestCase):
     """Check terminal logging thresholds for Compose Celery processes."""
 

@@ -3,6 +3,10 @@
 
 {% block title %}Session {{ session_display_name(session) }} — Chief{% endblock %}
 
+{% block head_assets %}
+<link rel="stylesheet" href="{{ static('web/rich-content/rich_content.bundle.css') }}">
+{% endblock %}
+
 {% block frame_x_data %}x-data='sessionView("{{ session.id }}", {{ (session.name or "")|tojson }}, {{ llm_label|tojson }})' x-init="init()"{% endblock %}
 
 {% block frame_header %}
@@ -65,13 +69,23 @@
 <section class="event-panel">
   <div class="event-toolbar">
     <h2>Events</h2>
-    <button
-      type="button"
-      class="frame-btn"
-      :class="{ 'active': follow }"
-      @click="toggleFollow()"
-      x-text="follow ? 'Following' : 'Follow'"
-    ></button>
+    <div class="event-toolbar-actions">
+      <button
+        type="button"
+        class="frame-btn"
+        :class="{ 'active': beautify }"
+        :aria-pressed="beautify.toString()"
+        @click="toggleBeautify()"
+        x-text="beautify ? 'Beautify: On' : 'Beautify: Off'"
+      ></button>
+      <button
+        type="button"
+        class="frame-btn"
+        :class="{ 'active': follow }"
+        @click="toggleFollow()"
+        x-text="follow ? 'Following' : 'Follow'"
+      ></button>
+    </div>
   </div>
   <div
     id="event-panel"
@@ -92,7 +106,23 @@
               x-text="formatEventStats(evt)"
             ></span>
           </div>
-          <pre class="event-body" x-text="formatPayload(evt)"></pre>
+          <template x-if="evt.kind === 'OUTPUT'">
+            <div>
+              <div
+                class="event-body rich-output"
+                x-show="beautify && richContentReady"
+                x-effect="beautify && richContentReady && renderOutput($el, evt)"
+              ></div>
+              <pre
+                class="event-body"
+                x-show="!beautify || !richContentReady"
+                x-text="formatPayload(evt)"
+              ></pre>
+            </div>
+          </template>
+          <template x-if="evt.kind !== 'OUTPUT'">
+            <pre class="event-body" x-text="formatPayload(evt)"></pre>
+          </template>
         </div>
       </template>
     </div>
@@ -101,6 +131,8 @@
 {% endblock %}
 
 {% block frame_extra_scripts %}
+<script src="{{ static('web/rich_content_lifecycle.js') }}"></script>
+<script type="module" src="{{ static('web/rich-content/rich_content.bundle.js') }}"></script>
 <script>
 function sessionView(sessionId, initialName, configModel) {
   const sessionIdPrefix = sessionId.replace(/-/g, '').slice(0, 8);
@@ -111,6 +143,9 @@ function sessionView(sessionId, initialName, configModel) {
     seenSeq: new Set(),
     source: null,
     follow: true,
+    beautify: true,
+    richContentReady: Boolean(window.chiefRichContent?.renderRichContent),
+    renderedOutputs: new WeakMap(),
     configModel,
     get displaySessionName() {
       return this.sessionName || sessionIdPrefix;
@@ -118,6 +153,12 @@ function sessionView(sessionId, initialName, configModel) {
     init() {
       this.updateDocumentTitle();
       this.$watch('displaySessionName', () => this.updateDocumentTitle());
+      // Mirror delayed ESM readiness into Alpine state and close the pre-subscription race.
+      this._stopWatchingRichContent = window.chiefRichContentLifecycle.watchRichContentReadiness(
+        (ready) => {
+          this.richContentReady = ready;
+        },
+      );
       this.connectStream();
       this._onPageHide = () => this.closeStream();
       this._onPageShow = (event) => {
@@ -130,6 +171,7 @@ function sessionView(sessionId, initialName, configModel) {
       this.$el.addEventListener('alpine:destroy', () => {
         window.removeEventListener('pagehide', this._onPageHide);
         window.removeEventListener('pageshow', this._onPageShow);
+        this._stopWatchingRichContent?.();
         this.closeStream();
       });
       this.focusChatInput();
@@ -198,6 +240,41 @@ function sessionView(sessionId, initialName, configModel) {
       if (evt.kind === 'OUTPUT' || evt.kind === 'INPUT') return p.content || '';
       if (evt.kind === 'FAILURE') return p.message || JSON.stringify(p, null, 2);
       return JSON.stringify(p, null, 2);
+    },
+    // Toggle presentation without persisting state or changing raw event payloads.
+    toggleBeautify() {
+      this.beautify = !this.beautify;
+      if (!this.beautify && this.$refs.eventPanel) {
+        this.$refs.eventPanel.querySelectorAll('.rich-output').forEach((element) => {
+          this.renderedOutputs.delete(element);
+          window.chiefRichContent?.cancelRichContent(element);
+        });
+      }
+    },
+    // Replace an unexpected rejected render with exact inert source content.
+    showOutputSource(element, source) {
+      const fallback = document.createElement('pre');
+      fallback.className = 'rich-content-source-fallback';
+      fallback.textContent = source;
+      element.replaceChildren(fallback);
+    },
+    // Render one exact OUTPUT event, repeating only when its displayed source changes.
+    renderOutput(element, event) {
+      if (event.kind !== 'OUTPUT') return Promise.resolve(false);
+      const source = this.formatPayload(event);
+      const renderer = window.chiefRichContent?.renderRichContent;
+      if (!renderer) {
+        this.renderedOutputs.delete(element);
+        this.richContentReady = false;
+        return Promise.resolve(false);
+      }
+      return window.chiefRichContentLifecycle.renderRichOutputAttempt(
+        this.renderedOutputs,
+        element,
+        source,
+        renderer,
+        this.showOutputSource,
+      );
     },
     formatEventStats(evt) {
       const parts = [];

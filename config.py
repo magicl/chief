@@ -21,8 +21,14 @@ import sys
 
 import click
 import parproc as pp
+import sh
 
 from olib.py.cli.run.readonly import readonly_safe
+from olib.py.cli.run.templates.assets import (
+    AssetsClusterInfo,
+    AssetsPathsResult,
+    assets,
+)
 from olib.py.cli.run.templates.base import ConfigMeta, prep_config
 from olib.py.cli.run.templates.django_ import (
     DjangoConfig,
@@ -36,7 +42,7 @@ from olib.py.cli.run.templates.docker import (
 )
 from olib.py.cli.run.templates.envs import EnvInfo
 from olib.py.cli.run.templates.eval_ import eval_cmd
-from olib.py.cli.run.templates.js_ import JSRoot, js
+from olib.py.cli.run.templates.js_ import JSRoot
 from olib.py.cli.run.templates.postgres import postgres
 from olib.py.cli.run.templates.py_ import PyRoot
 from olib.py.cli.run.templates.redis import redis
@@ -44,9 +50,10 @@ from olib.py.cli.run.templates.remote import remote
 from olib.py.cli.run.templates.roots import SubmoduleRoots, roots
 from olib.py.cli.run.templates.version import VersionClusterInfo
 from olib.py.cli.run.templates.version import version as version_template
+from olib.py.cli.run.tools.init.js_ import prepare_js_runtime
 
 
-class TargetInfo(VersionClusterInfo):
+class TargetInfo(VersionClusterInfo, AssetsClusterInfo):
     """Per-target info. `compose` is the only target for now."""
 
     release_name: str
@@ -86,20 +93,17 @@ class TargetInfo(VersionClusterInfo):
             noValidate=['olib', 'olib/**'],
         ),
         PyRoot('./infra'),
-        SubmoduleRoots('olib', aliases=['./backend/olib']),
-    ],
-)
-@js(
-    roots=[
         JSRoot(
             './backend/apps/web/static/web',
-            noValidate=['node_modules/**', 'codemirror/**'],
+            noValidate=['node_modules/**', 'codemirror/**', 'rich-content/**'],
         ),
+        SubmoduleRoots('olib', aliases=['./backend/olib']),
     ],
 )
 @eval_cmd()
 @django_template()
 @remote(plugins=[], default_host='compose')
+@assets(app_name='chief', asset_paths={'js': '/js'})
 @version_template
 class Config:
     displayName = 'Chief'
@@ -147,10 +151,28 @@ def prep_dirs(context: pp.ProcContext) -> None:
         os.makedirs(d, exist_ok=True)
 
 
-@pp.Proto(name='docker.compose-deps', deps=['prep-dirs', 'django.collectstatic::backend'])
+@pp.Proto(name='js.rich-content-build', deps=['assets.ensure::compose'])
+def rich_content_build(context: pp.ProcContext) -> None:
+    """Build browser renderer assets into Chief's externally mounted generated lane."""
+    static_web_root = 'backend/apps/web/static/web'
+    assets_paths = AssetsPathsResult.model_validate(context.results['assets.ensure::compose'])
+    js_gen = assets_paths.paths['js_gen']
+    prepare_js_runtime([static_web_root])
+    sh.pnpm(
+        'run',
+        'build:rich-content',
+        _cwd=static_web_root,
+        _env={**os.environ, 'CHIEF_RICH_CONTENT_OUTDIR': js_gen},
+        _fg=True,
+    )
+
+
+@pp.Proto(
+    name='docker.compose-deps',
+    deps=['prep-dirs', 'django.collectstatic::backend', 'js.rich-content-build'],
+)
 def docker_compose_deps(context: pp.ProcContext) -> None:
-    """Aggregate job run before `orunr docker compose`. Collects Django static
-    assets into backend/.output/static for chief-static nginx."""
+    """Aggregate generated and collected static assets before Compose starts."""
 
 
 def _implement_run_agent() -> click.Command:
