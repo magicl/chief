@@ -24,7 +24,7 @@ An agent is a single YAML file with two layers:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `owner` | yes | — | Owner identifier (username or org slug) |
+| `owner` | yes | — | Owner identifier (exact username or unique email) |
 | `identifier` | no | filename stem | Unique agent id within the owner scope |
 | `name` | no | same as `identifier` | Human-readable display name |
 
@@ -48,6 +48,7 @@ integrations: []   # shared connection configs (see Integrations)
 triggers: []       # how the agent is activated (see Triggers)
 tools: []          # tool instances available to the LLM (see Tools)
 queues: []         # work queues with optional sources (see Queues)
+skills: []         # prompt blocks loaded on demand (see Skills)
 ```
 
 | Field | Type | Required | Description |
@@ -61,6 +62,26 @@ queues: []         # work queues with optional sources (see Queues)
 | `triggers` | list of `TriggerSpec` | no | Activation rules |
 | `tools` | list of `ToolInstance` | no | Tool instances the LLM can call |
 | `queues` | list of `QueueSpec` | no | Agent-scoped work queues |
+| `skills` | list of `SkillSpec` | no | Named prompt blocks available on demand |
+
+---
+
+## Session limits
+
+Agent-level limits apply to every session unless a lower server or trigger cap wins:
+
+```yaml
+limits:
+  max_iterations: 50
+  max_cost_usd: 2.00
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `max_iterations` | int | Optional iteration cap; must be at least `1` |
+| `max_cost_usd` | decimal | Optional positive cost cap in USD |
+
+Chief uses the lowest configured cap at the server, agent, and trigger levels.
 
 ---
 
@@ -91,7 +112,7 @@ triggers:
 | `manual` | User-initiated; no automatic scheduling | — |
 | `schedule` | Cron-based periodic execution | `cron`, `prompt` |
 | `queue` | Fires when items appear on a named queue | `queue`, `prompt` |
-| `agent` | Triggered by another agent's output | `prompt` |
+| `agent` | Reserved schema kind; no runtime dispatcher is currently implemented | `prompt` |
 
 ### Fields
 
@@ -103,6 +124,11 @@ triggers:
 | `queue` | string | Queue id from `queues[]` (required for `queue` kind) |
 | `prompt` | string | Injected user-message at session start (required unless `manual`) |
 | `max_sessions` | int | Max concurrent sessions; defaults to `1` for schedule/queue, `null` for manual |
+| `max_iterations` | int | Optional per-session iteration cap; must be at least `1` |
+| `max_cost_usd` | decimal | Optional positive per-session cost cap in USD |
+
+Trigger limits only narrow the agent-level `limits` and server defaults. Chief uses
+the lowest configured value at the global, agent, and trigger levels.
 
 ---
 
@@ -146,6 +172,10 @@ The runner checks `allow` and `deny` before dispatching any function call:
 
 ### Built-in tools
 
+When `skills[]` is non-empty, Chief automatically exposes `load_skill.load`; do not
+declare it in `tools[]`. The function description lists the configured skill ids and
+descriptions, and calling it returns the selected skill's full content.
+
 #### `clock`
 
 Read-only UTC time. No credentials required.
@@ -156,9 +186,12 @@ Read-only UTC time. No credentials required.
 
 #### `gmail`
 
-Gmail operations. Requires a `google` credential containing the complete Google
-service-account JSON. The tool/integration/source type remains `gmail`; `gmail` is no
-longer a credential type.
+Gmail operations. Requires a `google` credential using either Google OAuth or a
+complete service-account JSON value. For OAuth, `gmail_read` permits read-only
+operations, `gmail_modify` permits reading and mailbox changes (including sending),
+and `gmail_send` permits sending only. Configure tool `allow`/`deny` to expose only
+operations authorized by the selected capabilities. The tool/integration/source type
+remains `gmail`; `gmail` is not a credential type.
 
 | Function | Description | Readonly |
 |----------|-------------|----------|
@@ -371,10 +404,33 @@ When a tool or source sets `integration: <id>`:
 
 ---
 
+## Skills
+
+Skills are named prompt blocks that an agent can discover and load only when relevant:
+
+```yaml
+skills:
+  - id: response-style
+    description: How to format customer-facing replies
+    content: |
+      Keep replies concise.
+      End with the next action the customer should take.
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique lowercase slug, max 64 characters |
+| `description` | string | Non-empty summary included in the `load_skill` tool description |
+| `content` | string | Non-empty instructions returned by `load_skill.load` |
+
+Chief adds the `load_skill` auto-tool only when at least one skill is configured.
+
+---
+
 ## Credentials
 
-Credentials supply secrets (API keys, OAuth tokens) to LLM providers, tools,
-and sources without embedding them in agent YAML.
+Credentials supply static secrets or OAuth grants to LLM providers, tools, and
+sources without embedding them in agent YAML.
 
 ### Credential references
 
@@ -392,6 +448,8 @@ Under Docker Compose, key files live in `.local/keys/*.yaml` (mapped to
 `/mnt/local/agents/*.yaml`). Outside Compose, both locations derive from the
 generic `CHIEF_LOCAL_DIR` application setting. Each key is a YAML file:
 
+Static credentials use `value`:
+
 ```yaml
 name: my-openai-key
 type: openai
@@ -399,15 +457,44 @@ owner: your-username
 value: sk-...
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Key name (matches `credential_ref` values) |
-| `type` | string | Credential type (`openai`, `anthropic`, `google`, `dropbox`, `clickup`, etc.) |
-| `owner` | string | Owner scope |
-| `value` | string | The secret value |
+OAuth credentials use `source: oauth` and capability ids in `scopes`; they never
+contain a provider grant, refresh token, OAuth application secret, or raw scope URL:
 
-Google Drive and Gmail share one canonical `google` credential containing the complete
-service-account key JSON:
+```yaml
+name: work-google
+type: google
+owner: user@example.com
+source: oauth
+scopes:
+  - gmail_read
+  - drive_metadata
+```
+
+`value` and `source`/`scopes` are mutually exclusive. Static declarations require
+the `value` key, although its string may be explicitly empty. OAuth declarations
+require `source: oauth` and at least one capability id.
+
+| Field | Form | Required | Description |
+|-------|------|----------|-------------|
+| `name` | both | no | Key name used by `credential_ref`; defaults to the filename stem |
+| `type` | both | yes | Credential type (`openai`, `anthropic`, `google`, `dropbox`, `clickup`, etc.) |
+| `owner` | both | yes | Owner username or unique email |
+| `value` | static | yes | Static secret string |
+| `source` | OAuth | yes | Must be `oauth` |
+| `scopes` | OAuth | yes | Non-empty list of provider capability ids, not raw OAuth scope URLs |
+
+Google is currently the only OAuth provider. Its currently tool-backed capability ids
+are `gmail_read`, `gmail_modify`, `gmail_send`, and `drive_metadata`;
+`drive_metadata` authorizes the read-only Google Drive metadata tool. After adding an
+OAuth declaration, use the Keys page to connect or reconnect the Google account.
+Chief stores the resulting grant encrypted in Postgres rather than writing it to
+disk. Changing the normalized capability set clears an existing grant, while changing
+from OAuth to a valid static declaration replaces the grant with the static value.
+Invalid declarations fail synchronization and leave the existing database row
+unchanged.
+
+Google Drive and Gmail also accept a static `google` credential whose `value` is the
+complete service-account key JSON:
 
 ```json
 {
@@ -425,18 +512,18 @@ service-account key JSON:
 }
 ```
 
-Enable the Gmail API and/or Drive API for the service-account project. Domain-wide
-delegation is required whenever Gmail is enabled and whenever Drive uses
-`config.subject` to impersonate a Workspace user. It is not required for Drive using
-the service-account identity directly. In Workspace Admin, authorize only the union of
-scopes needed by enabled tools:
+For service-account credentials, enable the Gmail API and/or Drive API for the
+service-account project. Domain-wide delegation is required whenever Gmail is enabled
+and whenever Drive uses `config.subject` to impersonate a Workspace user. It is not
+required for Drive using the service-account identity directly. In Workspace Admin,
+authorize only the union of scopes needed by enabled tools:
 
 - Gmail: `https://www.googleapis.com/auth/gmail.modify` and
   `https://www.googleapis.com/auth/gmail.send`
 - Drive: `https://www.googleapis.com/auth/drive.metadata.readonly`
 
-The current credential type `gmail` has been removed. Existing stored credentials are
-migrated to `google`; local key YAML is not rewritten, so change `type: gmail` to
+The credential type `gmail` has been removed. Existing stored credentials are migrated
+to `google`; local key YAML is not rewritten, so change `type: gmail` to
 `type: google`. Keep agent integration/tool/source type `gmail` unchanged.
 
 Dropbox credentials are JSON with all three non-empty fields:
@@ -476,6 +563,7 @@ The repository ships reference agent configs under
 | `queue-echo.yaml` | Queue processing with test source |
 | `clickup-inbox.yaml` | ClickUp INBOX router with gated tool and list source |
 | `inbox-triage-usecase.yaml` | Full inbox triage use-case |
+| `skills-demo.yaml` | On-demand prompt loading through the automatic `load_skill` tool |
 
 These files demonstrate increasing complexity — from a bare-bones agent to a
 full integration with sources, queues, triggers, and allow/deny gating.
