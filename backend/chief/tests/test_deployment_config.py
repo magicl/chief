@@ -58,14 +58,18 @@ class TestStageDeploymentConfig(OTestCase):
             },
         )
 
-    def test_cdn_upload_runs_after_backend_static_collection(self) -> None:
-        """The deployment graph uploads collected backend static files before deploy."""
+    def test_cdn_upload_creates_destination_before_sync(self) -> None:
+        """The deployment graph creates the release's static directory before rsync."""
         config_source = (REPOSITORY_ROOT / 'config.py').read_text()
+        ensure_call = "ensure_cdn_dir(cdn_info, release_name, 'public/static')"
+        sync_call = "sync_dir_to_cdn(cdn_info, release_name, static_dir, 'public/static')"
 
         self.assertIn("name='cdn.upload::[target]'", config_source)
         self.assertIn("deps=['django.collectstatic::backend']", config_source)
         self.assertIn("rdeps=['k8s.deploy::[target]']", config_source)
-        self.assertIn("sync_dir_to_cdn(cdn_info, release_name, static_dir, 'public/static')", config_source)
+        self.assertIn(ensure_call, config_source)
+        self.assertIn(sync_call, config_source)
+        self.assertLess(config_source.index(ensure_call), config_source.index(sync_call))
         self.assertNotIn('static-image-deps', config_source)
 
     def test_stage_uses_shared_development_cdn(self) -> None:
