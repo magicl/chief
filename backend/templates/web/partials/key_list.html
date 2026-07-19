@@ -25,8 +25,8 @@
       </td>
       <td class="muted">{% if key.updated_at %}{{ key.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
       <td>
+        <div style="display:flex; gap:.4rem; flex-wrap:wrap; justify-content:flex-end;">
         {% if key.status != 'disabled' and key.auth_kind == 'oauth' %}
-        <div style="display:flex; gap:.4rem; flex-wrap:wrap;">
           <form method="post" action="{{ url('settings_keys_oauth_authorize', kwargs={'credential_id': key.id}) }}">
             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <button type="submit" style="padding:.3rem .6rem;">{% if key.is_set %}Reauthenticate{% else %}Authenticate{% endif %}</button>
@@ -37,13 +37,19 @@
             <button type="submit" style="padding:.3rem .6rem;">Disconnect</button>
           </form>
           {% endif %}
-        </div>
-        {% elif key.source != 'disk' and key.auth_kind == 'static' %}
-        <form method="post" action="{{ url('settings_keys_delete_named', kwargs={'name': key.name}) }}">
-          <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-          <button type="submit" style="padding:.3rem .6rem;">Delete</button>
-        </form>
         {% endif %}
+          {% if key.source != 'disk' %}
+          <form method="post" action="{{ url('settings_keys_delete_named', kwargs={'name': key.name}) }}">
+            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+            <button
+              type="submit"
+              aria-label="Delete {{ key.name }}"
+              title="Delete {{ key.name }}"
+              style="padding:.3rem .6rem; color:#ef4444; border-color:#ef4444;"
+            >×</button>
+          </form>
+          {% endif %}
+        </div>
       </td>
     </tr>
     {% else %}
