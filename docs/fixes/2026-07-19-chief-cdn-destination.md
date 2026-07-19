@@ -41,4 +41,4 @@ No findings. Reviewer assessment: ready to merge.
 
 ## Links
 
-- PR: pending
+- PR: https://github.com/magicl/chief/pull/22
