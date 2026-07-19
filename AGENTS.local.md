@@ -116,7 +116,8 @@ save (avoids clobbering in-progress edits).
 
 ### Checklist when changing the schema (breaking bump only)
 
-Skip this checklist for optional-only additions — update `AgentConfigSpec` and tests only.
+Skip this checklist for optional-only additions — update `AgentConfigSpec` and tests only
+(and still update **`docs/docs/agents.md`** — see below).
 
 1. Update **`AgentConfigSpec`** (current version only) in `apps/agents/spec.py`.
 2. Add **`apps/agents/spec_migrations/migrations/NNN_{short_name}.py`** where `NNN` is the
@@ -129,12 +130,33 @@ Skip this checklist for optional-only additions — update `AgentConfigSpec` and
    - chain test from version 0 (and each intermediate) to current;
    - `get_spec()` on a model row at the previous `spec_version`.
 6. Update **`HARDCODED_SPEC`**, YAML fixtures, and docs/examples to the new version.
-7. Django migration **only** if new columns/indexes are needed — not for JSON rewrites.
+7. Update **`docs/docs/agents.md`** so envelope/`AgentConfigSpec` fields, trigger kinds,
+   tool/source/integration type-specific `config` tables, and credential forms match the
+   code (see **Keep agent docs in sync** below).
+8. Django migration **only** if new columns/indexes are needed — not for JSON rewrites.
+
+### Keep agent docs in sync
+
+**Whenever agent config shape changes — breaking or not — update
+`docs/docs/agents.md` in the same change.** That file is the operator-facing schema
+reference. In particular, update it when you:
+
+- Add, rename, remove, or retype fields on `AgentConfigSpec` / envelope / triggers /
+  queues / skills / credentials
+- Add or change type-specific `config` keys for a tool, source adapter, or integration
+  (e.g. Gmail `subject`, Drive/Dropbox `roots`, ClickUp `list_id` / `team_id`)
+- Add a new tool type, source adapter type, integration type, or credential type
+- Change defaults, requiredness, or semantics of documented config fields
+
+Do this for backward-compatible optional additions too (not only schema-version bumps).
+Leave the doc incomplete only if the user explicitly asks to defer documentation.
 
 **Additional codebase rules:**
 
 - **`AgentConfigSpec` schema changes:** follow **Agent config schema migrations** above —
   add a spec migration step and tests; do not transform spec JSON in Django data migrations.
+- **Agent docs:** keep **`docs/docs/agents.md`** aligned with the live schema and
+  type-specific config validators (see **Keep agent docs in sync**).
 - Algorithm config: pydantic struct per algorithm with defaults; override on call — avoid new env vars for tuning.
 
 ## For AI agents (Chief-specific)
@@ -142,4 +164,6 @@ Skip this checklist for optional-only additions — update `AgentConfigSpec` and
 - **Sandbox network**: `.cursor/sandbox.json` allows `curl` (and other HTTP clients) to reach the local dev server on `localhost` / `127.0.0.0/8`. Port numbers per slot are in `infra/docker/overlays/slot-*.env` (see olib **docker-compose** skill).
 - **Terminal allowlist**: `.cursor/permissions.json` and `.cursor/sandbox.json` allow `./olib/scripts/orunr` only (patterns need a `*` suffix for subcommands). Do not add `orun` to the allowlist.
 - **Web login for debugging**: The dashboard and session UI require a Django session. Log in at `http://localhost/admin/` (or the slot's nginx port) with `admin` / `nimda`, then return to `/` or a session URL. Agents debugging UI or API issues should do this first — unauthenticated requests won't see bootstrap/start controls or an owned agent list.
+- **Agent config docs**: any schema or type-specific `config` change must update
+  `docs/docs/agents.md` (see **Keep agent docs in sync** under Agent config schema migrations).
 - Follow established patterns in the backend codebase.

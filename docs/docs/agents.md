@@ -178,7 +178,7 @@ descriptions, and calling it returns the selected skill's full content.
 
 #### `clock`
 
-Read-only UTC time. No credentials required.
+Read-only UTC time. No credentials required. No `config` fields.
 
 | Function | Description | Parameters |
 |----------|-------------|------------|
@@ -192,6 +192,12 @@ operations, `gmail_modify` permits reading and mailbox changes (including sendin
 and `gmail_send` permits sending only. Configure tool `allow`/`deny` to expose only
 operations authorized by the selected capabilities. The tool/integration/source type
 remains `gmail`; `gmail` is not a credential type.
+
+**Config fields** (tool or integration `config`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `subject` | string | no | — | Workspace user to impersonate via domain-wide delegation (service accounts). Omit for OAuth (uses the connected account / `me`). |
 
 | Function | Description | Readonly |
 |----------|-------------|----------|
@@ -212,6 +218,24 @@ Typical deny pattern: `deny: [send, trash]` — restrict destructive operations.
 Read-only, metadata-only navigation and search within explicitly configured Google Drive
 roots. Requires a `google` credential.
 
+**Config fields** (tool or integration `config`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `roots` | list | yes | — | Non-empty list of aliased Drive roots (see root fields below) |
+| `subject` | string | no | — | Workspace user to impersonate via domain-wide delegation (service accounts). Omit for OAuth |
+
+**Root object fields** (`config.roots[]`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `id` | string | yes | — | Operator-chosen alias used as `root` in every tool call |
+| `file_id` | string | yes | — | Drive file/folder id (`root` is allowed and resolved to the canonical My Drive root) |
+| `corpus` | `user` \| `drive` | no | `user` | Search corpus; supplying `drive_id` forces `drive` |
+| `drive_id` | string | no | — | Shared Drive id; when set, selects the Shared Drive corpus |
+
+Root aliases and `file_id` values must each be unique within the list.
+
 | Function | Parameters | Description | Readonly |
 |----------|------------|-------------|----------|
 | `list_roots()` | none | Return metadata for configured roots | yes |
@@ -224,6 +248,22 @@ roots. Requires a `google` credential.
 Read-only, metadata-only navigation and search within explicitly configured Dropbox
 roots. Requires a `dropbox` credential.
 
+**Config fields** (tool or integration `config`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `roots` | list | yes | — | Non-empty list of aliased absolute Dropbox roots (see root fields below) |
+| `namespace_id` | string | no | — | Team-space namespace id selected before path resolution |
+
+**Root object fields** (`config.roots[]`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `id` | string | yes | — | Operator-chosen alias used as `root` in every tool call |
+| `path` | string | yes | — | Absolute normalized Dropbox path (e.g. `/Projects`; `/` for account root) |
+
+Root aliases and paths must each be unique within the list (paths compared case-insensitively for ASCII).
+
 | Function | Parameters | Description | Readonly |
 |----------|------------|-------------|----------|
 | `list_roots()` | none | Return metadata for configured roots | yes |
@@ -233,8 +273,7 @@ roots. Requires a `dropbox` credential.
 
 #### Cloud metadata tool contract
 
-Both cloud tools require a non-empty `config.roots` list. A root has an
-operator-chosen `id` alias used in every call:
+Example integrations using the fields above:
 
 ```yaml
 integrations:
@@ -255,11 +294,8 @@ integrations:
         - {id: projects, path: /Projects}
 ```
 
-Google roots require `id` and `file_id`; `corpus` defaults to `user`, while supplying
-`drive_id` selects and implies the Shared Drive corpus. Drive resolves the configured
-locator—including `file_id: root`—to its canonical current provider ID before checking
-ancestry. Dropbox roots require `id` and an absolute normalized `path`. Optional
-`namespace_id` selects a team-space path root before path resolution. Authorization uses
+Google Drive resolves the configured locator—including `file_id: root`—to its
+canonical current provider ID before checking ancestry. Dropbox authorization uses
 provider-authoritative `path_lower` segments, so sibling prefixes such as `/Projects2`
 do not pass for `/Projects`.
 
@@ -297,6 +333,13 @@ non-metadata feature is separately approved. Neither integration has a source ad
 
 ClickUp task management. Requires a `clickup` credential (API token).
 
+**Config fields** (tool or integration `config`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `team_id` | string | no* | — | Workspace id used as the default for `list_spaces` (*required for that function unless passed as an argument) |
+| `base_url` | string | no | `https://api.clickup.com/api/v2` | ClickUp API base URL (mainly for tests) |
+
 | Function | Description | Readonly |
 |----------|-------------|----------|
 | `list_spaces` | List spaces in a workspace | yes |
@@ -310,12 +353,10 @@ ClickUp task management. Requires a `clickup` credential (API token).
 
 Typical deny pattern: `deny: [delete_task]`.
 
-Config key: `team_id` (workspace id for `list_spaces` default).
-
 #### `queue`
 
 Agent-scoped queue operations. No external credential — bound to the session's
-agent and session ids at runtime.
+agent and session ids at runtime. No `config` fields.
 
 | Function | Description | Readonly |
 |----------|-------------|----------|
@@ -372,7 +413,52 @@ A source polls an external system and enqueues items with deduplication.
 | `type` | string | Adapter type (e.g. `gmail`, `clickup`, `test`) |
 | `integration` | string | Optional integration id for shared config |
 | `credential_ref` | string | Optional credential (overrides integration) |
-| `config` | object | Adapter-specific settings (query, list_id, etc.) |
+| `config` | object | Adapter-specific settings (see per-type tables below) |
+
+### Shared source config
+
+All source adapters accept:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `dedupe` | bool | no | `true` | When `true`, use a stable `external_id` so each upstream item is enqueued at most once. When `false`, derive `external_id` from a change token (Gmail `historyId`, ClickUp `date_updated`) so updates can re-enter the queue |
+
+### Source types
+
+#### `gmail` source
+
+Polls Gmail by search query. Requires a `google` credential.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `query` | string | yes | — | Gmail search query (e.g. `in:inbox -label:x-act`) |
+| `subject` | string | no | — | Workspace user to impersonate (service accounts). Omit for OAuth |
+| `max_results` | int | no | `25` | Max messages to fetch per poll (must be ≥ 1) |
+| `include_body` | bool | no | `false` | When `true`, include a truncated plain-text snippet in the enqueue payload |
+| `dedupe` | bool | no | `true` | See shared source config |
+
+#### `clickup` source
+
+Polls tasks from one ClickUp list. Requires a `clickup` credential.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `list_id` | string | yes | — | ClickUp list id to poll |
+| `statuses` | list of string | no | `[]` | When non-empty, only enqueue tasks in these statuses |
+| `max_results` | int | no | `50` | Max tasks to fetch per poll (must be ≥ 1) |
+| `include_closed` | bool | no | `false` | When `true`, include closed tasks from the ClickUp API |
+| `base_url` | string | no | `https://api.clickup.com/api/v2` | ClickUp API base URL (mainly for tests) |
+| `dedupe` | bool | no | `true` | See shared source config |
+
+#### `test` source
+
+Synthetic items for local development and automated tests. No credential.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `prefix` | string | no | `test` | Prefix for generated `external_id` values |
+| `batch_size` | int | no | `1` | Number of synthetic items to enqueue per poll (must be ≥ 1) |
+| `dedupe` | bool | no | `true` | See shared source config |
 
 ---
 
@@ -395,12 +481,21 @@ integrations:
 | `id` | string | Unique integration id |
 | `type` | string | Integration type (matches tool/source type) |
 | `credential_ref` | string | Credential key name |
-| `config` | object | Shared non-secret configuration |
+| `config` | object | Shared non-secret configuration — same type-specific keys as the matching tool/source (see Tools and Queues and sources) |
 
 When a tool or source sets `integration: <id>`:
 - `type` is inherited (must match if explicitly set on the tool/source).
 - `credential_ref` is inherited unless the tool/source overrides or explicitly nulls it.
 - `config` is merged (tool/source config wins on key conflicts).
+
+Type-specific `config` keys by integration `type`:
+
+| Type | Documented under | Typical shared keys |
+|------|------------------|---------------------|
+| `gmail` | Tools → `gmail` / Sources → `gmail` | `subject` (plus source-only `query`, `max_results`, …) |
+| `google_drive` | Tools → `google_drive` | `subject`, `roots` |
+| `dropbox` | Tools → `dropbox` | `namespace_id`, `roots` |
+| `clickup` | Tools → `clickup` / Sources → `clickup` | `team_id` / `list_id`, `base_url` |
 
 ---
 
