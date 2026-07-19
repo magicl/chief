@@ -196,7 +196,7 @@ class TestComposeRichContentAssets(OTestCase):
         package_path = repository_root / 'backend/apps/web/static/web/package.json'
         package = json.loads(package_path.read_text())
 
-        self.assertEqual(package['scripts']['postinstall'], 'playwright install chromium')
+        self.assertEqual(package['scripts']['postinstall'], 'pnpm run setup:browser')
 
     def test_static_service_mounts_generated_renderer_read_only(self) -> None:
         """The rich-content target has exactly one read-only external-assets mount."""
