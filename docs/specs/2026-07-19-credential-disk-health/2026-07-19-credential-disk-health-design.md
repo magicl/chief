@@ -1,7 +1,7 @@
 # Credential disk health — Design
 
 **Branch:** `feat/2026-07-19-credential-disk-health`
-Status: **implementing**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) ·
 Key management:
