@@ -23,10 +23,6 @@ if [[ "$ENTRYPOINT" == "web-server" ]]; then
 		exec uvicorn chief.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --lifespan off
 	fi
 elif [[ "$ENTRYPOINT" == "celery-worker" ]]; then
-	# Compose still runs as root; production's app user does not need this override.
-	if [[ "$(id -u)" == "0" ]]; then
-		export C_FORCE_ROOT=true
-	fi
 	# Agent sessions are long-lived and I/O-bound; use threads so concurrent
 	# sessions don't each occupy a prefork worker slot.
 	exec celery -A chief worker --loglevel=WARNING --pool=threads --concurrency=16

@@ -268,6 +268,20 @@ class TestCeleryEntrypointLogging(OTestCase):
         self.assertNotIn('--loglevel=INFO', entrypoint_source)
 
 
+class TestCeleryWorkerPrivileges(OTestCase):
+    """Check that Celery never needs its root-safety bypass."""
+
+    def test_compose_worker_runs_as_non_root(self) -> None:
+        """Use the host identity for mounted files and keep the bypass unset."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+        entrypoint_source = (repository_root / 'backend/entrypoint.sh').read_text()
+
+        self.assertEqual(compose['services']['chief-worker']['user'], '${UID:-1000}:${GID:-1000}')
+        self.assertNotIn('C_FORCE_ROOT', entrypoint_source)
+
+
 class TestProductionContainerConfig(OTestCase):
     """Verify hosted images and processes avoid development-only behavior."""
 

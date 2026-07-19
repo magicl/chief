@@ -115,6 +115,8 @@ services:
     environment:
       ENTRYPOINT: celery-worker
       CHIEF_LOCAL_DIR: /mnt/local
+    # Match the host identity so Celery stays non-root and can read bind-mounted local config.
+    user: "${UID:-1000}:${GID:-1000}"
     env_file:
       - ../../.output/env.compose.backend
       - path: ../../.env.local
