@@ -432,6 +432,9 @@ Chief adds the `load_skill` auto-tool only when at least one skill is configured
 Credentials supply static secrets or OAuth grants to LLM providers, tools, and
 sources without embedding them in agent YAML.
 
+See [OAuth Application Setup](oauth-apps.md) to create the Google or Dropbox
+application credentials used by Chief.
+
 ### Credential references
 
 | Context | Field | Description |
