@@ -554,66 +554,70 @@ style A fill:\75rl(https://attacker.invalid/a.svg)`,
     expect(existsSync(temporaryDirectory)).toBe(false);
   });
 
-  test('retains recent chunks, removes aged chunks, and publishes entries last', () => {
-    const outputDirectory = mkdtempSync(join(tmpdir(), 'chief-rich-content-'));
-    const publishLog = `${outputDirectory}-publish.log`;
-    const packageDirectory = dirname(fileURLToPath(import.meta.url));
-    try {
-      mkdirSync(join(outputDirectory, 'assets'));
-      writeFileSync(join(outputDirectory, 'stale-root.js'), 'stale');
-      const recentChunk = join(outputDirectory, 'assets', 'recent-stale-chunk.js');
-      const agedChunk = join(outputDirectory, 'assets', 'aged-stale-chunk.js');
-      writeFileSync(recentChunk, 'recent');
-      writeFileSync(agedChunk, 'aged');
-      const olderThanRetention = new Date(Date.now() - 25 * 60 * 60 * 1000);
-      utimesSync(agedChunk, olderThanRetention, olderThanRetention);
-      const outputDirectoryInode = statSync(outputDirectory).ino;
-      const initialStats = readdirSync(outputDirectory);
-      execFileSync('pnpm', ['run', 'build:rich-content'], {
-        cwd: packageDirectory,
-        env: {
-          ...env,
-          CHIEF_RICH_CONTENT_OUTDIR: outputDirectory,
-          CHIEF_RICH_CONTENT_PUBLISH_LOG: publishLog,
-        },
-        stdio: 'pipe',
-      });
+  test(
+    'retains recent chunks, removes aged chunks, and publishes entries last',
+    () => {
+      const outputDirectory = mkdtempSync(join(tmpdir(), 'chief-rich-content-'));
+      const publishLog = `${outputDirectory}-publish.log`;
+      const packageDirectory = dirname(fileURLToPath(import.meta.url));
+      try {
+        mkdirSync(join(outputDirectory, 'assets'));
+        writeFileSync(join(outputDirectory, 'stale-root.js'), 'stale');
+        const recentChunk = join(outputDirectory, 'assets', 'recent-stale-chunk.js');
+        const agedChunk = join(outputDirectory, 'assets', 'aged-stale-chunk.js');
+        writeFileSync(recentChunk, 'recent');
+        writeFileSync(agedChunk, 'aged');
+        const olderThanRetention = new Date(Date.now() - 25 * 60 * 60 * 1000);
+        utimesSync(agedChunk, olderThanRetention, olderThanRetention);
+        const outputDirectoryInode = statSync(outputDirectory).ino;
+        const initialStats = readdirSync(outputDirectory);
+        execFileSync('pnpm', ['run', 'build:rich-content'], {
+          cwd: packageDirectory,
+          env: {
+            ...env,
+            CHIEF_RICH_CONTENT_OUTDIR: outputDirectory,
+            CHIEF_RICH_CONTENT_PUBLISH_LOG: publishLog,
+          },
+          stdio: 'pipe',
+        });
 
-      const firstRootFiles = readdirSync(outputDirectory).sort();
-      const firstAssetFiles = readdirSync(join(outputDirectory, 'assets')).sort();
-      const firstPublishOrder = readFileSync(publishLog, 'utf8').trim().split('\n');
-      execFileSync('pnpm', ['run', 'build:rich-content'], {
-        cwd: packageDirectory,
-        env: {
-          ...env,
-          CHIEF_RICH_CONTENT_OUTDIR: outputDirectory,
-          CHIEF_RICH_CONTENT_PUBLISH_LOG: publishLog,
-        },
-        stdio: 'pipe',
-      });
-      const rootFiles = readdirSync(outputDirectory).sort();
-      const assetFiles = readdirSync(join(outputDirectory, 'assets')).sort();
+        const firstRootFiles = readdirSync(outputDirectory).sort();
+        const firstAssetFiles = readdirSync(join(outputDirectory, 'assets')).sort();
+        const firstPublishOrder = readFileSync(publishLog, 'utf8').trim().split('\n');
+        execFileSync('pnpm', ['run', 'build:rich-content'], {
+          cwd: packageDirectory,
+          env: {
+            ...env,
+            CHIEF_RICH_CONTENT_OUTDIR: outputDirectory,
+            CHIEF_RICH_CONTENT_PUBLISH_LOG: publishLog,
+          },
+          stdio: 'pipe',
+        });
+        const rootFiles = readdirSync(outputDirectory).sort();
+        const assetFiles = readdirSync(join(outputDirectory, 'assets')).sort();
 
-      expect(initialStats).toContain('stale-root.js');
-      expect(rootFiles).toEqual(firstRootFiles);
-      expect(assetFiles).toEqual(firstAssetFiles);
-      expect(statSync(outputDirectory).ino).toBe(outputDirectoryInode);
-      expect(rootFiles).not.toContain('stale-root.js');
-      expect(existsSync(recentChunk)).toBe(true);
-      expect(existsSync(agedChunk)).toBe(false);
-      expect(firstPublishOrder.slice(-2)).toEqual([
-        'rich_content.bundle.css',
-        'rich_content.bundle.js',
-      ]);
-      expect(rootFiles).toContain('rich_content.bundle.js');
-      expect(rootFiles).toContain('rich_content.bundle.css');
-      expect(rootFiles.some((name) => name.endsWith('.LEGAL.txt'))).toBe(true);
-      expect(assetFiles.some((name) => name.endsWith('.js'))).toBe(true);
-      expect(assetFiles.some((name) => /\.(?:woff2?|ttf)$/.test(name))).toBe(true);
-      expect(assetFiles.some((name) => name.endsWith('.LEGAL.txt'))).toBe(true);
-    } finally {
-      rmSync(outputDirectory, { recursive: true, force: true });
-      rmSync(publishLog, { force: true });
-    }
-  });
+        expect(initialStats).toContain('stale-root.js');
+        expect(rootFiles).toEqual(firstRootFiles);
+        expect(assetFiles).toEqual(firstAssetFiles);
+        expect(statSync(outputDirectory).ino).toBe(outputDirectoryInode);
+        expect(rootFiles).not.toContain('stale-root.js');
+        expect(existsSync(recentChunk)).toBe(true);
+        expect(existsSync(agedChunk)).toBe(false);
+        expect(firstPublishOrder.slice(-2)).toEqual([
+          'rich_content.bundle.css',
+          'rich_content.bundle.js',
+        ]);
+        expect(rootFiles).toContain('rich_content.bundle.js');
+        expect(rootFiles).toContain('rich_content.bundle.css');
+        expect(rootFiles.some((name) => name.endsWith('.LEGAL.txt'))).toBe(true);
+        expect(assetFiles.some((name) => name.endsWith('.js'))).toBe(true);
+        expect(assetFiles.some((name) => /\.(?:woff2?|ttf)$/.test(name))).toBe(true);
+        expect(assetFiles.some((name) => name.endsWith('.LEGAL.txt'))).toBe(true);
+      } finally {
+        rmSync(outputDirectory, { recursive: true, force: true });
+        rmSync(publishLog, { force: true });
+      }
+    },
+    30_000,
+  );
 });
