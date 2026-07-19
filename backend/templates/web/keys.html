@@ -104,7 +104,7 @@
               <span>
                 <strong>{{ capability.label }}</strong>
                 <span class="pill {% if capability.support == 'current' %}succeeded{% else %}waiting{% endif %}" style="margin-left:.35rem;">{{ capability.support_label }}</span>
-                <span class="muted" style="display:block; font-size:.82rem;">{{ capability.description }}</span>
+                <span class="muted" style="display:block; font-size:.82rem;">{{ capability.description }} ({{ capability.scope }})</span>
               </span>
             </label>
             {% endfor %}

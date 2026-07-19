@@ -89,6 +89,7 @@ def _oauth_catalog_for_ui() -> dict[str, list[dict[str, str]]]:
                 'id': capability.id,
                 'label': capability.label,
                 'description': capability.description,
+                'scope': capability.scope,
                 'support': capability.support,
                 'support_label': 'Available now' if capability.support == 'current' else 'Future support',
             }
