@@ -50,4 +50,9 @@ urlpatterns = [
         views.settings_keys_oauth_google_callback,
         name='settings_keys_oauth_google_callback',
     ),
+    path(
+        'settings/keys/oauth/dropbox/callback/',
+        views.settings_keys_oauth_dropbox_callback,
+        name='settings_keys_oauth_dropbox_callback',
+    ),
 ]

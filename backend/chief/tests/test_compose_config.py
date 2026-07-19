@@ -57,6 +57,23 @@ def _run_container_entrypoint(*, entrypoint: str, debug: str | None) -> tuple[su
         return result, commands
 
 
+def _run_isolated_settings_script(script: str, child_env: dict[str, str], repository_root: Path) -> list[object]:
+    """Run a settings-import script in a subprocess isolated from dotenv/ambient env vars."""
+    with tempfile.TemporaryDirectory() as empty_env_dir:
+        child_env['ENV_PATH'] = empty_env_dir
+        completed = subprocess.run(  # noqa: S603
+            [sys.executable, '-c', script],
+            cwd=repository_root / 'backend',
+            env=child_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    if completed.returncode:
+        raise AssertionError(f'isolated settings import failed: {completed.stderr}')
+    return cast('list[object]', json.loads(completed.stdout))
+
+
 class TestGoogleOAuthApplicationConfig(OTestCase):
     """Check optional Google OAuth app settings and their deployment contract."""
 
@@ -86,19 +103,7 @@ class TestGoogleOAuthApplicationConfig(OTestCase):
             'settings.GOOGLE_OAUTH_CLIENT_SECRET, '
             'settings.OAUTH_STATE_MAX_AGE_SECONDS]))\n'
         )
-        with tempfile.TemporaryDirectory() as empty_env_dir:
-            child_env['ENV_PATH'] = empty_env_dir
-            completed = subprocess.run(  # noqa: S603
-                [sys.executable, '-c', script],
-                cwd=repository_root / 'backend',
-                env=child_env,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        if completed.returncode:
-            raise AssertionError(f'isolated settings import failed: {completed.stderr}')
-        return cast('list[object]', json.loads(completed.stdout))
+        return _run_isolated_settings_script(script, child_env, repository_root)
 
     def test_blank_settings_allow_startup_without_google_oauth(self) -> None:
         """OAuth app credentials are optional while state lifetime stays bounded."""
@@ -181,6 +186,75 @@ class TestGoogleOAuthApplicationConfig(OTestCase):
         )
         self.assertIn('The current development nginx keeps `access_log off`.', normalized)
         self.assertRegex(nginx, r'(?m)^\s*access_log off;\s*$')
+
+
+class TestDropboxOAuthApplicationConfig(OTestCase):
+    """Check optional Dropbox OAuth app settings and their deployment contract."""
+
+    @staticmethod
+    def _load_oauth_settings(app_key: str | None, app_secret: str | None) -> list[object]:
+        """Import project settings in isolation from dotenv and ambient Dropbox OAuth values."""
+        repository_root = Path(__file__).resolve().parents[3]
+        child_env = os.environ.copy()
+        for setting_name in (
+            'DROPBOX_OAUTH_APP_KEY',
+            'DROPBOX_OAUTH_APP_KEY_FILE',
+            'DROPBOX_OAUTH_APP_SECRET',
+            'DROPBOX_OAUTH_APP_SECRET_FILE',
+        ):
+            child_env.pop(setting_name, None)
+        if app_key is not None:
+            child_env['DROPBOX_OAUTH_APP_KEY'] = app_key
+        if app_secret is not None:
+            child_env['DROPBOX_OAUTH_APP_SECRET'] = app_secret
+
+        script = (
+            'import json, sys\n'
+            "sys.argv = ['manage.py', 'test']\n"
+            'from chief import settings\n'
+            'print(json.dumps(['
+            'settings.DROPBOX_OAUTH_APP_KEY, '
+            'settings.DROPBOX_OAUTH_APP_SECRET]))\n'
+        )
+        return _run_isolated_settings_script(script, child_env, repository_root)
+
+    def test_blank_settings_allow_startup_without_dropbox_oauth(self) -> None:
+        """OAuth app credentials are optional so deployments without Dropbox OAuth still start."""
+        self.assertEqual(self._load_oauth_settings(None, None), ['', ''])
+
+    def test_oauth_settings_propagate_configured_values(self) -> None:
+        """Project settings preserve deployment-provided Dropbox OAuth application values."""
+        self.assertEqual(
+            self._load_oauth_settings('app-key-sentinel', 'app-secret-sentinel'),
+            ['app-key-sentinel', 'app-secret-sentinel'],
+        )
+
+    def test_env_example_places_blank_oauth_values_in_backend_group(self) -> None:
+        """Compose exposes only blank Dropbox OAuth app placeholders to backend consumers."""
+        repository_root = Path(__file__).resolve().parents[3]
+        env_example = (repository_root / '.env.local.example').read_text()
+        backend_match = re.search(
+            r'^#\[backend\]\s*$\n(?P<body>.*?)(?=^#\[|\Z)',
+            env_example,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+
+        self.assertIsNotNone(backend_match)
+        backend_body = backend_match.group('body') if backend_match else ''
+        for setting_name in ('DROPBOX_OAUTH_APP_KEY', 'DROPBOX_OAUTH_APP_SECRET'):
+            assignment = f'{setting_name}='
+            self.assertEqual(env_example.count(assignment), 1)
+            self.assertRegex(backend_body, rf'(?m)^{re.escape(assignment)}$')
+
+    def test_architecture_documents_dropbox_oauth_knox_and_callback_contract(self) -> None:
+        """Architecture fixes the Dropbox Knox mapping and callback beside Google's."""
+        repository_root = Path(__file__).resolve().parents[3]
+        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
+
+        self.assertIn('`$KNOX/chief/oauth/dropbox`', architecture)
+        self.assertIn('- `app_key` → `DROPBOX_OAUTH_APP_KEY`', architecture)
+        self.assertIn('- `app_secret` → `DROPBOX_OAUTH_APP_SECRET`', architecture)
+        self.assertIn('`https://<origin>/settings/keys/oauth/dropbox/callback/`', architecture)
 
 
 class TestComposeLocalProviderConfig(OTestCase):

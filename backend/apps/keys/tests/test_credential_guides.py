@@ -40,6 +40,14 @@ class TestCredentialGuides(OTestCase):
         self.assertIn('app_secret', guide.input_placeholder)
         self.assertIn('refresh_token', guide.input_placeholder)
 
+    def test_dropbox_guide_points_oauth_mode_at_keys_authenticate(self) -> None:
+        """Direct OAuth-mode users to Authenticate instead of claiming Chief never runs OAuth."""
+        guide = credential_guide('dropbox')
+        assert guide is not None
+        steps = ' '.join(guide.find_steps)
+        self.assertIn('Authenticate', steps)
+        self.assertNotIn('does not run the OAuth consent flow', steps)
+
     def test_ui_guides_cover_all_service_types(self) -> None:
         from apps.keys.types import SERVICE_TYPES
 

@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from apps.keys import crypto
 from apps.keys.exceptions import OAuthProviderError, OAuthStateError
 from apps.keys.models import CredentialStatus, UserCredential
+from apps.keys.oauth.providers.dropbox import DROPBOX_CAPABILITIES
 from apps.keys.oauth.providers.google import GOOGLE_CAPABILITIES, GoogleOAuthProvider
 from apps.keys.oauth.services import OAuthStart
 from apps.keys.services import commands
@@ -160,11 +161,13 @@ class TestKeysPage(OTransactionTestCase):
 
         parser = _CapabilityCheckboxParser()
         parser.feed(response.content.decode())
+        google_ids = {capability.id for capability in GOOGLE_CAPABILITIES}
+        google_checkboxes = [checkbox for checkbox in parser.checkboxes if checkbox.get('value') in google_ids]
         self.assertEqual(
-            [checkbox.get('value') for checkbox in parser.checkboxes],
+            [checkbox.get('value') for checkbox in google_checkboxes],
             [capability.id for capability in GOOGLE_CAPABILITIES],
         )
-        for checkbox in parser.checkboxes:
+        for checkbox in google_checkboxes:
             self.assertEqual(checkbox.get('type'), 'checkbox')
             self.assertNotIn('checked', checkbox)
 
@@ -186,6 +189,29 @@ class TestKeysPage(OTransactionTestCase):
         ):
             self.assertContains(response, label)
         self.assertContains(response, 'Future support', count=7)
+
+    def test_dropbox_form_renders_provider_capability_catalog_unchecked(self) -> None:
+        """Expose the Dropbox capability catalog alongside Google, unselected."""
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('settings_keys'))
+
+        self.assertContains(response, 'Dropbox authentication')
+        for capability in DROPBOX_CAPABILITIES:
+            self.assertContains(response, capability.id)
+            self.assertContains(response, capability.label)
+            self.assertContains(response, capability.description)
+            self.assertContains(response, f'{capability.description} ({capability.scope})')
+
+        parser = _CapabilityCheckboxParser()
+        parser.feed(response.content.decode())
+        dropbox_checkboxes = [
+            checkbox for checkbox in parser.checkboxes if checkbox.get('value') in {c.id for c in DROPBOX_CAPABILITIES}
+        ]
+        self.assertEqual(len(dropbox_checkboxes), len(DROPBOX_CAPABILITIES))
+        for checkbox in dropbox_checkboxes:
+            self.assertEqual(checkbox.get('type'), 'checkbox')
+            self.assertNotIn('checked', checkbox)
 
     def test_provider_catalog_json_escapes_html_metacharacters(self) -> None:
         """Render provider text once through normal HTML escaping without duplicate JSON."""
@@ -236,6 +262,26 @@ class TestKeysPage(OTransactionTestCase):
         row = self.user.credentials.get(name='google-oauth')
         self.assertEqual(row.auth_kind, 'oauth')
         self.assertEqual(row.auth_config, {'provider': 'google', 'capabilities': ['gmail_read', 'drive_metadata']})
+        self.assertEqual(bytes(row.encrypted_value), b'')
+
+    def test_post_add_dropbox_oauth_needs_capabilities_but_no_secret(self) -> None:
+        """Create an unconnected Dropbox declaration without hardcoding the Google provider."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse('settings_keys_add_named'),
+            {
+                'name': 'team-dropbox',
+                'type': 'dropbox',
+                'auth_kind': 'oauth',
+                'capabilities': ['files_metadata'],
+            },
+        )
+
+        self.assertRedirects(response, reverse('settings_keys'), fetch_redirect_response=False)
+        row = self.user.credentials.get(name='team-dropbox')
+        self.assertEqual(row.auth_kind, 'oauth')
+        self.assertEqual(row.auth_config, {'provider': 'dropbox', 'capabilities': ['files_metadata']})
         self.assertEqual(bytes(row.encrypted_value), b'')
 
     def test_post_add_multiline_google_json(self) -> None:
@@ -524,6 +570,60 @@ class TestKeysPage(OTransactionTestCase):
         )
         self.assertNotIn('app-secret-sentinel', response.headers['Location'])
 
+    @override_settings(
+        DROPBOX_OAUTH_APP_KEY='app-key',
+        DROPBOX_OAUTH_APP_SECRET='app-secret-sentinel',
+    )
+    def test_authorize_uses_dropbox_callback_for_dropbox_credential(self) -> None:
+        """Resolve the Dropbox provider from the credential instead of hardcoding Google."""
+        self.client.force_login(self.user)
+        commands.create_user_oauth(
+            self.user.pk,
+            'team-dropbox',
+            'dropbox',
+            provider_id='dropbox',
+            capability_ids=['files_metadata'],
+        )
+        row = self.user.credentials.get(name='team-dropbox')
+        authorization_url = 'https://www.dropbox.com/oauth2/authorize?x=1'
+
+        with patch(
+            'apps.web.views.oauth_services.start_authorization',
+            return_value=OAuthStart(authorization_url=authorization_url, state='s'),
+        ) as start:
+            response = self.client.post(reverse('settings_keys_oauth_authorize', kwargs={'credential_id': row.pk}))
+
+        self.assertRedirects(response, authorization_url, fetch_redirect_response=False)
+        self.assertEqual(
+            start.call_args.kwargs['redirect_uri'],
+            f'http://testserver{reverse("settings_keys_oauth_dropbox_callback")}',
+        )
+        self.assertNotIn('app-secret-sentinel', response.headers['Location'])
+
+    def test_google_authorize_still_uses_google_callback(self) -> None:
+        """Keep the Google credential routed to its own fixed callback (regression)."""
+        self.client.force_login(self.user)
+        commands.create_user_oauth(
+            self.user.pk,
+            'google-oauth',
+            'google',
+            provider_id='google',
+            capability_ids=['gmail_read'],
+        )
+        row = self.user.credentials.get(name='google-oauth')
+        authorization_url = 'https://accounts.google.test/authorize?state=safe-state'
+
+        with patch(
+            'apps.web.views.oauth_services.start_authorization',
+            return_value=OAuthStart(authorization_url=authorization_url, state='safe-state'),
+        ) as start:
+            self.client.post(reverse('settings_keys_oauth_authorize', kwargs={'credential_id': row.pk}))
+
+        self.assertEqual(
+            start.call_args.kwargs['redirect_uri'],
+            f'http://testserver{reverse("settings_keys_oauth_google_callback")}',
+        )
+
     @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Not Found: /settings/keys/oauth/.+', count=2)])
     def test_oauth_mutation_routes_enforce_ownership(self) -> None:
         """Hide credentials owned by another authenticated user."""
@@ -619,6 +719,87 @@ class TestKeysPage(OTransactionTestCase):
         )
         self.assertNotIn('code-sentinel', response.headers['Location'])
         self.assertNotIn('evil.test', response.headers['Location'])
+
+    def test_dropbox_callback_completes_with_dropbox_redirect_and_messages(self) -> None:
+        """Route the Dropbox callback through its own fixed URI and Dropbox-labeled message."""
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['oauth-test'] = True
+        session.save()
+        callback_url = reverse('settings_keys_oauth_dropbox_callback')
+
+        with patch('apps.web.views.oauth_services.complete_authorization') as complete:
+            response = self.client.get(
+                callback_url,
+                {'state': 'safe-state', 'code': 'code-sentinel', 'next': 'https://evil.test/'},
+            )
+
+        self.assertRedirects(response, reverse('settings_keys'), fetch_redirect_response=False)
+        self._assert_callback_hardening(response)
+        complete.assert_called_once_with(
+            user_id=self.user.pk,
+            session_key=self.client.session.session_key,
+            state='safe-state',
+            code='code-sentinel',
+            redirect_uri=f'http://testserver{callback_url}',
+        )
+        rendered = self.client.get(response.headers['Location']).content.decode()
+        self.assertEqual(rendered.count('Dropbox authorization completed.'), 1)
+        self.assertNotIn('code-sentinel', response.headers['Location'])
+        self.assertNotIn('evil.test', response.headers['Location'])
+
+    def test_dropbox_callback_denial_and_failures_use_dropbox_safe_messages(self) -> None:
+        """Use Dropbox-labeled fixed messages, never the Google-only strings."""
+        self.client.force_login(self.user)
+        callback_url = reverse('settings_keys_oauth_dropbox_callback')
+
+        with patch(
+            'apps.web.views.oauth_services.complete_authorization',
+            side_effect=OAuthStateError('safe callback failure'),
+        ):
+            response = self.client.get(callback_url, {'state': 'safe-state', 'code': 'code-sentinel'})
+
+        self.assertRedirects(response, reverse('settings_keys'), fetch_redirect_response=False)
+        self._assert_callback_hardening(response)
+        rendered = self.client.get(response.headers['Location']).content.decode()
+        self.assertEqual(rendered.count('Dropbox authorization could not be completed.'), 1)
+        self.assertNotIn('Google authorization', rendered)
+
+        with patch('apps.web.views.oauth_services.complete_authorization') as complete:
+            denied = self.client.get(callback_url, {'state': 'safe-state', 'error': 'access_denied'})
+        self.assertEqual(complete.call_args.kwargs['code'], None)
+        self.assertRedirects(denied, reverse('settings_keys'), fetch_redirect_response=False)
+        rendered = self.client.get(denied.headers['Location']).content.decode()
+        self.assertEqual(rendered.count('Dropbox authorization was denied.'), 1)
+
+    @override_settings(DROPBOX_OAUTH_APP_KEY='', DROPBOX_OAUTH_APP_SECRET='')
+    @expectLogItems(
+        [
+            ExpectLogItem(
+                'django.request',
+                logging.WARNING,
+                r'Bad Request: /settings/keys/oauth/.+/authorize/',
+                count=1,
+            )
+        ]
+    )
+    def test_authorize_missing_dropbox_configuration_uses_dropbox_safe_message(self) -> None:
+        """Fail Dropbox authorization with a Dropbox-labeled message, not the Google-only string."""
+        self.client.force_login(self.user)
+        commands.create_user_oauth(
+            self.user.pk,
+            'team-dropbox',
+            'dropbox',
+            provider_id='dropbox',
+            capability_ids=['files_metadata'],
+        )
+        row = self.user.credentials.get(name='team-dropbox')
+
+        response = self.client.post(reverse('settings_keys_oauth_authorize', kwargs={'credential_id': row.pk}))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'Dropbox authorization could not be started.', response.content)
+        self.assertNotIn(b'Google authorization', response.content)
 
     def test_callback_denial_and_failures_use_fixed_safe_messages(self) -> None:
         """Consume denial state and sanitize state/provider failures."""

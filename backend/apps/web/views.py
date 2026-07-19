@@ -30,7 +30,11 @@ from apps.keys.models import CredentialSource
 from apps.keys.oauth import OAUTH_PROVIDERS
 from apps.keys.oauth import services as oauth_services
 from apps.keys.services import commands
-from apps.keys.services.queries import list_user_credentials
+from apps.keys.services.queries import (
+    get_oauth_metadata,
+    get_owned_user_credential,
+    list_user_credentials,
+)
 from apps.keys.types import SERVICE_TYPES
 from apps.runner.dispatch import (
     maybe_dispatch_session,
@@ -82,10 +86,15 @@ def _html_safe_json(value: Any) -> str:
 
 
 def _oauth_catalog_for_ui() -> dict[str, list[dict[str, str]]]:
-    """Return provider-owned, secret-free capability copy for the credential form."""
-    provider = OAUTH_PROVIDERS.get('google')
-    return {
-        provider.id: [
+    """Return provider-owned, secret-free capability copy for the credential form.
+
+    Iterates every registered provider so the Keys page form generalizes to new
+    providers without hardcoding a single provider id.
+    """
+    catalog: dict[str, list[dict[str, str]]] = {}
+    for provider_id in OAUTH_PROVIDERS.provider_ids():
+        provider = OAUTH_PROVIDERS.get(provider_id)
+        catalog[provider.id] = [
             {
                 'id': capability.id,
                 'label': capability.label,
@@ -96,12 +105,31 @@ def _oauth_catalog_for_ui() -> dict[str, list[dict[str, str]]]:
             }
             for capability in provider.capabilities
         ]
-    }
+    return catalog
 
 
-def _fixed_google_callback_uri(request: HttpRequest) -> str:
-    """Build the sole callback URI and require HTTPS outside local development."""
-    callback_uri = request.build_absolute_uri(reverse('settings_keys_oauth_google_callback'))
+_CALLBACK_ROUTE_NAMES = {
+    'google': 'settings_keys_oauth_google_callback',
+    'dropbox': 'settings_keys_oauth_dropbox_callback',
+}
+
+_PROVIDER_LABELS = {
+    'google': 'Google',
+    'dropbox': 'Dropbox',
+}
+
+
+def _provider_label(provider_id: str | None) -> str:
+    """Return the capitalized provider name used in fixed, secret-free user messages."""
+    return _PROVIDER_LABELS.get(provider_id or '', 'OAuth')
+
+
+def _fixed_oauth_callback_uri(request: HttpRequest, provider_id: str) -> str:
+    """Build the provider-fixed callback URI; require HTTPS outside local development."""
+    route_name = _CALLBACK_ROUTE_NAMES.get(provider_id)
+    if route_name is None:
+        raise OAuthConfigurationError('OAuth callback is unavailable')
+    callback_uri = request.build_absolute_uri(reverse(route_name))
     if not settings.DEBUG and not callback_uri.startswith('https://'):
         raise OAuthConfigurationError('OAuth callback is unavailable')
     return callback_uri
@@ -420,6 +448,8 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
             'service_types': sorted(SERVICE_TYPES),
             'credential_guides_json': _html_safe_json(credential_guides_for_ui()),
             'google_oauth_capabilities': oauth_catalog['google'],
+            'dropbox_oauth_capabilities': oauth_catalog['dropbox'],
+            'oauth_capable_types_json': _html_safe_json(sorted(oauth_catalog)),
             'HEALTH_CODE_LABELS': HEALTH_CODE_LABELS,
         },
     )
@@ -459,7 +489,7 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
                 user.pk,
                 name,
                 type_name,
-                provider_id='google',
+                provider_id=OAUTH_PROVIDERS.provider_id_for_credential_type(type_name),
                 capability_ids=request.POST.getlist('capabilities'),
             )
         else:
@@ -473,20 +503,23 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 @require_POST
 def settings_keys_oauth_authorize(request: HttpRequest, credential_id: UUID) -> HttpResponse:
-    """Start an owned OAuth declaration using the fixed callback and current session."""
+    """Start an owned OAuth declaration using its provider's fixed callback and current session."""
     user_id = _require_authenticated_user_id(request)
+    provider_id: str | None = None
     try:
+        row = get_owned_user_credential(user_id, credential_id)
+        provider_id, _ = get_oauth_metadata(row)
         start = oauth_services.start_authorization(
             user_id=user_id,
             credential_id=credential_id,
             session_key=_existing_session_key(request, create=True),
-            redirect_uri=_fixed_google_callback_uri(request),
+            redirect_uri=_fixed_oauth_callback_uri(request, provider_id or ''),
         )
     except KeyNotFoundError as exc:
         raise Http404('OAuth credential not found') from exc
     except (KeyValidationError, OAuthConfigurationError, OAuthProviderError, OAuthStateError) as failure:
         _scrub_caught_oauth_failure(failure)
-        return HttpResponseBadRequest('Google authorization could not be started.')
+        return HttpResponseBadRequest(f'{_provider_label(provider_id)} authorization could not be started.')
     return redirect(start.authorization_url)
 
 
@@ -507,13 +540,16 @@ def settings_keys_oauth_disconnect(request: HttpRequest, credential_id: UUID) ->
     return redirect('settings_keys')
 
 
-@_harden_oauth_callback_response
-@require_GET
-def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
-    """Complete Google's callback with fixed safe messages and an internal redirect."""
+def _complete_oauth_callback(request: HttpRequest, *, provider_id: str) -> HttpResponse:
+    """Complete one provider's fixed callback route with safe, provider-labeled messages.
+
+    Shared by every provider callback view; the caller supplies the fixed ``provider_id``
+    for its own route so no query parameter ever selects the provider or callback URI.
+    """
     if not request.user.is_authenticated:
         # Do not copy callback query parameters containing the authorization code into `next`.
         return redirect('/admin/login/')
+    label = _provider_label(provider_id)
     provider_denied = bool(request.GET.get('error'))
     try:
         oauth_services.complete_authorization(
@@ -521,7 +557,7 @@ def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
             session_key=_existing_session_key(request, create=False),
             state=request.GET.get('state', ''),
             code=None if provider_denied else request.GET.get('code', ''),
-            redirect_uri=_fixed_google_callback_uri(request),
+            redirect_uri=_fixed_oauth_callback_uri(request, provider_id),
         )
     except (
         KeyNotFoundError,
@@ -532,13 +568,27 @@ def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
         OAuthStateError,
     ) as failure:
         _scrub_caught_oauth_failure(failure)
-        messages.error(request, 'Google authorization could not be completed.')
+        messages.error(request, f'{label} authorization could not be completed.')
     else:
         if provider_denied:
-            messages.error(request, 'Google authorization was denied.')
+            messages.error(request, f'{label} authorization was denied.')
         else:
-            messages.success(request, 'Google authorization completed.')
+            messages.success(request, f'{label} authorization completed.')
     return redirect('settings_keys')
+
+
+@_harden_oauth_callback_response
+@require_GET
+def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
+    """Complete Google's fixed callback route with Google-labeled safe messages."""
+    return _complete_oauth_callback(request, provider_id='google')
+
+
+@_harden_oauth_callback_response
+@require_GET
+def settings_keys_oauth_dropbox_callback(request: HttpRequest) -> HttpResponse:
+    """Complete Dropbox's fixed callback route with Dropbox-labeled safe messages."""
+    return _complete_oauth_callback(request, provider_id='dropbox')
 
 
 @login_required(login_url='/admin/login/')

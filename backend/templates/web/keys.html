@@ -17,12 +17,15 @@
 <div class="card" style="margin-top:1.5rem;">
   <h3 style="font-size:.85rem; margin-top:1.25rem; color:#8b93a7;">Add key</h3>
   <script id="credential-guides-data" type="application/json">{{ credential_guides_json|safe }}</script>
+  <script id="oauth-capable-types-data" type="application/json">{{ oauth_capable_types_json|safe }}</script>
   <div
     x-data="{
       type: '',
       authKind: 'static',
       guides: JSON.parse(document.getElementById('credential-guides-data').textContent),
+      oauthCapableTypes: JSON.parse(document.getElementById('oauth-capable-types-data').textContent),
       get guide() { return this.type ? this.guides[this.type] : null; },
+      get isOAuthCapable() { return this.oauthCapableTypes.includes(this.type); },
       selectType(value) {
         this.type = value;
         this.authKind = 'static';
@@ -32,7 +35,7 @@
   >
     <form method="post" action="{{ url('settings_keys_add_named') }}" style="display:grid; gap:.75rem;">
       <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <input type="hidden" name="auth_kind" value="static" :disabled="type === 'google'">
+      <input type="hidden" name="auth_kind" value="static" :disabled="isOAuthCapable">
       <label>Type
         <select name="type" x-model="type" @change="selectType($event.target.value)" required style="width:100%; padding:.35rem .5rem;">
           <option value="" disabled selected>Select a credential type…</option>
@@ -44,7 +47,7 @@
 
       <template x-if="guide">
         <div style="display:grid; gap:.75rem;">
-          <div x-show="type !== 'google' || authKind === 'static'" class="card" style="padding:.75rem 1rem; background:#12151c;">
+          <div x-show="!isOAuthCapable || authKind === 'static'" class="card" style="padding:.75rem 1rem; background:#12151c;">
             <p style="margin:0 0 .5rem; font-size:.85rem; color:#9ec5ff;" x-text="guide.label + ' setup'"></p>
             <ol style="margin:0; padding-left:1.25rem; font-size:.85rem; color:#b8c0d0;">
               <template x-for="step in guide.find_steps" :key="step">
@@ -67,6 +70,18 @@
             </label>
             <label>
               <input type="radio" name="auth_kind" value="oauth" x-model="authKind" :disabled="type !== 'google'">
+              OAuth
+            </label>
+          </fieldset>
+
+          <fieldset x-show="type === 'dropbox'" style="border:0; padding:0; margin:0; display:grid; gap:.4rem;">
+            <legend style="font-size:.85rem; color:#c5cdd9; margin-bottom:.25rem;">Dropbox authentication</legend>
+            <label>
+              <input type="radio" name="auth_kind" value="static" x-model="authKind" :disabled="type !== 'dropbox'">
+              Static JSON
+            </label>
+            <label>
+              <input type="radio" name="auth_kind" value="oauth" x-model="authKind" :disabled="type !== 'dropbox'">
               OAuth
             </label>
           </fieldset>
@@ -99,6 +114,26 @@
                 name="capabilities"
                 value="{{ capability.id }}"
                 :disabled="type !== 'google' || authKind !== 'oauth'"
+                style="margin-top:.25rem;"
+              >
+              <span>
+                <strong>{{ capability.label }}</strong>
+                <span class="pill {% if capability.support == 'current' %}succeeded{% else %}waiting{% endif %}" style="margin-left:.35rem;">{{ capability.support_label }}</span>
+                <span class="muted" style="display:block; font-size:.82rem;">{{ capability.description }} ({{ capability.scope }})</span>
+              </span>
+            </label>
+            {% endfor %}
+          </fieldset>
+
+          <fieldset x-show="type === 'dropbox' && authKind === 'oauth'" style="display:grid; gap:.6rem; border:1px solid #262a33; border-radius:8px; padding:.75rem 1rem;">
+            <legend style="font-size:.85rem; color:#c5cdd9;">Dropbox OAuth capabilities</legend>
+            {% for capability in dropbox_oauth_capabilities %}
+            <label style="display:grid; grid-template-columns:auto 1fr; gap:.15rem .5rem; align-items:start;">
+              <input
+                type="checkbox"
+                name="capabilities"
+                value="{{ capability.id }}"
+                :disabled="type !== 'dropbox' || authKind !== 'oauth'"
                 style="margin-top:.25rem;"
               >
               <span>

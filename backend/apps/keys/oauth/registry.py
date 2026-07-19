@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from apps.keys.exceptions import KeyValidationError
+from apps.keys.oauth.providers.dropbox import DROPBOX_OAUTH_PROVIDER
 from apps.keys.oauth.providers.google import GOOGLE_OAUTH_PROVIDER
 from apps.keys.oauth.types import OAuthProvider
 
@@ -35,6 +36,18 @@ class OAuthProviderRegistry:
         """Return registered IDs in deterministic registration order."""
         return tuple(self._providers)
 
+    def provider_id_for_credential_type(self, credential_type: str) -> str:
+        """Return the registered provider id whose credential type matches *credential_type*.
+
+        Callers (disk sync, HTTP views) use this instead of hardcoding a single
+        provider id so every registered OAuth provider works generically.
+        """
+        for provider in self._providers.values():
+            if provider.credential_type == credential_type:
+                return provider.id
+        raise KeyValidationError('credential type does not support OAuth')
+
 
 OAUTH_PROVIDERS = OAuthProviderRegistry()
 OAUTH_PROVIDERS.register(GOOGLE_OAUTH_PROVIDER)
+OAUTH_PROVIDERS.register(DROPBOX_OAUTH_PROVIDER)

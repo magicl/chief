@@ -568,6 +568,15 @@ scopes:
   - drive_metadata
 ```
 
+```yaml
+name: team-dropbox
+type: dropbox
+owner: user@example.com
+source: oauth
+scopes:
+  - files_metadata
+```
+
 `value` and `source`/`scopes` are mutually exclusive. Static declarations require
 the `value` key, although its string may be explicitly empty. OAuth declarations
 require `source: oauth` and at least one capability id.
@@ -581,13 +590,16 @@ require `source: oauth` and at least one capability id.
 | `source` | OAuth | yes | Must be `oauth` |
 | `scopes` | OAuth | yes | Non-empty list of provider capability ids, not raw OAuth scope URLs |
 
-Google is currently the only OAuth provider. Its currently tool-backed capability ids
-are `gmail_read`, `gmail_modify`, `gmail_send`, and `drive_metadata`;
-`drive_metadata` authorizes the read-only Google Drive metadata tool. After adding an
-OAuth declaration, use the Keys page to connect or reconnect the Google account.
-Chief stores the resulting grant encrypted in Postgres rather than writing it to
-disk. Changing the normalized capability set clears an existing grant, while changing
-from OAuth to a valid static declaration replaces the grant with the static value.
+Google and Dropbox are the currently registered OAuth providers. Google's
+tool-backed capability ids are `gmail_read`, `gmail_modify`, `gmail_send`, and
+`drive_metadata`; `drive_metadata` authorizes the read-only Google Drive metadata
+tool. Dropbox has one capability id, `files_metadata`, which authorizes the
+read-only Dropbox metadata tool (`list_roots`, `list_folder`, `get_metadata`,
+`search`). After adding an OAuth declaration, use the Keys page to Authenticate (or
+Reauthenticate) the account. Chief stores the resulting grant encrypted in Postgres
+rather than writing it to disk. Changing the normalized capability set clears an
+existing grant, while changing from OAuth to a valid static declaration replaces the
+grant with the static value.
 An invalid declaration (unrecognized fields, missing scopes, or an unregistered
 type) still creates or updates an identifiable row so it shows up on the Keys page,
 but it is flagged with a durable health code and cannot be resolved, reconnected, or
@@ -636,7 +648,8 @@ The credential type `gmail` has been removed. Existing stored credentials are mi
 to `google`; local key YAML is not rewritten, so change `type: gmail` to
 `type: google`. Keep agent integration/tool/source type `gmail` unchanged.
 
-Dropbox credentials are JSON with all three non-empty fields:
+Dropbox credentials support either OAuth (`source: oauth`, `scopes: [files_metadata]`,
+above) or a static credential whose `value` is JSON with all three non-empty fields:
 
 ```json
 {
@@ -646,11 +659,15 @@ Dropbox credentials are JSON with all three non-empty fields:
 }
 ```
 
-Create a Dropbox API app with only `files.metadata.read`, then provision an offline
-refresh token outside Chief; Chief does not run the OAuth consent flow. Choose Full
-Dropbox access for roots in pre-existing account content. App Folder access is
-sufficient only when every configured root is inside that app folder. For team-space
-content, configure the appropriate `namespace_id` on the integration.
+For OAuth, create a Dropbox API app with only `files.metadata.read`, register a
+Chief callback URL, and set the app key/secret as the deployment's OAuth application
+credentials; users then Authenticate on the Keys page and Chief runs the consent flow.
+For a static credential, provision the offline refresh token outside Chief instead.
+Either way, choose Full Dropbox access for roots in pre-existing account content.
+App Folder access is sufficient only when every configured root is inside that app
+folder. For team-space content, configure the appropriate `namespace_id` on the
+integration. See [OAuth Application Setup](oauth-apps.md) for the Dropbox app
+console steps.
 
 Templates:
 [`example-openai.yaml`](../../examples/local/keys/example-openai.yaml),

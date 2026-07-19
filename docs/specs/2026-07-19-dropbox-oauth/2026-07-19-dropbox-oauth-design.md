@@ -1,7 +1,7 @@
 # Dropbox OAuth credentials — Design
 
 **Branch:** `feat/2026-07-19-dropbox-oauth`
-Status: **plan**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) ·
 Credential storage:

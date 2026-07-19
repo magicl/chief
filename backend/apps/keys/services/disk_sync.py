@@ -18,6 +18,7 @@ from apps.keys.models import (
     CredentialStatus,
     UserCredential,
 )
+from apps.keys.oauth.registry import OAUTH_PROVIDERS
 from apps.keys.oauth.services import normalize_auth_config
 from apps.keys.services.commands import upsert_disk_health, upsert_user_named_from_disk
 from apps.keys.services.owner import resolve_owner
@@ -88,8 +89,9 @@ def _sync_parsed_outcome(outcome: KeyDiskParseOutcome, *, owner_id: int) -> bool
 
     if file.auth_kind == 'oauth':
         try:
+            provider_id = OAUTH_PROVIDERS.provider_id_for_credential_type(type_name)
             auth_config = normalize_auth_config(
-                provider_id='google',
+                provider_id=provider_id,
                 credential_type=type_name,
                 capability_ids=file.capabilities,
             )

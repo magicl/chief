@@ -40,6 +40,10 @@ from libs.clients.dropbox.errors import (
     DropboxOutsideRootError,
     DropboxRateLimitedError,
 )
+from libs.dropbox_scopes import DROPBOX_OAUTH_SCOPES as _CANONICAL_DROPBOX_OAUTH_SCOPES
+
+# Re-export so provider/runtime contract tests can assert a single shared allowlist.
+DROPBOX_OAUTH_SCOPES = _CANONICAL_DROPBOX_OAUTH_SCOPES
 
 DropboxSDKFactory = Callable[[str], Any]
 
@@ -74,12 +78,26 @@ def _credential_field(info: Mapping[str, Any], field: str) -> str:
     return value.strip()
 
 
+# Chief's operation-local Dropbox OAuth runtime envelope (mirrors the Google OAuth
+# envelope contract in ``libs.clients.google_auth``): an exact integer version
+# sentinel, an exact field set, and scopes from the shared Dropbox allowlist.
+_OAUTH_ENVELOPE_SENTINEL = 'chief_dropbox_oauth'
+_OAUTH_ENVELOPE_FIELDS = frozenset({_OAUTH_ENVELOPE_SENTINEL, 'app_key', 'app_secret', 'refresh_token', 'scopes'})
+
+
 def _build_sdk(raw_credential: str) -> Any:
-    """Build the official Dropbox SDK from a complete refresh credential JSON value."""
+    """Build the official Dropbox SDK from static refresh JSON or a Chief OAuth envelope.
+
+    Recognizes Chief's versioned ``chief_dropbox_oauth: 1`` runtime envelope; any other
+    JSON object is treated as the legacy static refresh credential shape. Both paths
+    build the SDK identically. Tracebacks retain frame locals, so every credential-
+    bearing local is scrubbed in ``finally`` regardless of which path is taken or fails.
+    """
     info: Any = None
     app_key: str | None = None
     app_secret: str | None = None
     refresh_token: str | None = None
+    scopes: Any = None
     sdk: Any = None
     try:
         invalid_json = False
@@ -91,6 +109,19 @@ def _build_sdk(raw_credential: str) -> Any:
             raise DropboxAuthError('Dropbox refresh credential is not valid JSON') from None
         if not isinstance(info, Mapping):
             raise DropboxAuthError('Dropbox refresh credential must be a JSON object')
+        if _OAUTH_ENVELOPE_SENTINEL in info:
+            version = info.get(_OAUTH_ENVELOPE_SENTINEL)
+            if not isinstance(version, int) or isinstance(version, bool) or version != 1:
+                raise DropboxAuthError('Dropbox OAuth envelope has an invalid version')
+            if set(info) != _OAUTH_ENVELOPE_FIELDS:
+                raise DropboxAuthError('Dropbox OAuth envelope is invalid')
+            scopes = info.get('scopes')
+            if (
+                not isinstance(scopes, list)
+                or not scopes
+                or any(not isinstance(scope, str) or scope not in DROPBOX_OAUTH_SCOPES for scope in scopes)
+            ):
+                raise DropboxAuthError('Dropbox OAuth envelope is invalid')
         app_key = _credential_field(info, 'app_key')
         app_secret = _credential_field(info, 'app_secret')
         refresh_token = _credential_field(info, 'refresh_token')
@@ -117,6 +148,7 @@ def _build_sdk(raw_credential: str) -> Any:
         app_key = None
         app_secret = None
         refresh_token = None
+        scopes = None
         sdk = None
 
 
