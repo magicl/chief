@@ -48,6 +48,7 @@ services:
     volumes:
       - ../k8s/nginx.static.conf:/etc/nginx/nginx.conf:ro
       - ../../backend/.output/static:/etc/storage/public/static
+      - /mnt/infra-assets/chief/js/gen:/etc/storage/public/static/web/rich-content:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/readyz || exit 1"]
       interval: 100h

@@ -43,6 +43,67 @@ class TestSessionEventView(OTransactionTestCase):
         self.assertContains(response, 'scrollToBottom')
         self.assertContains(response, 'formatEventStats')
 
+    def test_session_page_loads_rich_output_assets(self) -> None:
+        """The session page loads the rich renderer bundle and styles."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        body = response.content.decode()
+        self.assertContains(response, 'web/rich-content/rich_content.bundle.js')
+        self.assertContains(response, 'web/rich-content/rich_content.bundle.css')
+        self.assertLess(body.index('rich_content.bundle.js'), body.index('function sessionView'))
+
+    def test_session_page_has_default_on_beautify_control(self) -> None:
+        """Beautification starts on with an understandable pressed control."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, 'class="event-toolbar-actions"')
+        self.assertContains(response, 'beautify: true')
+        self.assertContains(response, ':aria-pressed="beautify.toString()"')
+        self.assertContains(response, '@click="toggleBeautify()"')
+        self.assertContains(response, "beautify ? 'Beautify: On' : 'Beautify: Off'")
+        self.assertContains(response, ':class="{ \'active\': beautify }"')
+
+    def test_session_page_routes_only_outputs_to_rich_renderer(self) -> None:
+        """Only exact OUTPUT event content enters the rich renderer."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, '<template x-if="evt.kind === \'OUTPUT\'">')
+        self.assertContains(response, 'class="event-body rich-output"')
+        self.assertContains(response, 'x-show="beautify && richContentReady"')
+        self.assertContains(
+            response,
+            'x-effect="beautify && richContentReady && renderOutput($el, evt)"',
+        )
+        self.assertContains(response, 'x-show="!beautify || !richContentReady"')
+        self.assertContains(response, '<template x-if="evt.kind !== \'OUTPUT\'">')
+        self.assertContains(response, 'x-text="formatPayload(evt)"', count=2)
+
+    def test_session_page_keeps_beautify_state_local(self) -> None:
+        """Beautify state stays page-local and cancels hidden rich output."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertNotContains(response, 'localStorage')
+        self.assertNotContains(response, 'sessionStorage')
+        self.assertContains(response, 'renderedOutputs: new WeakMap()')
+        self.assertContains(response, "this.$refs.eventPanel.querySelectorAll('.rich-output')")
+        self.assertNotContains(response, "document.querySelectorAll('.rich-output')")
+        self.assertContains(response, 'cancelRichContent(element)')
+        self.assertContains(response, 'renderRichOutputAttempt')
+
+    def test_session_page_observes_delayed_rich_content_readiness(self) -> None:
+        """The session reacts to renderer readiness and removes its listener."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, 'web/rich_content_lifecycle.js')
+        self.assertContains(response, 'richContentReady:')
+        self.assertContains(response, 'watchRichContentReadiness')
+        self.assertContains(response, 'this._stopWatchingRichContent?.()')
+
     def test_session_page_has_no_expandable_event_log(self) -> None:
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
