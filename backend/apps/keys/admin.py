@@ -8,7 +8,7 @@ from typing import cast
 
 from apps.keys import crypto
 from apps.keys.models import SystemCredential, UserCredential
-from apps.keys.services import commands
+from apps.keys.services import commands, queries
 from django import forms
 from django.contrib import admin
 from django.core.exceptions import ValidationError
@@ -75,15 +75,46 @@ class SystemCredentialAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
 class UserCredentialAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
     """Read-only user credential metadata for staff support (no secret access)."""
 
-    list_display = ('user', 'name', 'type', 'is_set_display', 'updated_at')
-    readonly_fields = ('name', 'type', 'is_set_display', 'created_at', 'updated_at', 'user')
-    exclude = ('encrypted_value',)
+    list_display = (
+        'user',
+        'name',
+        'type',
+        'auth_kind',
+        'oauth_provider_display',
+        'oauth_capabilities_display',
+        'is_set_display',
+        'updated_at',
+    )
+    readonly_fields = (
+        'name',
+        'type',
+        'auth_kind',
+        'oauth_provider_display',
+        'oauth_capabilities_display',
+        'is_set_display',
+        'created_at',
+        'updated_at',
+        'user',
+    )
+    exclude = ('auth_config', 'encrypted_value')
 
     def has_add_permission(self, request) -> bool:  # type: ignore[no-untyped-def]
         return False
 
     def has_change_permission(self, request, obj=None) -> bool:  # type: ignore[no-untyped-def]
         return False
+
+    @admin.display(description='OAuth provider', empty_value='—')
+    def oauth_provider_display(self, obj: UserCredential) -> str | None:
+        """Display a structurally validated provider identifier without decrypting."""
+        provider, _ = queries.get_oauth_metadata(obj)
+        return provider
+
+    @admin.display(description='OAuth capabilities', empty_value='—')
+    def oauth_capabilities_display(self, obj: UserCredential) -> str | None:
+        """Display validated capability identifiers without exposing stored JSON."""
+        _, capabilities = queries.get_oauth_metadata(obj)
+        return ', '.join(capabilities) or None
 
     @admin.display(boolean=True, description='Set')
     def is_set_display(self, obj: UserCredential) -> bool:

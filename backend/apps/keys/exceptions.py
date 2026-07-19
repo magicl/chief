@@ -18,3 +18,19 @@ class KeyTypeMismatchError(ValueError):
 
 class KeyStorageMisconfiguredError(RuntimeError):
     """Raised when ciphertext cannot be decrypted (e.g. rotated CREDENTIALS_KEY)."""
+
+
+class OAuthConfigurationError(RuntimeError):
+    """Raised when an OAuth provider's deployment configuration is unavailable."""
+
+
+class OAuthProviderError(RuntimeError):
+    """Raised when an OAuth provider flow fails without exposing provider details."""
+
+
+class OAuthGrantError(ValueError):
+    """Raised when an encrypted OAuth grant payload is malformed or inconsistent."""
+
+
+class OAuthStateError(ValueError):
+    """Raised when OAuth callback state is invalid, expired, or already consumed."""

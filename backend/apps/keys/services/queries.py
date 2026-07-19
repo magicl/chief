@@ -7,14 +7,25 @@
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
 from apps.keys import crypto
-from apps.keys.exceptions import KeyNotFoundError, KeyTypeMismatchError
-from apps.keys.models import CredentialStatus, SystemCredential, UserCredential
+from apps.keys.exceptions import (
+    KeyNotFoundError,
+    KeyTypeMismatchError,
+    KeyValidationError,
+)
+from apps.keys.models import (
+    CredentialAuthKind,
+    CredentialStatus,
+    SystemCredential,
+    UserCredential,
+)
+from apps.keys.oauth import OAUTH_PROVIDERS
 from apps.keys.types import LLM_ENV_FALLBACK, validate_type
 
 
@@ -28,8 +39,12 @@ class KeyMetadata:
     is_default: bool
     is_set: bool
     updated_at: datetime | None
+    id: uuid.UUID | None = None
     source: str = 'db'
     status: str = 'active'
+    auth_kind: str = 'static'
+    oauth_provider: str | None = None
+    oauth_capabilities: tuple[str, ...] = ()
 
 
 def _is_set(encrypted_value: bytes | memoryview) -> bool:
@@ -53,8 +68,41 @@ def _system_metadata(row: SystemCredential) -> KeyMetadata:
     )
 
 
+def get_oauth_metadata(row: UserCredential) -> tuple[str | None, tuple[str, ...]]:
+    """Return only registry-validated, canonical OAuth metadata without decrypting."""
+    if row.auth_kind != CredentialAuthKind.OAUTH or not isinstance(row.auth_config, dict):
+        return None, ()
+    if set(row.auth_config) != {'provider', 'capabilities'}:
+        return None, ()
+
+    provider = row.auth_config.get('provider')
+    capabilities = row.auth_config.get('capabilities')
+    if not isinstance(provider, str) or not provider or provider != provider.strip():
+        return None, ()
+    if (
+        not isinstance(capabilities, list)
+        or not capabilities
+        or any(
+            not isinstance(capability, str) or not capability or capability != capability.strip()
+            for capability in capabilities
+        )
+    ):
+        return None, ()
+    try:
+        registered_provider = OAUTH_PROVIDERS.get(provider)
+        if registered_provider.credential_type != row.type:
+            return None, ()
+        normalized = registered_provider.normalize_capabilities(capabilities)
+    except KeyValidationError:
+        return None, ()
+    if capabilities != list(normalized):
+        return None, ()
+    return registered_provider.id, normalized
+
+
 def _user_metadata(row: UserCredential) -> KeyMetadata:
     """Build UI-safe metadata including user credential provenance and status."""
+    oauth_provider, oauth_capabilities = get_oauth_metadata(row)
     return KeyMetadata(
         name=row.name,
         scope='user',
@@ -62,8 +110,12 @@ def _user_metadata(row: UserCredential) -> KeyMetadata:
         is_default=False,
         is_set=_is_set(row.encrypted_value),
         updated_at=row.updated_at,
+        id=row.pk,
         source=row.source,
         status=row.status,
+        auth_kind=row.auth_kind,
+        oauth_provider=oauth_provider,
+        oauth_capabilities=oauth_capabilities,
     )
 
 
@@ -75,6 +127,14 @@ def list_system_credentials() -> list[KeyMetadata]:
 def list_user_credentials(user_id: int) -> list[KeyMetadata]:
     """List credential slots owned by ``user_id`` (metadata only)."""
     return [_user_metadata(row) for row in UserCredential.objects.filter(user_id=user_id).order_by('name')]
+
+
+def get_owned_user_credential(user_id: int, credential_id: uuid.UUID) -> UserCredential:
+    """Return one user-owned credential row without decrypting its value."""
+    try:
+        return UserCredential.objects.get(user_id=user_id, pk=credential_id)
+    except UserCredential.DoesNotExist:
+        raise KeyNotFoundError('credential not found') from None
 
 
 def list_referenceable_credentials(
@@ -139,6 +199,12 @@ def resolve_secret(user_id: int, name: str, *, expected_type: str) -> str:
     if user_row is not None:
         if user_row.type != expected_type:
             raise KeyTypeMismatchError(f"key_ref '{name}' is type {user_row.type}, expected {expected_type}")
+        if user_row.auth_kind == CredentialAuthKind.OAUTH:
+            if not _is_set(user_row.encrypted_value):
+                raise KeyNotFoundError(f'credential not connected: {name}')
+            from apps.keys.oauth.services import materialize_runtime_credential
+
+            return materialize_runtime_credential(user_row)
         if not _is_set(user_row.encrypted_value):
             raise KeyNotFoundError(f'credential not set: {name}')
         return _decrypt_row(user_row.encrypted_value)

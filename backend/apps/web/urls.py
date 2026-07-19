@@ -35,4 +35,19 @@ urlpatterns = [
     path('settings/keys/', views.settings_keys, name='settings_keys'),
     path('settings/keys/named/', views.settings_keys_add_named, name='settings_keys_add_named'),
     path('settings/keys/named/<str:name>/delete/', views.settings_keys_delete_named, name='settings_keys_delete_named'),
+    path(
+        'settings/keys/oauth/<uuid:credential_id>/authorize/',
+        views.settings_keys_oauth_authorize,
+        name='settings_keys_oauth_authorize',
+    ),
+    path(
+        'settings/keys/oauth/<uuid:credential_id>/disconnect/',
+        views.settings_keys_oauth_disconnect,
+        name='settings_keys_oauth_disconnect',
+    ),
+    path(
+        'settings/keys/oauth/google/callback/',
+        views.settings_keys_oauth_google_callback,
+        name='settings_keys_oauth_google_callback',
+    ),
 ]

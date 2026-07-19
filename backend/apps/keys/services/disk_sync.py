@@ -13,6 +13,7 @@ import yaml
 from apps.bus.resources import publish_resource_update_after_commit
 from apps.keys.exceptions import KeyValidationError
 from apps.keys.models import CredentialSource, CredentialStatus, UserCredential
+from apps.keys.oauth.services import normalize_auth_config
 from apps.keys.services.commands import upsert_user_named_from_disk
 from apps.keys.services.owner import resolve_owner
 from apps.keys.types import validate_type
@@ -49,6 +50,13 @@ def sync_key_path(
     try:
         parsed = parse_key_file(path, root=root)
         type_name = validate_type(parsed.type)
+        auth_config: dict[str, object] = {}
+        if parsed.auth_kind == 'oauth':
+            auth_config = normalize_auth_config(
+                provider_id='google',
+                credential_type=type_name,
+                capability_ids=parsed.capabilities,
+            )
         owner = resolve_owner(parsed.owner)
         if owner is None:
             logger.error('Credential owner not found for %s (owner=%s)', source_path, parsed.owner)
@@ -67,6 +75,8 @@ def sync_key_path(
             parsed.name,
             type_name,
             parsed.value,
+            auth_kind=parsed.auth_kind,
+            auth_config=auth_config,
             source_path=parsed.source_path,
             source_rev=parsed.source_rev,
         )

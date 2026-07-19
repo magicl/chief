@@ -20,15 +20,21 @@
   <div
     x-data="{
       type: '',
+      authKind: 'static',
       guides: JSON.parse(document.getElementById('credential-guides-data').textContent),
-      get guide() { return this.type ? this.guides[this.type] : null; }
+      get guide() { return this.type ? this.guides[this.type] : null; },
+      selectType(value) {
+        this.type = value;
+        this.authKind = 'static';
+      }
     }"
     style="max-width:640px; margin-top:.5rem;"
   >
     <form method="post" action="{{ url('settings_keys_add_named') }}" style="display:grid; gap:.75rem;">
       <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <input type="hidden" name="auth_kind" value="static" :disabled="type === 'google'">
       <label>Type
-        <select name="type" x-model="type" required style="width:100%; padding:.35rem .5rem;">
+        <select name="type" x-model="type" @change="selectType($event.target.value)" required style="width:100%; padding:.35rem .5rem;">
           <option value="" disabled selected>Select a credential type…</option>
           {% for t in service_types %}
           <option value="{{ t }}">{{ t }}</option>
@@ -38,7 +44,7 @@
 
       <template x-if="guide">
         <div style="display:grid; gap:.75rem;">
-          <div class="card" style="padding:.75rem 1rem; background:#12151c;">
+          <div x-show="type !== 'google' || authKind === 'static'" class="card" style="padding:.75rem 1rem; background:#12151c;">
             <p style="margin:0 0 .5rem; font-size:.85rem; color:#9ec5ff;" x-text="guide.label + ' setup'"></p>
             <ol style="margin:0; padding-left:1.25rem; font-size:.85rem; color:#b8c0d0;">
               <template x-for="step in guide.find_steps" :key="step">
@@ -53,15 +59,28 @@
             </template>
           </div>
 
+          <fieldset x-show="type === 'google'" style="border:0; padding:0; margin:0; display:grid; gap:.4rem;">
+            <legend style="font-size:.85rem; color:#c5cdd9; margin-bottom:.25rem;">Google authentication</legend>
+            <label>
+              <input type="radio" name="auth_kind" value="static" x-model="authKind" :disabled="type !== 'google'">
+              Service account
+            </label>
+            <label>
+              <input type="radio" name="auth_kind" value="oauth" x-model="authKind" :disabled="type !== 'google'">
+              OAuth
+            </label>
+          </fieldset>
+
           <label>Name
             <input type="text" name="name" pattern="[a-z][a-z0-9_-]{0,63}" required autocomplete="off" style="width:100%; padding:.35rem .5rem;">
           </label>
-          <label>
+          <label x-show="authKind === 'static'">
             <span x-text="guide.input_label"></span>
             <textarea
               name="secret"
               rows="8"
-              required
+              :required="authKind === 'static'"
+              :disabled="authKind !== 'static'"
               autocomplete="off"
               data-lpignore="true"
               data-1p-ignore
@@ -70,6 +89,26 @@
               style="width:100%; padding:.35rem .5rem; font-family:ui-monospace, monospace; font-size:.85rem; margin-top:.25rem;"
             ></textarea>
           </label>
+
+          <fieldset x-show="type === 'google' && authKind === 'oauth'" style="display:grid; gap:.6rem; border:1px solid #262a33; border-radius:8px; padding:.75rem 1rem;">
+            <legend style="font-size:.85rem; color:#c5cdd9;">Google OAuth capabilities</legend>
+            {% for capability in google_oauth_capabilities %}
+            <label style="display:grid; grid-template-columns:auto 1fr; gap:.15rem .5rem; align-items:start;">
+              <input
+                type="checkbox"
+                name="capabilities"
+                value="{{ capability.id }}"
+                :disabled="type !== 'google' || authKind !== 'oauth'"
+                style="margin-top:.25rem;"
+              >
+              <span>
+                <strong>{{ capability.label }}</strong>
+                <span class="pill {% if capability.support == 'current' %}succeeded{% else %}waiting{% endif %}" style="margin-left:.35rem;">{{ capability.support_label }}</span>
+                <span class="muted" style="display:block; font-size:.82rem;">{{ capability.description }}</span>
+              </span>
+            </label>
+            {% endfor %}
+          </fieldset>
           <button type="submit" style="padding:.4rem .75rem; width:fit-content;">Save</button>
         </div>
       </template>
