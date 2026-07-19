@@ -190,6 +190,14 @@ class TestComposeLocalProviderConfig(OTestCase):
 class TestComposeRichContentAssets(OTestCase):
     """Check that static Nginx serves the external generated renderer lane."""
 
+    def test_package_install_provisions_chromium(self) -> None:
+        """JavaScript initialization must install the browser required by its test gate."""
+        repository_root = Path(__file__).resolve().parents[3]
+        package_path = repository_root / 'backend/apps/web/static/web/package.json'
+        package = json.loads(package_path.read_text())
+
+        self.assertEqual(package['scripts']['postinstall'], 'playwright install chromium')
+
     def test_static_service_mounts_generated_renderer_read_only(self) -> None:
         """The rich-content target has exactly one read-only external-assets mount."""
         repository_root = Path(__file__).resolve().parents[3]
