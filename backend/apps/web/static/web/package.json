@@ -8,7 +8,7 @@
     "build:editor": "esbuild agent_config_editor.js --bundle --format=esm --outfile=codemirror/agent_config_editor.bundle.js --minify",
     "build:rich-content": "node build_rich_content.mjs",
     "lint": "eslint . --fix",
-    "postinstall": "playwright install chromium",
+    "postinstall": "pnpm run setup:browser",
     "setup:browser": "playwright install --with-deps chromium",
     "test": "pnpm run test:unit && pnpm run test:browser",
     "test:browser": "vitest run --config vitest.browser.config.js",
