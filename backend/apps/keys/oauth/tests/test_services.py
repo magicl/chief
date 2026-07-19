@@ -276,6 +276,38 @@ class TestOAuthServices(OTestCase):
                         )
         decrypt.assert_not_called()
 
+    def test_start_rejects_invalid_declaration_and_unknown_type_health(self) -> None:
+        """Refuse to start consent for a row whose recorded health cannot start it."""
+        row = self._create_oauth()
+        for health_code in ('invalid_declaration', 'unknown_type'):
+            with self.subTest(health_code=health_code):
+                UserCredential.objects.filter(pk=row.pk).update(
+                    health_status='needs_attention',
+                    health_code=health_code,
+                )
+                with (
+                    patch.object(GOOGLE_OAUTH_PROVIDER, 'build_authorization_url') as build,
+                    self.assertRaisesRegex(KeyValidationError, r'^OAuth credential configuration is invalid$'),
+                ):
+                    start_authorization(
+                        user_id=self.user.pk,
+                        credential_id=row.pk,
+                        session_key='session-one',
+                        redirect_uri='https://chief.example.test/oauth/google/callback',
+                    )
+                build.assert_not_called()
+
+    def test_start_permits_oauth_not_connected_and_ready_health(self) -> None:
+        """Allow starting consent for the two health codes representing usable rows."""
+        row = self._create_oauth()
+        for health_status, health_code in (('needs_attention', 'oauth_not_connected'), ('ready', '')):
+            with self.subTest(health_status=health_status, health_code=health_code):
+                UserCredential.objects.filter(pk=row.pk).update(
+                    health_status=health_status,
+                    health_code=health_code,
+                )
+                self._start(row)
+
     def test_start_signs_secret_free_bound_state_and_adds_digest_marker(self) -> None:
         """Bind signed state to owner, row, provider, session, config, and random nonce."""
         row = self._create_oauth(capabilities=('drive_metadata', 'gmail_read'))
@@ -763,6 +795,8 @@ class TestOAuthServices(OTestCase):
         row.refresh_from_db()
         self.assertTrue(metadata.is_set)
         self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), NEW_GRANT)
+        self.assertEqual(row.health_status, 'ready')
+        self.assertEqual(row.health_code, '')
         lock.assert_called_once_with()
         publish.assert_called_once_with(self.user.pk, 'keys')
 
@@ -793,6 +827,8 @@ class TestOAuthServices(OTestCase):
         row.refresh_from_db()
         self.assertEqual(bytes(row.encrypted_value), b'')
         self.assertFalse(metadata.is_set)
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'oauth_not_connected')
         for field, value in expected.items():
             self.assertEqual(getattr(row, field), value)
         publish.assert_called_once_with(self.user.pk, 'keys')

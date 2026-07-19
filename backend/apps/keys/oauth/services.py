@@ -23,12 +23,22 @@ from apps.keys.exceptions import (
     OAuthConfigurationError,
     OAuthStateError,
 )
-from apps.keys.models import CredentialAuthKind, CredentialStatus, UserCredential
+from apps.keys.models import (
+    CredentialAuthKind,
+    CredentialHealthStatus,
+    CredentialStatus,
+    UserCredential,
+)
 from apps.keys.oauth.registry import OAUTH_PROVIDERS
 from django.conf import settings
 from django.core import signing
 from django.core.cache import cache
 from django.db import transaction
+from libs.providers.key.health_codes import (
+    INVALID_DECLARATION,
+    OAUTH_NOT_CONNECTED,
+    UNKNOWN_TYPE,
+)
 
 if TYPE_CHECKING:
     from apps.keys.services.queries import KeyMetadata
@@ -130,6 +140,17 @@ def _owned_active_oauth(user_id: int, credential_id: uuid.UUID) -> UserCredentia
     return row
 
 
+def _reject_unrecoverable_declaration_health(row: UserCredential) -> None:
+    """Block starting consent for a declaration that cannot become usable as-is.
+
+    ``oauth_not_connected`` (and ``ready``) rows may start authorization normally;
+    ``invalid_declaration`` / ``unknown_type`` rows need a disk/UI edit first, so
+    consent must not begin — the disk YAML fix, not a new grant, resolves them.
+    """
+    if row.health_code in (INVALID_DECLARATION, UNKNOWN_TYPE):
+        raise KeyValidationError('OAuth credential configuration is invalid')
+
+
 def start_authorization(
     *,
     user_id: int,
@@ -139,6 +160,7 @@ def start_authorization(
 ) -> OAuthStart:
     """Create signed session-bound state and a one-use provider authorization URL."""
     row = _owned_active_oauth(user_id, credential_id)
+    _reject_unrecoverable_declaration_health(row)
     provider_id, capability_ids, fingerprint = _validated_oauth_declaration(row)
     provider = OAUTH_PROVIDERS.get(provider_id)
     nonce = secrets.token_urlsafe(32)
@@ -299,7 +321,7 @@ def _complete_authorization_payload(
     code: str | None,
     redirect_uri: str,
 ) -> KeyMetadata:
-    """Complete validated state while clearing callback and grant locals on every exit."""
+    """Complete validated state, set health to ready, clearing callback/grant locals on exit."""
     from apps.keys.services.queries import _user_metadata
 
     grant_payload: str | None = None
@@ -360,7 +382,13 @@ def _complete_authorization_payload(
                 encrypted_grant = None
                 raise KeyStorageMisconfiguredError('credential storage misconfigured') from None
             locked_row.encrypted_value = encrypted_grant
-            locked_row.save(update_fields=['encrypted_value', 'updated_at'])
+            if encrypted_grant:
+                locked_row.health_status = CredentialHealthStatus.READY
+                locked_row.health_code = ''
+            else:
+                locked_row.health_status = CredentialHealthStatus.NEEDS_ATTENTION
+                locked_row.health_code = OAUTH_NOT_CONNECTED
+            locked_row.save(update_fields=['encrypted_value', 'health_status', 'health_code', 'updated_at'])
             publish_resource_update_after_commit(user_id, 'keys')
             completed_row = locked_row
         return _user_metadata(completed_row)
@@ -372,7 +400,7 @@ def _complete_authorization_payload(
 
 
 def disconnect_authorization(*, user_id: int, credential_id: uuid.UUID) -> KeyMetadata:
-    """Clear only the encrypted grant from an owned active OAuth declaration."""
+    """Clear an owned active OAuth grant and mark it needs_attention/oauth_not_connected."""
     from apps.keys.services.queries import _user_metadata
 
     with transaction.atomic():
@@ -386,7 +414,9 @@ def disconnect_authorization(*, user_id: int, credential_id: uuid.UUID) -> KeyMe
             raise KeyNotFoundError('OAuth credential not found') from None
         _validated_oauth_declaration(row)
         row.encrypted_value = b''
-        row.save(update_fields=['encrypted_value', 'updated_at'])
+        row.health_status = CredentialHealthStatus.NEEDS_ATTENTION
+        row.health_code = OAUTH_NOT_CONNECTED
+        row.save(update_fields=['encrypted_value', 'health_status', 'health_code', 'updated_at'])
         publish_resource_update_after_commit(user_id, 'keys')
     return _user_metadata(row)
 

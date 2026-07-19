@@ -12,6 +12,7 @@ from typing import Literal
 
 import yaml
 from libs.file.hashing import content_hash
+from libs.providers.key.health_codes import INVALID_DECLARATION
 from yaml.nodes import MappingNode
 
 
@@ -105,8 +106,37 @@ def _strict_safe_load(raw: str) -> object:
     return loaded
 
 
-def parse_key_file(path: Path, *, root: Path) -> KeyDiskFile:
-    """Parse one credential YAML file while leaving type validation to callers."""
+@dataclass(frozen=True)
+class KeyDiskParseOutcome:
+    """Represent one disk file after identity extraction and declaration validation.
+
+    ``file`` is a fully parsed ``KeyDiskFile`` when ``health_code`` is empty. When
+    ``health_code`` is non-empty (currently always ``invalid_declaration``), ``file``
+    is ``None`` and callers must not invent auth/secret material from the invalid
+    YAML — only ``name``/``type``/``owner`` identity fields are trustworthy.
+    """
+
+    file: KeyDiskFile | None
+    name: str
+    type: str
+    owner: str
+    source_path: str
+    source_rev: str
+    health_code: str
+
+
+def parse_key_outcome(path: Path, *, root: Path) -> KeyDiskParseOutcome:
+    """Parse one credential file, separating identity extraction from validation.
+
+    Unrecoverable failures (unparseable/non-mapping YAML, missing owner, or a
+    missing/invalid name) raise, because no
+    stable row identity can be established. Once identity resolves, a structurally
+    invalid static/OAuth declaration (missing fields, unknown keys such as
+    ``auth_kind``, bad scopes) is reported as a recoverable ``invalid_declaration``
+    outcome rather than raised, so disk sync can still persist an identifiable row.
+    ``auth_kind`` is never disk-YAML syntax: its mere presence always invalidates
+    the declaration, regardless of any other static/OAuth-shaped fields present.
+    """
     raw = path.read_text(encoding='utf-8')
     source_rev = content_hash(raw)
     failure: yaml.YAMLError | None = None
@@ -114,7 +144,7 @@ def parse_key_file(path: Path, *, root: Path) -> KeyDiskFile:
     try:
         loaded = _strict_safe_load(raw)
     except yaml.YAMLError as exc:
-        failure = exc.with_traceback(None)
+        failure = exc
     finally:
         raw = ''
     if failure is not None:
@@ -122,16 +152,33 @@ def parse_key_file(path: Path, *, root: Path) -> KeyDiskFile:
     if not isinstance(loaded, dict):
         raise yaml.YAMLError('credential YAML must contain a mapping')
 
-    type_name = _required_string(loaded, 'type').strip()
     owner = _required_string(loaded, 'owner').strip()
-    auth_kind, value, capabilities = _parse_auth(loaded)
     raw_name = loaded.get('name', path.stem)
     if not isinstance(raw_name, str) or not raw_name.strip():
         raise ValueError('name must be a non-empty string')
-
+    name = raw_name.strip()
     source_path = path.resolve().relative_to(root.resolve()).as_posix()
-    return KeyDiskFile(
-        name=raw_name.strip(),
+
+    raw_type = loaded.get('type')
+    type_name = raw_type.strip() if isinstance(raw_type, str) and raw_type.strip() else ''
+
+    try:
+        if not type_name:
+            raise ValueError('type must be a non-empty string')
+        auth_kind, value, capabilities = _parse_auth(loaded)
+    except ValueError:
+        return KeyDiskParseOutcome(
+            file=None,
+            name=name,
+            type=type_name,
+            owner=owner,
+            source_path=source_path,
+            source_rev=source_rev,
+            health_code=INVALID_DECLARATION,
+        )
+
+    file = KeyDiskFile(
+        name=name,
         type=type_name,
         owner=owner,
         auth_kind=auth_kind,
@@ -139,4 +186,13 @@ def parse_key_file(path: Path, *, root: Path) -> KeyDiskFile:
         capabilities=capabilities,
         source_path=source_path,
         source_rev=source_rev,
+    )
+    return KeyDiskParseOutcome(
+        file=file,
+        name=name,
+        type=type_name,
+        owner=owner,
+        source_path=source_path,
+        source_rev=source_rev,
+        health_code='',
     )

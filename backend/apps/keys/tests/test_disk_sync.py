@@ -153,6 +153,8 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(row.source, CredentialSource.DISK)
         self.assertEqual(row.source_path, 'keys/work-openai.yaml')
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
+        self.assertEqual(row.health_status, 'ready')
+        self.assertEqual(row.health_code, '')
         self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-first')
         self.assertNotEqual(bytes(row.encrypted_value), b'sk-first')
 
@@ -166,6 +168,8 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(report.failed, 0)
         row = UserCredential.objects.get(user=self.user, name='work-openai')
         self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), '')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'value_empty')
 
     def test_oauth_file_creates_unconnected_normalized_declaration(self) -> None:
         """Create an active disk OAuth row with stable provider capability order."""
@@ -183,6 +187,8 @@ class TestKeyDiskSync(OTestCase):
         )
         self.assertEqual(bytes(row.encrypted_value), b'')
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'oauth_not_connected')
 
     def test_oauth_format_and_capability_order_changes_preserve_grant(self) -> None:
         """Update provenance but retain a grant when normalized semantics are equal."""
@@ -282,8 +288,8 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
         self.assertEqual(bytes(row.encrypted_value), b'')
 
-    def test_unknown_and_raw_oauth_scopes_are_rejected_safely(self) -> None:
-        """Reject non-catalog capability input without logging declarations or grants."""
+    def test_unknown_and_raw_oauth_scopes_persist_invalid_declaration_and_preserve_grant(self) -> None:
+        """Downgrade non-catalog capability input to a health row without losing a grant."""
         path = self.write_oauth(capabilities=('gmail_read',))
         sync_keys_dir()
         row = UserCredential.objects.get(user=self.user, name='work-google')
@@ -299,16 +305,16 @@ class TestKeyDiskSync(OTestCase):
                     f'scopes: [{invalid_scope}]\n',
                     encoding='utf-8',
                 )
-                with self.assertLogs('apps.keys.services.disk_sync', level='ERROR') as captured:
+                with self.assertNoLogs('apps.keys.services.disk_sync', level='ERROR'):
                     report = sync_keys_dir()
 
-                self.assertEqual(report.failed, 1)
-                output = '\n'.join(captured.output)
-                self.assertNotIn(invalid_scope, report.items[0].detail)
-                self.assertNotIn(invalid_scope, output)
-                self.assertNotIn(grant_sentinel, output)
+                self.assertEqual(report.succeeded, 1)
+                self.assertEqual(report.failed, 0)
+                self.assertNotIn(invalid_scope, report.items[0].detail or '')
                 row.refresh_from_db()
-                self.assertNotEqual(bytes(row.encrypted_value), b'')
+                self.assertEqual(row.health_status, 'needs_attention')
+                self.assertEqual(row.health_code, 'invalid_declaration')
+                self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), grant_sentinel)
 
     @patch('apps.keys.services.disk_sync.logger.exception')
     def test_duplicate_yaml_failure_retains_no_values(
@@ -484,27 +490,116 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(report.failed, 1)
         self.assertFalse(UserCredential.objects.exists())
 
-    def test_unknown_type_records_failure_without_write(self) -> None:
-        self.write_key(type_name='mystery')
+    def test_unknown_type_persists_a_needs_attention_row_without_error_logs(self) -> None:
+        """An unregistered type still identifies a row instead of only failing sync."""
+        self.write_key(type_name='mystery', value='sk-mystery')
 
-        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR'):
-            report = sync_keys_dir()
+        report = sync_keys_dir()
 
-        self.assertEqual(report.failed, 1)
-        self.assertEqual(report.items[0].detail, 'unknown credential type: mystery')
-        self.assertFalse(UserCredential.objects.exists())
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 0)
+        row = UserCredential.objects.get(user=self.user, name='work-openai')
+        self.assertEqual(row.type, 'mystery')
+        self.assertEqual(row.status, CredentialStatus.ACTIVE)
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'unknown_type')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-mystery')
 
-    def test_gmail_type_reports_safe_rename_guidance(self) -> None:
+    def test_gmail_type_persists_a_needs_attention_row_without_storing_error_logs(self) -> None:
+        """A renamed gmail type still identifies and encrypts a static row."""
         self.write_key(type_name='gmail', value='ultra-secret')
 
-        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR') as captured:
+        report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 0)
+        row = UserCredential.objects.get(user=self.user, name='work-openai')
+        self.assertEqual(row.type, 'gmail')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'unknown_type')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'ultra-secret')
+
+    def test_missing_scopes_persists_invalid_declaration_row_without_error_logs(self) -> None:
+        """A resolvable OAuth identity with no scopes becomes an invalid_declaration row."""
+        path = self.keys_path / 'work-google.yaml'
+        path.write_text(
+            'name: work-google\ntype: google\nowner: alice\nsource: oauth\n',
+            encoding='utf-8',
+        )
+
+        with self.assertNoLogs('apps.keys.services.disk_sync', level='ERROR'):
             report = sync_keys_dir()
 
-        self.assertEqual(
-            report.items[0].detail,
-            "credential type 'gmail' was renamed to 'google'; update type: google",
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 0)
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'invalid_declaration')
+        self.assertEqual(bytes(row.encrypted_value), b'')
+
+    def test_extra_auth_kind_field_persists_invalid_declaration_row(self) -> None:
+        """Any presence of the non-disk ``auth_kind`` field invalidates the declaration."""
+        path = self.keys_path / 'work-openai.yaml'
+        path.write_text(
+            'name: work-openai\ntype: openai\nowner: alice\nauth_kind: static\nvalue: sk-first\n',
+            encoding='utf-8',
         )
-        self.assertNotIn('ultra-secret', '\n'.join(captured.output))
+
+        with self.assertNoLogs('apps.keys.services.disk_sync', level='ERROR'):
+            report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 0)
+        row = UserCredential.objects.get(user=self.user, name='work-openai')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'invalid_declaration')
+        self.assertEqual(bytes(row.encrypted_value), b'')
+
+    def test_invalid_declaration_retains_prior_ciphertext_on_existing_row(self) -> None:
+        """Recovering an existing row's identity keeps its ciphertext when a later edit is invalid."""
+        path = self.write_key(value='sk-first')
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-openai')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-first')
+        path.write_text(
+            'name: work-openai\ntype: openai\nowner: alice\nauth_kind: static\nvalue: sk-first\n',
+            encoding='utf-8',
+        )
+
+        with self.assertNoLogs('apps.keys.services.disk_sync', level='ERROR'):
+            report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        row.refresh_from_db()
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'invalid_declaration')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-first')
+
+    def test_fixed_yaml_recovers_invalid_declaration_to_ready(self) -> None:
+        """Clear needs-attention health when a later scan finds a valid declaration."""
+        path = self.write_key(value='sk-first')
+        sync_keys_dir()
+        path.write_text(
+            'name: work-openai\ntype: openai\nowner: alice\nauth_kind: static\nvalue: sk-first\n',
+            encoding='utf-8',
+        )
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-openai')
+        self.assertEqual(row.health_code, 'invalid_declaration')
+        path.write_text(
+            'name: work-openai\ntype: openai\nowner: alice\nvalue: sk-recovered\n',
+            encoding='utf-8',
+        )
+
+        with self.assertNoLogs('apps.keys.services.disk_sync', level='ERROR'):
+            report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(row.health_status, 'ready')
+        self.assertEqual(row.health_code, '')
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'sk-recovered')
 
     def test_invalid_yaml_does_not_disable_other_present_key(self) -> None:
         self.write_key()

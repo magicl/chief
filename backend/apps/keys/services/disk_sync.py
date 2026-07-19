@@ -12,15 +12,21 @@ from pathlib import Path
 import yaml
 from apps.bus.resources import publish_resource_update_after_commit
 from apps.keys.exceptions import KeyValidationError
-from apps.keys.models import CredentialSource, CredentialStatus, UserCredential
+from apps.keys.models import (
+    CredentialHealthStatus,
+    CredentialSource,
+    CredentialStatus,
+    UserCredential,
+)
 from apps.keys.oauth.services import normalize_auth_config
-from apps.keys.services.commands import upsert_user_named_from_disk
+from apps.keys.services.commands import upsert_disk_health, upsert_user_named_from_disk
 from apps.keys.services.owner import resolve_owner
 from apps.keys.types import validate_type
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from libs.file.sync import SyncItemResult, SyncProgressCallback, SyncReport
-from libs.providers.key.disk_parse import parse_key_file
+from libs.providers.key.disk_parse import KeyDiskParseOutcome, parse_key_outcome
+from libs.providers.key.health_codes import INVALID_DECLARATION, UNKNOWN_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -39,56 +45,134 @@ def _relative_path(path: Path, root: Path) -> str:
         return path.name
 
 
+def _sync_parsed_outcome(outcome: KeyDiskParseOutcome, *, owner_id: int) -> bool:
+    """Persist one identity-resolved outcome via the health-aware write path.
+
+    Recoverable declaration problems (invalid shape, unregistered type) persist a
+    ``needs_attention`` row instead of raising. Only unrecoverable identity/name/
+    ownership conflicts raise ``KeyValidationError`` here, for the caller to log and
+    report as a failed sync item without writing a row.
+    """
+    if outcome.health_code:
+        _, changed = upsert_disk_health(
+            owner_id,
+            outcome.name,
+            outcome.type,
+            None,
+            health_status=CredentialHealthStatus.NEEDS_ATTENTION,
+            health_code=outcome.health_code,
+            source_path=outcome.source_path,
+            source_rev=outcome.source_rev,
+        )
+        return changed
+
+    file = outcome.file
+    if file is None:  # pragma: no cover — invariant of parse_key_outcome
+        raise KeyValidationError('credential declaration is invalid')
+
+    try:
+        type_name = validate_type(file.type)
+    except KeyValidationError:
+        secret = file.value if file.auth_kind == 'static' else None
+        _, changed = upsert_disk_health(
+            owner_id,
+            outcome.name,
+            file.type,
+            secret,
+            health_status=CredentialHealthStatus.NEEDS_ATTENTION,
+            health_code=UNKNOWN_TYPE,
+            source_path=outcome.source_path,
+            source_rev=outcome.source_rev,
+        )
+        return changed
+
+    if file.auth_kind == 'oauth':
+        try:
+            auth_config = normalize_auth_config(
+                provider_id='google',
+                credential_type=type_name,
+                capability_ids=file.capabilities,
+            )
+        except KeyValidationError:
+            _, changed = upsert_disk_health(
+                owner_id,
+                outcome.name,
+                type_name,
+                None,
+                health_status=CredentialHealthStatus.NEEDS_ATTENTION,
+                health_code=INVALID_DECLARATION,
+                source_path=outcome.source_path,
+                source_rev=outcome.source_rev,
+            )
+            return changed
+        _, changed = upsert_user_named_from_disk(
+            owner_id,
+            outcome.name,
+            type_name,
+            None,
+            auth_kind=file.auth_kind,
+            auth_config=auth_config,
+            source_path=outcome.source_path,
+            source_rev=outcome.source_rev,
+        )
+        return changed
+
+    _, changed = upsert_user_named_from_disk(
+        owner_id,
+        outcome.name,
+        type_name,
+        file.value,
+        source_path=outcome.source_path,
+        source_rev=outcome.source_rev,
+    )
+    return changed
+
+
 def sync_key_path(
     path: Path,
     *,
     root: Path,
     seen_identities: set[tuple[int, str]] | None = None,
 ) -> SyncItemResult:
-    """Parse and synchronize one credential file while containing file-level failures."""
+    """Parse and synchronize one credential file while containing file-level failures.
+
+    Unresolvable identity (bad YAML, missing owner, invalid name, duplicates) fails
+    the sync item and logs a safe ERROR. Once identity resolves, recoverable
+    declaration/type problems persist a ``needs_attention`` row instead of failing.
+    """
     source_path = _relative_path(path, root)
     try:
-        parsed = parse_key_file(path, root=root)
-        type_name = validate_type(parsed.type)
-        auth_config: dict[str, object] = {}
-        if parsed.auth_kind == 'oauth':
-            auth_config = normalize_auth_config(
-                provider_id='google',
-                credential_type=type_name,
-                capability_ids=parsed.capabilities,
-            )
-        owner = resolve_owner(parsed.owner)
-        if owner is None:
-            logger.error('Credential owner not found for %s (owner=%s)', source_path, parsed.owner)
-            return SyncItemResult(source_path=source_path, success=False, detail='owner not found')
-        identity = (int(owner.pk), parsed.name)
-        if seen_identities is not None and identity in seen_identities:
-            logger.error(
-                'Duplicate credential identity for %s (owner=%s name=%s)',
-                source_path,
-                parsed.owner,
-                parsed.name,
-            )
-            return SyncItemResult(source_path=source_path, success=False, detail='duplicate identity')
-        _, changed = upsert_user_named_from_disk(
-            owner.pk,
-            parsed.name,
-            type_name,
-            parsed.value,
-            auth_kind=parsed.auth_kind,
-            auth_config=auth_config,
-            source_path=parsed.source_path,
-            source_rev=parsed.source_rev,
-        )
-        if seen_identities is not None:
-            seen_identities.add(identity)
-    except KeyValidationError as exc:
-        logger.error('Credential file validation failed for %s (%s)', source_path, type(exc).__name__)
-        return SyncItemResult(source_path=source_path, success=False, detail=str(exc))
-    except (OSError, UnicodeError, yaml.YAMLError, ValueError, IntegrityError) as exc:
+        outcome = parse_key_outcome(path, root=root)
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError) as exc:
         # YAML parser messages can quote source lines, including credential values.
         logger.error('Credential file sync failed for %s (%s)', source_path, type(exc).__name__)
         return SyncItemResult(source_path=source_path, success=False, detail=type(exc).__name__)
+
+    owner = resolve_owner(outcome.owner)
+    if owner is None:
+        logger.error('Credential owner not found for %s (owner=%s)', source_path, outcome.owner)
+        return SyncItemResult(source_path=source_path, success=False, detail='owner not found')
+    identity = (int(owner.pk), outcome.name)
+    if seen_identities is not None and identity in seen_identities:
+        logger.error(
+            'Duplicate credential identity for %s (owner=%s name=%s)',
+            source_path,
+            outcome.owner,
+            outcome.name,
+        )
+        return SyncItemResult(source_path=source_path, success=False, detail='duplicate identity')
+
+    try:
+        changed = _sync_parsed_outcome(outcome, owner_id=owner.pk)
+    except KeyValidationError as exc:
+        logger.error('Credential file validation failed for %s (%s)', source_path, type(exc).__name__)
+        return SyncItemResult(source_path=source_path, success=False, detail=str(exc))
+    except IntegrityError as exc:
+        logger.error('Credential file sync failed for %s (%s)', source_path, type(exc).__name__)
+        return SyncItemResult(source_path=source_path, success=False, detail=type(exc).__name__)
+
+    if seen_identities is not None:
+        seen_identities.add(identity)
     return SyncItemResult(source_path=source_path, success=True, user_id=owner.pk, changed=changed)
 
 

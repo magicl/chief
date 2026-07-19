@@ -5,8 +5,27 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from libs.providers.key.health_codes import (
+    INVALID_DECLARATION,
+    OAUTH_NOT_CONNECTED,
+    UNKNOWN_TYPE,
+    VALUE_EMPTY,
+)
 
 from olib.py.utils.uuid7 import uuid7
+
+__all__ = [
+    'CredentialAuthKind',
+    'CredentialHealthStatus',
+    'CredentialSource',
+    'CredentialStatus',
+    'SystemCredential',
+    'UserCredential',
+    'INVALID_DECLARATION',
+    'OAUTH_NOT_CONNECTED',
+    'UNKNOWN_TYPE',
+    'VALUE_EMPTY',
+]
 
 
 class CredentialAuthKind(models.TextChoices):
@@ -14,6 +33,19 @@ class CredentialAuthKind(models.TextChoices):
 
     STATIC = 'static', 'Static'
     OAUTH = 'oauth', 'OAuth'
+
+
+class CredentialHealthStatus(models.TextChoices):
+    """Describe whether a credential declaration is usable at resolve time.
+
+    Stable per-declaration ``health_code`` values (documented alongside
+    ``UserCredential.health_code``) are ``value_empty``, ``oauth_not_connected``,
+    ``invalid_declaration``, and ``unknown_type``; re-exported here from the
+    Django-free ``libs.providers.key.health_codes`` module.
+    """
+
+    READY = 'ready', 'Ready'
+    NEEDS_ATTENTION = 'needs_attention', 'Needs attention'
 
 
 class CredentialSource(models.TextChoices):
@@ -74,6 +106,12 @@ class UserCredential(models.Model):
     source_path = models.CharField(max_length=512, blank=True, default='')
     source_rev = models.CharField(max_length=128, blank=True, default='')
     status = models.CharField(max_length=16, choices=CredentialStatus.choices, default=CredentialStatus.ACTIVE)
+    health_status = models.CharField(
+        max_length=32,
+        choices=CredentialHealthStatus.choices,
+        default=CredentialHealthStatus.READY,
+    )
+    health_code = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

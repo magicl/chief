@@ -56,6 +56,24 @@ class TestCredentialModels(OTransactionTestCase):
                 encrypted_value=b'other',
             )
 
+    def test_user_credential_health_defaults_ready(self) -> None:
+        """New user credentials default to a ready health status with no code."""
+        user = get_user_model().objects.create_user(username='health-defaults-user', password='x')
+        row = UserCredential.objects.create(
+            user=user,
+            name='openai-health-defaults',
+            type='openai',
+            encrypted_value=b'x',
+        )
+
+        self.assertEqual(row.health_status, key_models.CredentialHealthStatus.READY)
+        self.assertEqual(row.health_code, '')
+
+    def test_health_status_choices_are_stable(self) -> None:
+        """Credential health status choices retain their persisted string values."""
+        self.assertEqual(key_models.CredentialHealthStatus.READY, 'ready')
+        self.assertEqual(key_models.CredentialHealthStatus.NEEDS_ATTENTION, 'needs_attention')
+
     def test_user_name_unique_per_user(self) -> None:
         user = get_user_model().objects.create_user(username='u1', password='x')
         UserCredential.objects.create(

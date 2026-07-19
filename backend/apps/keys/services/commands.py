@@ -14,6 +14,7 @@ from apps.keys import crypto
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
 from apps.keys.models import (
     CredentialAuthKind,
+    CredentialHealthStatus,
     CredentialSource,
     CredentialStatus,
     SystemCredential,
@@ -28,6 +29,9 @@ from apps.keys.types import (
     validate_type,
 )
 from django.db import transaction
+from libs.providers.key.health_codes import OAUTH_NOT_CONNECTED, VALUE_EMPTY
+
+_MAX_TYPE_LENGTH = 32
 
 
 def _validate_secret(secret: str, *, allow_empty: bool = False) -> str:
@@ -82,6 +86,8 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
                 'source_path': '',
                 'source_rev': '',
                 'status': CredentialStatus.ACTIVE,
+                'health_status': CredentialHealthStatus.READY,
+                'health_code': '',
             },
         )
         publish_resource_update_after_commit(user_id, 'keys')
@@ -122,6 +128,8 @@ def create_user_oauth(
                 'source_path': '',
                 'source_rev': '',
                 'status': CredentialStatus.ACTIVE,
+                'health_status': CredentialHealthStatus.NEEDS_ATTENTION,
+                'health_code': OAUTH_NOT_CONNECTED,
             },
         )
         publish_resource_update_after_commit(user_id, 'keys')
@@ -220,20 +228,33 @@ def upsert_user_named_from_disk(
             and row.auth_kind == auth_kind
             and _existing_disk_auth_config(row) == normalized_auth_config
         )
+        encrypted_value = (
+            bytes(row.encrypted_value)
+            if auth_kind == CredentialAuthKind.OAUTH and semantic_match and row is not None
+            else b'' if auth_kind == CredentialAuthKind.OAUTH else crypto.encrypt(validated_secret or '')
+        )
+        if auth_kind == CredentialAuthKind.OAUTH:
+            health_status, health_code = (
+                (CredentialHealthStatus.READY, '')
+                if encrypted_value
+                else (CredentialHealthStatus.NEEDS_ATTENTION, OAUTH_NOT_CONNECTED)
+            )
+        else:
+            health_status, health_code = (
+                (CredentialHealthStatus.READY, '')
+                if validated_secret
+                else (CredentialHealthStatus.NEEDS_ATTENTION, VALUE_EMPTY)
+            )
         if (
             row is not None
             and semantic_match
             and row.source_path == source_path
             and row.source_rev == source_rev
             and row.status == CredentialStatus.ACTIVE
+            and row.health_status == health_status
+            and row.health_code == health_code
         ):
             return _user_metadata(row), False
-
-        encrypted_value = (
-            bytes(row.encrypted_value)
-            if auth_kind == CredentialAuthKind.OAUTH and semantic_match and row is not None
-            else b'' if auth_kind == CredentialAuthKind.OAUTH else crypto.encrypt(validated_secret or '')
-        )
         if row is None:
             row = UserCredential.objects.create(
                 user_id=user_id,
@@ -246,6 +267,8 @@ def upsert_user_named_from_disk(
                 source_path=source_path,
                 source_rev=source_rev,
                 status=CredentialStatus.ACTIVE,
+                health_status=health_status,
+                health_code=health_code,
             )
         else:
             row.type = type_name
@@ -255,6 +278,8 @@ def upsert_user_named_from_disk(
             row.source_path = source_path
             row.source_rev = source_rev
             row.status = CredentialStatus.ACTIVE
+            row.health_status = health_status
+            row.health_code = health_code
             row.save(
                 update_fields=[
                     'type',
@@ -264,6 +289,95 @@ def upsert_user_named_from_disk(
                     'source_path',
                     'source_rev',
                     'status',
+                    'health_status',
+                    'health_code',
+                    'updated_at',
+                ]
+            )
+        publish_resource_update_after_commit(user_id, 'keys')
+    return _user_metadata(row), True
+
+
+def upsert_disk_health(
+    user_id: int,
+    name: str,
+    type_name: str,
+    secret: str | None,
+    *,
+    health_status: str,
+    health_code: str,
+    source_path: str,
+    source_rev: str,
+) -> tuple[KeyMetadata, bool]:
+    """Persist a recoverable disk credential health row without registry validation.
+
+    Used for ``invalid_declaration`` / ``unknown_type`` outcomes where the declared
+    type may not be registered and no OAuth ``auth_config`` can be safely derived.
+    Existing auth material (``auth_kind``/``auth_config``/ciphertext) is left
+    untouched unless ``secret`` is provided (only for a statically-shaped
+    ``unknown_type`` declaration) — invalid declarations never carry a secret to
+    write, since the failed parse retained no auth material.
+    """
+    validated_name = _validate_named_name(name, user_id=user_id)
+    safe_type_name = type_name[:_MAX_TYPE_LENGTH]
+    with transaction.atomic():
+        row = UserCredential.objects.select_for_update().filter(user_id=user_id, name=validated_name).first()
+        if row is not None and row.source != CredentialSource.DISK:
+            raise KeyValidationError(f'database-owned credential conflict: {validated_name}')
+
+        if secret is not None:
+            encrypted_value = crypto.encrypt(_validate_secret(secret, allow_empty=True))
+        elif row is not None:
+            encrypted_value = bytes(row.encrypted_value)
+        else:
+            encrypted_value = b''
+        auth_kind = row.auth_kind if row is not None else CredentialAuthKind.STATIC
+        auth_config = row.auth_config if row is not None else {}
+
+        if (
+            row is not None
+            and row.type == safe_type_name
+            and bytes(row.encrypted_value) == encrypted_value
+            and row.source_path == source_path
+            and row.source_rev == source_rev
+            and row.status == CredentialStatus.ACTIVE
+            and row.health_status == health_status
+            and row.health_code == health_code
+        ):
+            return _user_metadata(row), False
+
+        if row is None:
+            row = UserCredential.objects.create(
+                user_id=user_id,
+                name=validated_name,
+                type=safe_type_name,
+                encrypted_value=encrypted_value,
+                auth_kind=auth_kind,
+                auth_config=auth_config,
+                source=CredentialSource.DISK,
+                source_path=source_path,
+                source_rev=source_rev,
+                status=CredentialStatus.ACTIVE,
+                health_status=health_status,
+                health_code=health_code,
+            )
+        else:
+            row.type = safe_type_name
+            row.encrypted_value = encrypted_value
+            row.source_path = source_path
+            row.source_rev = source_rev
+            row.status = CredentialStatus.ACTIVE
+            row.health_status = health_status
+            row.health_code = health_code
+            row.save(
+                update_fields=[
+                    'type',
+                    'encrypted_value',
+                    'source_path',
+                    'source_rev',
+                    'status',
+                    'health_status',
+                    'health_code',
                     'updated_at',
                 ]
             )
