@@ -2,22 +2,20 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Dev/infra CLI config for chief (the agent orchestrator).
+"""Dev/infra CLI config for Chief, the agent orchestrator.
 
-Minimal, compose-only port of the floors config. Wires up the olib `run` CLI
-templates we need locally:
+Wires up the olib `run` CLI templates needed for:
   - docker compose (with slot overlays)
   - postgres / redis helpers
   - python roots (lint/mypy/test) + django management passthrough
-  - env splitting + versioning for the `compose` target
-
-There are intentionally no kubernetes/CDN/frontend targets yet: the only
-deploy target is `compose`.
+  - env splitting + versioning for Compose and the hosted stage target
+  - Kubernetes image builds and ArgoCD deployment
 """
 
 import importlib
 import os
 import sys
+from pathlib import Path
 
 import click
 import parproc as pp
@@ -30,6 +28,17 @@ from olib.py.cli.run.templates.assets import (
     assets,
 )
 from olib.py.cli.run.templates.base import ConfigMeta, prep_config
+from olib.py.cli.run.templates.buildArgoService import (
+    BuildContext,
+)
+from olib.py.cli.run.templates.buildArgoService import (
+    ClusterInfo as BuildArgoServiceClusterInfo,
+)
+from olib.py.cli.run.templates.buildArgoService import (
+    buildArgoService,
+)
+from olib.py.cli.run.templates.cdn import CdnClusterInfoMixin as CdnClusterInfo
+from olib.py.cli.run.templates.cdn import CdnInfo, sync_dir_to_cdn
 from olib.py.cli.run.templates.django_ import (
     DjangoConfig,
     _primary_django_config,
@@ -51,10 +60,11 @@ from olib.py.cli.run.templates.roots import SubmoduleRoots, roots
 from olib.py.cli.run.templates.version import VersionClusterInfo
 from olib.py.cli.run.templates.version import version as version_template
 from olib.py.cli.run.tools.init.js_ import prepare_js_runtime
+from olib.py.cli.run.utils.postgres import PostgresConfig
 
 
 class TargetInfo(VersionClusterInfo, AssetsClusterInfo):
-    """Per-target info. `compose` is the only target for now."""
+    """Describe shared Chief target metadata, including Compose."""
 
     release_name: str
     host: str
@@ -63,6 +73,20 @@ class TargetInfo(VersionClusterInfo, AssetsClusterInfo):
     basic_auth: bool = False
 
 
+class ClusterInfo(BuildArgoServiceClusterInfo, CdnClusterInfo, VersionClusterInfo):
+    """Describe one deployable Chief Kubernetes target."""
+
+    host: str
+    static_dir: str
+
+
+@buildArgoService(
+    BuildContext(
+        app_category='apps',
+        app_name='chief',
+        env_repo_path=Path('~/yolo/env'),
+    )
+)
 @docker(
     'infra/docker/docker-compose.yml',
     postgres_restore_defaults=DockerPostgresRestoreDefaults(
@@ -72,7 +96,12 @@ class TargetInfo(VersionClusterInfo, AssetsClusterInfo):
         password='nimda',  # nosec
     ),
 )
-@postgres()
+@postgres(
+    config=PostgresConfig(
+        k8s_namespace='cnpg-database',
+        k8s_service='cnpg-database-cluster-rw',
+    )
+)
 @redis()
 @roots(
     [
@@ -118,7 +147,15 @@ class Config:
     eval_sample_runner = 'evals.inbox:get_sample_runner'
     eval_log_root = '.output/usecase-logs'
 
-    clusters: dict[str, TargetInfo] = {
+    cdns: dict[str, CdnInfo] = {
+        'onas': CdnInfo(
+            upload_user='oivind',
+            base_path='/volume1/infra',
+            hostname='onas',
+        ),
+    }
+
+    clusters: dict[str, ClusterInfo | TargetInfo] = {
         'compose': TargetInfo(
             release_name='compose',
             host=get_local_compose_entrypoint_url(),
@@ -128,9 +165,29 @@ class Config:
             version_push_tag=False,
             try_creds=['admin:nimda'],
         ),
+        'chief-stage': ClusterInfo(
+            release_name='chief-stage',
+            cluster='dev',
+            docker_images={
+                'backend': './backend/Dockerfile.prod',
+                'static': './infra/k8s/Dockerfile.static.stage',
+            },
+            registry_url='registry.dev.oivindloe.com',
+            default=True,
+            cdn='onas',
+            host='https://chief.dev.oivindloe.com',
+            static_dir='backend/.output/static',
+            version_tag_prefix='chief',
+            version_increments=['debug'],
+            version_push_tag=False,
+        ),
     }
 
     envs: dict[str, EnvInfo] = {
+        'chief-stage': EnvInfo(
+            release_name='chief-stage',
+            env_files=['.env', '.env.production', '.env.production.stage'],
+        ),
         'compose': EnvInfo(
             release_name='compose',
             env_files=['.env', '.env.development', '.env.development.compose', '?.env.local'],
@@ -149,6 +206,21 @@ def prep_dirs(context: pp.ProcContext) -> None:
     """Create .output dirs up front so host-user owns them before Docker can."""
     for d in ('.output', 'backend/.output'):
         os.makedirs(d, exist_ok=True)
+
+
+@pp.Proto(
+    name='cdn.upload::[target]',
+    deps=['django.collectstatic::backend'],
+    rdeps=['k8s.deploy::[target]'],
+)
+def cdn_upload(context: pp.ProcContext, target: str) -> None:
+    """Upload Chief's collected backend static files to the target CDN."""
+    config = context.params['config']
+    cluster_info = ClusterInfo.model_validate(config.clusters[target])
+    cdn_info = config.cdns[cluster_info.cdn]
+    release_name = cluster_info.release_name
+    static_dir = cluster_info.static_dir
+    sync_dir_to_cdn(cdn_info, release_name, static_dir, 'public/static')
 
 
 @pp.Proto(name='js.rich-content-build', deps=['assets.ensure::compose'])

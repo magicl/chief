@@ -5,3 +5,7 @@
 **/db.sqlite3
 .venv
 .output
+
+# The config build graph generates the only .output content packaged in images.
+!backend/.output/static
+!backend/.output/static/**
