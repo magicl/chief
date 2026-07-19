@@ -4,17 +4,17 @@
 # ~
 """Top-level URL configuration for the chief project."""
 
+from chief.views import check, livez, readyz, startupz
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 from django.views.generic.base import RedirectView
 
-from chief.views import check, livez, readyz
-
 urlpatterns = [
     path('admin', RedirectView.as_view(url='/admin/', permanent=False)),
     path('admin/', admin.site.urls),
+    path('health/startupz', startupz, name='health_startupz'),
     path('health/livez', livez, name='health_livez'),
     path('health/readyz', readyz, name='health_readyz'),
     path('client/check', check, name='client_check'),

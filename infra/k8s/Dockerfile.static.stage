@@ -1,0 +1,25 @@
+FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+
+ENV LANG=C.UTF-8
+ENV TZ=UTC
+
+# Nginx writes only beneath /tmp; Kubernetes mounts that path when the root
+# filesystem is read-only.
+RUN rm -rf /etc/nginx/conf.d \
+    && mkdir -p \
+        /etc/storage/public/static \
+        /tmp/client_temp \
+        /tmp/proxy_temp \
+        /tmp/fastcgi_temp \
+        /tmp/uwsgi_temp \
+        /tmp/scgi_temp \
+    && chown -R nginx:nginx /etc/storage /tmp
+
+COPY --chown=nginx:nginx infra/k8s/nginx.static.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx backend/.output/static /etc/storage/public/static
+
+USER nginx
+
+EXPOSE 8000
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -7,6 +7,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,44 @@ from typing import cast
 from ruamel.yaml import YAML
 
 from olib.py.django.test.cases import OTestCase
+
+_PYTHON_IMAGE = 'python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91'
+_UV_IMAGE = 'ghcr.io/astral-sh/uv:0.11.29@' + 'sha256:eb2843a1e56fd9e30c7276ce1a52cba86e64c7b385f5e3279a0e08e02dd058fc'
+_NGINX_IMAGE = 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de'
+
+
+def _run_container_entrypoint(*, entrypoint: str, debug: str | None) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run the real entrypoint against recording stand-ins for container commands."""
+    repository_root = Path(__file__).resolve().parents[3]
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        runtime_root = Path(temporary_directory)
+        shutil.copy2(repository_root / 'backend/entrypoint.sh', runtime_root / 'entrypoint.sh')
+        command_log = runtime_root / 'commands.log'
+        recorder_source = '#!/bin/sh\nprintf "%s %s\\n" "$(basename "$0")" "$*" >> "$COMMAND_LOG"\n'
+        for command_name in ('manage.py', 'uvicorn', 'celery'):
+            command_path = runtime_root / command_name
+            command_path.write_text(recorder_source)
+            command_path.chmod(0o755)
+
+        environment = os.environ.copy()
+        environment['COMMAND_LOG'] = str(command_log)
+        environment['ENTRYPOINT'] = entrypoint
+        environment['PATH'] = f'{runtime_root}:{environment["PATH"]}'
+        if debug is None:
+            environment.pop('DEBUG', None)
+        else:
+            environment['DEBUG'] = debug
+
+        result = subprocess.run(
+            ['/bin/bash', str(runtime_root / 'entrypoint.sh')],
+            cwd=runtime_root,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        commands = command_log.read_text() if command_log.exists() else ''
+        return result, commands
 
 
 class TestGoogleOAuthApplicationConfig(OTestCase):
@@ -227,3 +266,120 @@ class TestCeleryEntrypointLogging(OTestCase):
         self.assertIn('celery -A chief worker --loglevel=WARNING', entrypoint_source)
         self.assertIn('celery -A chief beat --loglevel=WARNING', entrypoint_source)
         self.assertNotIn('--loglevel=INFO', entrypoint_source)
+
+
+class TestProductionContainerConfig(OTestCase):
+    """Verify hosted images and processes avoid development-only behavior."""
+
+    def test_debug_web_keeps_compose_bootstrap_and_reload(self) -> None:
+        """The default debug path retains migrations, admin bootstrap, and reload."""
+        result, commands = _run_container_entrypoint(entrypoint='web-server', debug=None)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('manage.py migrate --noinput', commands)
+        self.assertIn('manage.py ensure_superuser --no-input', commands)
+        self.assertIn('uvicorn chief.asgi:application', commands)
+        self.assertIn('--reload', commands)
+
+    def test_production_web_skips_bootstrap_and_uses_fixed_workers(self) -> None:
+        """Hosted web starts only a fixed-worker uvicorn process without reload."""
+        result, commands = _run_container_entrypoint(entrypoint='web-server', debug='false')
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('manage.py', commands)
+        self.assertIn('uvicorn chief.asgi:application', commands)
+        self.assertIn('--host 0.0.0.0 --port 8000', commands)
+        self.assertIn('--workers 4', commands)
+        self.assertNotIn('--reload', commands)
+
+    def test_worker_and_beat_keep_operational_flags(self) -> None:
+        """Celery process selections preserve log level and worker thread settings."""
+        worker_result, worker_commands = _run_container_entrypoint(entrypoint='celery-worker', debug='false')
+        beat_result, beat_commands = _run_container_entrypoint(entrypoint='celery-beat', debug='false')
+
+        self.assertEqual(worker_result.returncode, 0, worker_result.stderr)
+        self.assertIn(
+            'celery -A chief worker --loglevel=WARNING --pool=threads --concurrency=16',
+            worker_commands,
+        )
+        self.assertEqual(beat_result.returncode, 0, beat_result.stderr)
+        self.assertIn('celery -A chief beat --loglevel=WARNING', beat_commands)
+
+    def test_invalid_entrypoint_selection_exits_nonzero(self) -> None:
+        """Unknown process selections fail instead of starting an unintended service."""
+        result, commands = _run_container_entrypoint(entrypoint='unknown', debug='false')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(commands, '')
+        self.assertIn('invalid entrypoint selection', result.stdout)
+
+    def test_deployment_images_pin_single_stage_runtime_inputs(self) -> None:
+        """Deployment images use exact manifests without duplicate runtime stages."""
+        repository_root = Path(__file__).resolve().parents[3]
+        backend_source = (repository_root / 'backend/Dockerfile.prod').read_text()
+        static_source = (repository_root / 'infra/k8s/Dockerfile.static.stage').read_text()
+        backend_from_images = re.findall(r'^FROM (\S+)', backend_source, flags=re.MULTILINE)
+        static_from_images = re.findall(r'^FROM (\S+)', static_source, flags=re.MULTILINE)
+        backend_uv_images = re.findall(r'^COPY --from=(\S+) /uv ', backend_source, flags=re.MULTILINE)
+
+        self.assertEqual(backend_from_images, [_PYTHON_IMAGE])
+        self.assertEqual(static_from_images, [_NGINX_IMAGE])
+        self.assertEqual(backend_uv_images, [_UV_IMAGE])
+        self.assertNotIn('ghcr.io/astral-sh/uv', static_source)
+
+    def test_backend_image_uses_only_backend_dependency_metadata_as_non_root(self) -> None:
+        """The production backend installs its standalone locked environment for app."""
+        repository_root = Path(__file__).resolve().parents[3]
+        source = (repository_root / 'backend/Dockerfile.prod').read_text()
+
+        self.assertNotIn(' AS builder', source)
+        self.assertNotIn(' AS runtime', source)
+        self.assertIn('COPY ./backend/pyproject.toml /app/pyproject.toml', source)
+        self.assertIn('COPY ./backend/uv.lock /app/uv.lock', source)
+        self.assertNotIn('COPY ./pyproject.toml', source)
+        self.assertNotIn('COPY ./infra/pyproject.toml', source)
+        self.assertNotIn('COPY ./olib/pyproject.toml', source)
+        self.assertIn('uv export --frozen --package chief-backend-env --output-file requirements.lock.txt', source)
+        self.assertIn('uv pip install --system --require-hashes', source)
+        self.assertNotIn('--no-hashes', source)
+        self.assertIn('rm -f requirements.lock.txt /usr/local/bin/uv', source)
+        self.assertIn('COPY --chown=app:app ./olib', source)
+        self.assertIn('COPY --chown=app:app ./backend', source)
+        self.assertIn('WORKDIR /app', source)
+        self.assertIn('USER app', source)
+        self.assertIn('EXPOSE 8000', source)
+        self.assertIn('CMD ["./entrypoint.sh"]', source)
+        self.assertIn('rm -rf /var/lib/apt/lists/*', source)
+        self.assertTrue((repository_root / 'backend/uv.lock').is_file())
+
+    def test_static_image_packages_config_generated_assets_only(self) -> None:
+        """The nginx image packages host-generated assets without Python tooling."""
+        repository_root = Path(__file__).resolve().parents[3]
+        source = (repository_root / 'infra/k8s/Dockerfile.static.stage').read_text()
+
+        self.assertNotIn('python:', source)
+        self.assertNotIn('manage.py', source)
+        self.assertNotIn('collectstatic', source)
+        self.assertIn('backend/.output/static /etc/storage/public/static', source)
+        self.assertIn('infra/k8s/nginx.static.conf /etc/nginx/nginx.conf', source)
+        self.assertIn('/tmp/client_temp', source)
+        self.assertIn('USER nginx', source)
+
+        nginx_source = (repository_root / 'infra/k8s/nginx.static.conf').read_text()
+        self.assertIn('include /etc/nginx/mime.types;', nginx_source)
+        self.assertNotIn('application/javascript js mjs;', nginx_source)
+
+    def test_static_build_context_includes_only_generated_assets(self) -> None:
+        """Docker includes collected static files while other output stays ignored."""
+        repository_root = Path(__file__).resolve().parents[3]
+        dockerignore = (repository_root / '.dockerignore').read_text()
+
+        self.assertIn('\n.output\n', dockerignore)
+        self.assertIn('!backend/.output/static\n', dockerignore)
+        self.assertIn('!backend/.output/static/**\n', dockerignore)
+
+        backend_dockerignore_path = repository_root / 'backend/Dockerfile.prod.dockerignore'
+        self.assertTrue(backend_dockerignore_path.exists())
+        backend_dockerignore = backend_dockerignore_path.read_text()
+        self.assertIn('\n.output\n', backend_dockerignore)
+        self.assertNotIn('!backend/.output/static', backend_dockerignore)

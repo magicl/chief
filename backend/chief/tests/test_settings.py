@@ -45,3 +45,35 @@ class TestCredentialSettings(OTestCase):
             'CREDENTIALS_KEY must be set when DEBUG is False',
             completed.stderr,
         )
+
+
+class TestHostedProbeSettings(OTestCase):
+    """Verify Kubernetes probe addressing is accepted by Chief settings."""
+
+    def test_pod_ip_is_appended_to_allowed_hosts(self) -> None:
+        """Chief must accept kubelet probes addressed to the backend pod IP."""
+        pod_ip = '10.42.7.19'
+        process_env = {
+            **os.environ,
+            'DJANGO_SETTINGS_MODULE': 'chief.settings',
+            'KB_POD_IP': pod_ip,
+        }
+        repository_root = Path(__file__).resolve().parents[3]
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                'backend/manage.py',
+                'shell',
+                '-c',
+                'from django.conf import settings; print("\\n".join(settings.ALLOWED_HOSTS))',
+            ],
+            cwd=repository_root,
+            env=process_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn(pod_ip, completed.stdout.splitlines())

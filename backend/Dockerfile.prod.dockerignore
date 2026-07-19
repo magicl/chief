@@ -1,0 +1,7 @@
+# Keep the backend build context small and exclude generated static output.
+**/.*
+**/__pycache__
+**/*.pyc
+**/db.sqlite3
+.venv
+.output

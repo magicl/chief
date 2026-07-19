@@ -22,6 +22,11 @@ def livez(request: HttpRequest) -> HttpResponse:
     return HttpResponse('ok', content_type='text/plain')
 
 
+def startupz(request: HttpRequest) -> HttpResponse:
+    """Startup: Django is initialized and able to serve requests."""
+    return HttpResponse('ok', content_type='text/plain')
+
+
 def readyz(request: HttpRequest) -> HttpResponse:
     """Readiness: the app can serve traffic (DB reachable)."""
     try:
