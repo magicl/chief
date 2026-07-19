@@ -36,6 +36,18 @@ class ConfigMutationTests(OTestCase):
         self.assertIn('name: sweep', updated)
         self.assertIn('prompt: Run the hourly sweep.', updated)
 
+    def test_multiline_system_prompt_uses_literal_block(self) -> None:
+        """Helper-inserted multiline text should remain easy to edit as YAML."""
+        raw = dump_agent_config_spec(load_example('clock-assistant'))
+        updated = apply_config_mutation(
+            raw,
+            {
+                'action': 'set_system_prompt',
+                'system_prompt': 'First line.\nSecond line.',
+            },
+        )
+        self.assertIn('system_prompt: |-\n  First line.\n  Second line.\n', updated)
+
     def test_add_schedule_trigger_uses_default_prompt_when_omitted(self) -> None:
         raw = dump_agent_config_spec(load_example('clock-assistant'))
         updated = apply_config_mutation(

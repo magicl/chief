@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 from libs.file.hashing import content_hash
+from libs.file.yaml_dump import dump_editable_yaml
 
 _ENVELOPE_FIELDS = ('owner', 'identifier', 'name')
 
@@ -47,7 +48,7 @@ def parse_agent_file(path: Path, *, root: Path) -> AgentDiskFile:
     identifier = _non_empty_string(loaded.get('identifier', path.stem), field='identifier')
     name = _non_empty_string(loaded.get('name', identifier), field='name')
     body = {key: value for key, value in loaded.items() if key not in _ENVELOPE_FIELDS}
-    body_yaml = yaml.safe_dump(body, sort_keys=False, allow_unicode=True)
+    body_yaml = dump_editable_yaml(body, sort_keys=False)
     source_path = path.resolve().relative_to(root.resolve()).as_posix()
     # Hash the config body only so envelope-only edits (display name) do not
     # create redundant AgentConfig revisions or rematerialize beat.
