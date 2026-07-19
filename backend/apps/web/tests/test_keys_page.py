@@ -327,6 +327,33 @@ class TestKeysPage(OTransactionTestCase):
         self.assertContains(response, disconnect_url)
         self.assertNotContains(response, 'grant-sentinel')
 
+    def test_ui_owned_oauth_row_renders_red_cross_delete_action_last(self) -> None:
+        """Place the compact delete control after every OAuth lifecycle action."""
+        self.client.force_login(self.user)
+        commands.create_user_oauth(
+            self.user.pk,
+            'google-oauth',
+            'google',
+            provider_id='google',
+            capability_ids=['gmail_read'],
+        )
+        row = self.user.credentials.get(name='google-oauth')
+        row.encrypted_value = crypto.encrypt('grant-sentinel')
+        row.save(update_fields=['encrypted_value'])
+
+        response = self.client.get(reverse('settings_keys'))
+
+        content = response.content.decode()
+        authorize_url = reverse('settings_keys_oauth_authorize', kwargs={'credential_id': row.pk})
+        disconnect_url = reverse('settings_keys_oauth_disconnect', kwargs={'credential_id': row.pk})
+        delete_url = reverse('settings_keys_delete_named', kwargs={'name': row.name})
+        self.assertContains(response, delete_url)
+        self.assertLess(content.index(authorize_url), content.index(delete_url))
+        self.assertLess(content.index(disconnect_url), content.index(delete_url))
+        self.assertContains(response, f'aria-label="Delete {row.name}"')
+        self.assertContains(response, 'color:#ef4444;')
+        self.assertContains(response, '>×</button>')
+
     def test_disk_oauth_keeps_lifecycle_controls_but_disabled_has_none(self) -> None:
         """Allow grant lifecycle actions without making disk declarations editable."""
         self.client.force_login(self.user)
