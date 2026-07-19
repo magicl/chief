@@ -30,6 +30,25 @@ class TestCredentialCommands(OTestCase):
         self.assertEqual(meta.status, 'active')
         row = UserCredential.objects.get(user_id=user.pk, name='openai-work')
         self.assertNotEqual(row.encrypted_value, b'sk-user-key')
+        self.assertEqual(row.health_status, 'ready')
+        self.assertEqual(row.health_code, '')
+
+    def test_create_user_oauth_starts_unconnected(self) -> None:
+        """A newly declared database OAuth credential starts needing a grant."""
+        user = get_user_model().objects.create_user(username='cmd-oauth-user', password='x')
+
+        meta = commands.create_user_oauth(
+            user.pk,
+            'google-work',
+            'google',
+            provider_id='google',
+            capability_ids=['gmail_read'],
+        )
+
+        self.assertFalse(meta.is_set)
+        row = UserCredential.objects.get(user_id=user.pk, name='google-work')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'oauth_not_connected')
 
     def test_upsert_named_resets_existing_oauth_declaration_to_static(self) -> None:
         """Replacing a database OAuth row explicitly clears its declaration metadata."""
@@ -106,6 +125,26 @@ class TestCredentialCommands(OTestCase):
         self.assertEqual(metadata.name, 'disk-key')
         self.assertTrue(changed)
         publish.assert_called_once_with(user.pk, 'keys')
+        row = UserCredential.objects.get(user=user, name='disk-key')
+        self.assertEqual(row.health_status, 'ready')
+        self.assertEqual(row.health_code, '')
+
+    def test_disk_upsert_with_empty_secret_needs_attention(self) -> None:
+        """Flag a static disk declaration whose secret is empty as needing attention."""
+        user = get_user_model().objects.create_user(username='disk-empty-secret')
+
+        commands.upsert_user_named_from_disk(
+            user.pk,
+            'disk-key',
+            'openai',
+            '',
+            source_path='keys/disk-key.yaml',
+            source_rev='sha256:empty',
+        )
+
+        row = UserCredential.objects.get(user=user, name='disk-key')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'value_empty')
 
     @patch('apps.bus.resources.publish_resource_update')
     def test_unchanged_disk_upsert_does_not_publish(self, publish: MagicMock) -> None:
@@ -232,6 +271,8 @@ class TestCredentialCommands(OTestCase):
         self.assertEqual(bytes(row.encrypted_value), grant)
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
         self.assertEqual(row.source_rev, 'sha256:second')
+        self.assertEqual(row.health_status, 'ready')
+        self.assertEqual(row.health_code, '')
 
     def test_disk_oauth_upsert_clears_grant_for_type_change(self) -> None:
         """Replace ciphertext when a disk declaration changes type and auth kind."""
@@ -292,6 +333,104 @@ class TestCredentialCommands(OTestCase):
 
                 self.assertIsNone(normalized)
                 normalize.assert_not_called()
+
+    def test_upsert_disk_health_creates_identifiable_row_without_secret(self) -> None:
+        """An invalid_declaration outcome with no prior row persists an empty secret."""
+        user = get_user_model().objects.create_user(username='disk-health-create')
+
+        metadata, changed = commands.upsert_disk_health(
+            user.pk,
+            'broken-key',
+            'openai',
+            None,
+            health_status='needs_attention',
+            health_code='invalid_declaration',
+            source_path='keys/broken-key.yaml',
+            source_rev='sha256:broken',
+        )
+
+        self.assertTrue(changed)
+        self.assertFalse(metadata.is_set)
+        row = UserCredential.objects.get(user=user, name='broken-key')
+        self.assertEqual(bytes(row.encrypted_value), b'')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'invalid_declaration')
+
+    def test_upsert_disk_health_preserves_prior_auth_material(self) -> None:
+        """A later invalid edit keeps a disk row's previous auth kind and ciphertext."""
+        user = get_user_model().objects.create_user(username='disk-health-preserve')
+        commands.upsert_user_named_from_disk(
+            user.pk,
+            'work-google',
+            'google',
+            None,
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'provider': 'google', 'capabilities': ['gmail_read']},
+            source_path='keys/work-google.yaml',
+            source_rev='sha256:first',
+        )
+        row = UserCredential.objects.get(user=user, name='work-google')
+        grant = b'encrypted-grant-sentinel'
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=grant)
+
+        commands.upsert_disk_health(
+            user.pk,
+            'work-google',
+            'google',
+            None,
+            health_status='needs_attention',
+            health_code='invalid_declaration',
+            source_path='keys/work-google.yaml',
+            source_rev='sha256:second',
+        )
+
+        row.refresh_from_db()
+        self.assertEqual(row.auth_kind, CredentialAuthKind.OAUTH)
+        self.assertEqual(row.auth_config, {'provider': 'google', 'capabilities': ['gmail_read']})
+        self.assertEqual(bytes(row.encrypted_value), grant)
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'invalid_declaration')
+
+    def test_upsert_disk_health_truncates_overlong_type_name(self) -> None:
+        """Cap an unregistered disk type name so storage limits cannot be exceeded."""
+        user = get_user_model().objects.create_user(username='disk-health-truncate')
+        overlong = 'x' * 100
+
+        commands.upsert_disk_health(
+            user.pk,
+            'overlong-type',
+            overlong,
+            None,
+            health_status='needs_attention',
+            health_code='unknown_type',
+            source_path='keys/overlong-type.yaml',
+            source_rev='sha256:overlong',
+        )
+
+        row = UserCredential.objects.get(user=user, name='overlong-type')
+        self.assertEqual(row.type, overlong[:32])
+
+    def test_upsert_disk_health_rejects_database_owned_conflict(self) -> None:
+        """Refuse to downgrade a database-owned credential's health from disk sync."""
+        user = get_user_model().objects.create_user(username='disk-health-conflict')
+        UserCredential.objects.create(
+            user=user,
+            name='db-owned',
+            type='openai',
+            encrypted_value=b'database-ciphertext',
+        )
+
+        with self.assertRaises(KeyValidationError):
+            commands.upsert_disk_health(
+                user.pk,
+                'db-owned',
+                'openai',
+                None,
+                health_status='needs_attention',
+                health_code='invalid_declaration',
+                source_path='keys/db-owned.yaml',
+                source_rev='sha256:conflict',
+            )
 
     def test_delete_user_credential_idempotent_missing(self) -> None:
         user = get_user_model().objects.create_user(username='cmd-user3', password='x')

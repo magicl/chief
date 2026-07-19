@@ -13,20 +13,18 @@
       <td>
         {% if key.status == 'disabled' %}
         <span class="pill waiting">Disabled</span>
-        {% elif key.auth_kind == 'oauth' and key.is_set %}
-        <span class="pill succeeded">Connected</span>
+        {% elif key.health_status == 'needs_attention' %}
+        <span class="pill waiting">{{ HEALTH_CODE_LABELS.get(key.health_code, 'Needs attention') }}</span>
         {% elif key.auth_kind == 'oauth' %}
-        <span class="pill waiting">Not connected</span>
-        {% elif key.is_set %}
-        <span class="pill succeeded">Set</span>
+        <span class="pill succeeded">Connected</span>
         {% else %}
-        <span class="pill waiting">Not set</span>
+        <span class="pill succeeded">Set</span>
         {% endif %}
       </td>
       <td class="muted">{% if key.updated_at %}{{ key.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
       <td>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap; justify-content:flex-end;">
-        {% if key.status != 'disabled' and key.auth_kind == 'oauth' %}
+        {% if key.status != 'disabled' and key.auth_kind == 'oauth' and key.health_code not in ('invalid_declaration', 'unknown_type') %}
           <form method="post" action="{{ url('settings_keys_oauth_authorize', kwargs={'credential_id': key.id}) }}">
             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <button type="submit" style="padding:.3rem .6rem;">{% if key.is_set %}Reauthenticate{% else %}Authenticate{% endif %}</button>

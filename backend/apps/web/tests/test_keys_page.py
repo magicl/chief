@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 from apps.keys import crypto
 from apps.keys.exceptions import OAuthProviderError, OAuthStateError
-from apps.keys.models import CredentialStatus
+from apps.keys.models import CredentialStatus, UserCredential
 from apps.keys.oauth.providers.google import GOOGLE_CAPABILITIES, GoogleOAuthProvider
 from apps.keys.oauth.services import OAuthStart
 from apps.keys.services import commands
@@ -21,6 +21,7 @@ from django.contrib.auth import get_user_model
 from django.http import Http404, HttpRequest, HttpResponse
 from django.test import Client, override_settings
 from django.urls import reverse
+from libs.providers.key.health_codes import HEALTH_CODE_LABELS
 
 from olib.py.django.test.cases import OTransactionTestCase
 from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
@@ -298,6 +299,71 @@ class TestKeysPage(OTransactionTestCase):
 
         self.assertContains(response, '<span class="pill waiting">Disabled</span>', html=True)
 
+    def test_needs_attention_rows_show_health_labels_instead_of_set_status(self) -> None:
+        """Show the actionable health label for each needs_attention disk row."""
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-empty',
+            'openai',
+            '',
+            source_path='keys/disk-empty.yaml',
+            source_rev='sha256:empty',
+        )
+        commands.upsert_disk_health(
+            self.user.pk,
+            'disk-broken',
+            'openai',
+            None,
+            health_status='needs_attention',
+            health_code='invalid_declaration',
+            source_path='keys/disk-broken.yaml',
+            source_rev='sha256:broken',
+        )
+        commands.upsert_disk_health(
+            self.user.pk,
+            'disk-mystery',
+            'mystery',
+            None,
+            health_status='needs_attention',
+            health_code='unknown_type',
+            source_path='keys/disk-mystery.yaml',
+            source_rev='sha256:mystery',
+        )
+
+        response = self.client.get(reverse('settings_keys'))
+
+        self.assertContains(response, 'Value empty')
+        self.assertContains(response, 'Invalid declaration')
+        self.assertContains(response, 'Unknown type')
+        self.assertNotContains(response, '<span class="pill succeeded">Set</span>', html=True)
+
+    def test_authenticate_control_is_hidden_for_invalid_declaration_and_unknown_type(self) -> None:
+        """Hide the Authenticate control for disk OAuth rows that cannot start consent."""
+        self.client.force_login(self.user)
+        commands.upsert_user_named_from_disk(
+            self.user.pk,
+            'disk-google',
+            'google',
+            None,
+            auth_kind='oauth',
+            auth_config={'provider': 'google', 'capabilities': ['drive_metadata']},
+            source_path='keys/disk-google.yaml',
+            source_rev='sha256:oauth',
+        )
+        row = self.user.credentials.get(name='disk-google')
+        authorize_url = reverse('settings_keys_oauth_authorize', kwargs={'credential_id': row.pk})
+
+        for health_code in ('invalid_declaration', 'unknown_type'):
+            with self.subTest(health_code=health_code):
+                UserCredential.objects.filter(pk=row.pk).update(
+                    health_status='needs_attention',
+                    health_code=health_code,
+                )
+                response = self.client.get(reverse('settings_keys'))
+                self.assertNotContains(response, authorize_url)
+                self.assertContains(response, HEALTH_CODE_LABELS[health_code])
+
     def test_oauth_rows_render_connection_lifecycle_controls(self) -> None:
         """Render connection controls strictly from active metadata and grant presence."""
         self.client.force_login(self.user)
@@ -313,13 +379,15 @@ class TestKeysPage(OTransactionTestCase):
         response = self.client.get(reverse('settings_keys'))
         authorize_url = reverse('settings_keys_oauth_authorize', kwargs={'credential_id': row.pk})
         disconnect_url = reverse('settings_keys_oauth_disconnect', kwargs={'credential_id': row.pk})
-        self.assertContains(response, 'Not connected')
+        self.assertContains(response, 'OAuth not connected')
         self.assertContains(response, 'Authenticate')
         self.assertContains(response, authorize_url)
         self.assertNotContains(response, disconnect_url)
 
         row.encrypted_value = crypto.encrypt('grant-sentinel')
-        row.save(update_fields=['encrypted_value'])
+        row.health_status = 'ready'
+        row.health_code = ''
+        row.save(update_fields=['encrypted_value', 'health_status', 'health_code'])
         response = self.client.get(reverse('settings_keys'))
         self.assertContains(response, 'Connected')
         self.assertContains(response, 'Reauthenticate')

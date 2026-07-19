@@ -71,6 +71,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
+from libs.providers.key.health_codes import HEALTH_CODE_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -419,6 +420,7 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
             'service_types': sorted(SERVICE_TYPES),
             'credential_guides_json': _html_safe_json(credential_guides_for_ui()),
             'google_oauth_capabilities': oauth_catalog['google'],
+            'HEALTH_CODE_LABELS': HEALTH_CODE_LABELS,
         },
     )
 
@@ -428,7 +430,11 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
 def settings_keys_partial(request: HttpRequest) -> HttpResponse:
     """Render credential metadata for the authenticated user's key-list fragment."""
     named_keys = list_user_credentials(_require_authenticated_user_id(request))
-    return render(request, 'web/partials/key_list.html', {'named_keys': named_keys})
+    return render(
+        request,
+        'web/partials/key_list.html',
+        {'named_keys': named_keys, 'HEALTH_CODE_LABELS': HEALTH_CODE_LABELS},
+    )
 
 
 @login_required(login_url='/admin/login/')

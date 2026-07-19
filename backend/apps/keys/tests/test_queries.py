@@ -129,6 +129,40 @@ class TestCredentialQueries(OTransactionTestCase):
         with self.assertRaises(KeyNotFoundError):
             queries.resolve_secret(user.pk, row.name, expected_type='openai')
 
+    def test_resolve_rejects_needs_attention_static_row_despite_ciphertext(self) -> None:
+        """Block resolution of an active row flagged needs_attention even with a set secret."""
+        user = get_user_model().objects.create_user(username='q-needs-attention', password='x')
+        row = UserCredential.objects.create(
+            user=user,
+            name='disk-broken',
+            type='openai',
+            encrypted_value=b'stale-ciphertext-not-decryptable-as-fernet',
+            source='disk',
+            source_path='keys/disk-broken.yaml',
+            health_status='needs_attention',
+            health_code='invalid_declaration',
+        )
+
+        with self.assertRaisesRegex(KeyNotFoundError, rf'^credential not set: {row.name}$'):
+            queries.resolve_secret(user.pk, row.name, expected_type='openai')
+
+    def test_resolve_reports_not_connected_for_oauth_not_connected_health(self) -> None:
+        """Surface the OAuth-specific message when health_code is oauth_not_connected."""
+        user = get_user_model().objects.create_user(username='q-health-oauth', password='x')
+        commands.upsert_user_named_from_disk(
+            user.pk,
+            'work-google',
+            'google',
+            None,
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'provider': 'google', 'capabilities': ['gmail_read']},
+            source_path='keys/work-google.yaml',
+            source_rev='sha256:first',
+        )
+
+        with self.assertRaisesRegex(KeyNotFoundError, r'^credential not connected: work-google$'):
+            queries.resolve_secret(user.pk, 'work-google', expected_type='google')
+
     def test_type_mismatch_raises(self) -> None:
         user = get_user_model().objects.create_user(username='q-user4', password='x')
         commands.upsert_user_named(user.pk, 'my-clickup', 'clickup', 'tok')

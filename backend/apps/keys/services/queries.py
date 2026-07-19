@@ -21,12 +21,14 @@ from apps.keys.exceptions import (
 )
 from apps.keys.models import (
     CredentialAuthKind,
+    CredentialHealthStatus,
     CredentialStatus,
     SystemCredential,
     UserCredential,
 )
 from apps.keys.oauth import OAUTH_PROVIDERS
 from apps.keys.types import LLM_ENV_FALLBACK, validate_type
+from libs.providers.key.health_codes import OAUTH_NOT_CONNECTED
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class KeyMetadata:
     auth_kind: str = 'static'
     oauth_provider: str | None = None
     oauth_capabilities: tuple[str, ...] = ()
+    health_status: str = CredentialHealthStatus.READY
+    health_code: str = ''
 
 
 def _is_set(encrypted_value: bytes | memoryview) -> bool:
@@ -116,6 +120,8 @@ def _user_metadata(row: UserCredential) -> KeyMetadata:
         auth_kind=row.auth_kind,
         oauth_provider=oauth_provider,
         oauth_capabilities=oauth_capabilities,
+        health_status=row.health_status,
+        health_code=row.health_code,
     )
 
 
@@ -188,7 +194,11 @@ def resolve_default_secret(user_id: int, type_name: str) -> str | None:
 def resolve_secret(user_id: int, name: str, *, expected_type: str) -> str:
     """Resolve by name, skipping disabled user rows before the system fallback.
 
-    Validates type match and raises KeyNotFoundError or KeyTypeMismatchError.
+    Requires ``status == active`` and ``health_status == ready``; a
+    ``needs_attention`` row (empty static value, unconnected OAuth, invalid
+    declaration, or unknown type) is not resolvable even when ciphertext
+    happens to remain from a prior valid state. Validates type match and
+    raises KeyNotFoundError or KeyTypeMismatchError.
     """
     validate_type(expected_type)
     user_row = UserCredential.objects.filter(
@@ -199,14 +209,14 @@ def resolve_secret(user_id: int, name: str, *, expected_type: str) -> str:
     if user_row is not None:
         if user_row.type != expected_type:
             raise KeyTypeMismatchError(f"key_ref '{name}' is type {user_row.type}, expected {expected_type}")
-        if user_row.auth_kind == CredentialAuthKind.OAUTH:
-            if not _is_set(user_row.encrypted_value):
+        if user_row.health_status != CredentialHealthStatus.READY:
+            if user_row.health_code == OAUTH_NOT_CONNECTED:
                 raise KeyNotFoundError(f'credential not connected: {name}')
+            raise KeyNotFoundError(f'credential not set: {name}')
+        if user_row.auth_kind == CredentialAuthKind.OAUTH:
             from apps.keys.oauth.services import materialize_runtime_credential
 
             return materialize_runtime_credential(user_row)
-        if not _is_set(user_row.encrypted_value):
-            raise KeyNotFoundError(f'credential not set: {name}')
         return _decrypt_row(user_row.encrypted_value)
     system_row = SystemCredential.objects.filter(name=name).first()
     if system_row is not None:

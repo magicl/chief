@@ -310,6 +310,17 @@ Architectural rules (all features must follow):
    plaintext on session state, config objects, or library client fields.
 6. **Type-safe wiring.** Every credential has a `type`; consumers declare
    `expected_type` and reject mismatches.
+7. **Health-gated resolution.** `UserCredential` tracks `health_status` (`ready` /
+   `needs_attention`) and a stable `health_code` (`value_empty`, `oauth_not_connected`,
+   `invalid_declaration`, `unknown_type`) independently from lifecycle `status`.
+   `resolve_secret` and OAuth authorize/materialize require `status == active` **and**
+   `health_status == ready`. Recoverable disk declaration problems (empty static value,
+   unconnected OAuth, invalid shape, unregistered type) persist an identifiable
+   `needs_attention` row instead of only emitting an ERROR log; unrecoverable
+   identity failures (bad YAML, missing owner/name) still fail the sync item and log
+   safely. The Keys UI shows the health label in place of Set/Connected and hides
+   Authenticate for `invalid_declaration` / `unknown_type` rows — those disk
+   declarations are fixed on disk, not by re-authorizing.
 
 **Import boundary:** `apps.web` uses metadata queries + commands only (no `resolve_*`).
 `apps.runner`, `apps.agents`, and tasks use `resolve_*` / `make_secret_supplier`.

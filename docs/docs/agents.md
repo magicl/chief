@@ -493,8 +493,20 @@ OAuth declaration, use the Keys page to connect or reconnect the Google account.
 Chief stores the resulting grant encrypted in Postgres rather than writing it to
 disk. Changing the normalized capability set clears an existing grant, while changing
 from OAuth to a valid static declaration replaces the grant with the static value.
-Invalid declarations fail synchronization and leave the existing database row
-unchanged.
+An invalid declaration (unrecognized fields, missing scopes, or an unregistered
+type) still creates or updates an identifiable row so it shows up on the Keys page,
+but it is flagged with a durable health code and cannot be resolved, reconnected, or
+reauthorized until the YAML is fixed on disk; any prior grant or value on that row is
+preserved untouched in the meantime. Stable health codes:
+
+| Code | Meaning |
+|------|---------|
+| `value_empty` | Static declaration with an empty secret string |
+| `oauth_not_connected` | Valid OAuth declaration without an encrypted grant |
+| `invalid_declaration` | Identifiable YAML that is not a valid static/OAuth shape |
+| `unknown_type` | Identifiable YAML whose `type` is not registered |
+
+`auth_kind` is not a disk YAML field; its presence makes the declaration invalid.
 
 Google Drive and Gmail also accept a static `google` credential whose `value` is the
 complete service-account key JSON:

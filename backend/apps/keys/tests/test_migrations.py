@@ -165,3 +165,83 @@ class TestRenameGmailCredentialsToGoogle(OTestCase):
         self.assertEqual(unrelated.name, 'default:gmail')
         self.assertEqual(unrelated.type, 'clickup')
         self.assertEqual(bytes(unrelated.encrypted_value), b'unrelated-ciphertext')
+
+
+class TestUserCredentialHealthMigration(OTestCase):
+    """Verify the health backfill classifies pre-existing rows by auth kind and content."""
+
+    def setUp(self) -> None:
+        """Load the generated migration's backfill function under test."""
+        super().setUp()
+        migration = import_module('apps.keys.migrations.0007_usercredential_health')
+        self.backfill = migration.backfill_usercredential_health
+
+    def test_adds_health_fields_without_a_data_rewrite_helper_for_ready_rows(self) -> None:
+        """The generated schema operations add the two new columns with a ready default."""
+        migration = import_module('apps.keys.migrations.0007_usercredential_health')
+        operations = migration.Migration.operations
+        added_fields = {
+            operation.name: operation.field for operation in operations if isinstance(operation, migrations.AddField)
+        }
+
+        self.assertEqual(added_fields['health_status'].default, 'ready')
+        self.assertEqual(added_fields['health_code'].default, '')
+        self.assertTrue(any(isinstance(operation, migrations.RunPython) for operation in operations))
+
+    def test_backfill_marks_empty_oauth_rows_not_connected(self) -> None:
+        user = get_user_model().objects.create_user(username='migration-health-oauth')
+        row = UserCredential.objects.create(
+            user=user,
+            name='google-oauth',
+            type='google',
+            auth_kind='oauth',
+            encrypted_value=b'',
+        )
+
+        self.backfill(django_apps, None)
+
+        row.refresh_from_db()
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'oauth_not_connected')
+
+    def test_backfill_marks_empty_static_rows_value_empty(self) -> None:
+        user = get_user_model().objects.create_user(username='migration-health-static')
+        row = UserCredential.objects.create(
+            user=user,
+            name='openai-empty',
+            type='openai',
+            auth_kind='static',
+            encrypted_value=b'',
+        )
+
+        self.backfill(django_apps, None)
+
+        row.refresh_from_db()
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'value_empty')
+
+    def test_backfill_leaves_non_empty_rows_ready(self) -> None:
+        user = get_user_model().objects.create_user(username='migration-health-ready')
+        static_row = UserCredential.objects.create(
+            user=user,
+            name='openai-set',
+            type='openai',
+            auth_kind='static',
+            encrypted_value=b'ciphertext',
+        )
+        oauth_row = UserCredential.objects.create(
+            user=user,
+            name='google-connected',
+            type='google',
+            auth_kind='oauth',
+            encrypted_value=b'grant-ciphertext',
+        )
+
+        self.backfill(django_apps, None)
+
+        static_row.refresh_from_db()
+        oauth_row.refresh_from_db()
+        self.assertEqual(static_row.health_status, 'ready')
+        self.assertEqual(static_row.health_code, '')
+        self.assertEqual(oauth_row.health_status, 'ready')
+        self.assertEqual(oauth_row.health_code, '')
