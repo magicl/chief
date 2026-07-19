@@ -28,6 +28,10 @@ INSTALLED_APPS += [  # noqa: F405
     'django_celery_beat',
 ]
 
+# This route-specific layer must remain outermost so it runs after all converted
+# downstream failures; the callback view keeps its decorator as defense in depth.
+MIDDLEWARE = ['apps.web.middleware.OAuthCallbackResponseMiddleware', *MIDDLEWARE]  # noqa: F405
+
 # Per-trigger schedule crons live in the DB; platform beats stay in chief/celery.py.
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
@@ -39,6 +43,11 @@ SITE_NAME = env.str('SITE_NAME', default='Chief')  # noqa: F405
 
 CHIEF_LOCAL_DIR = env.str('CHIEF_LOCAL_DIR', default='')  # noqa: F405
 
+# Optional application credentials for user-owned Google OAuth grants.
+GOOGLE_OAUTH_CLIENT_ID = env.str('GOOGLE_OAUTH_CLIENT_ID', default='')  # noqa: F405
+GOOGLE_OAUTH_CLIENT_SECRET = env.str('GOOGLE_OAUTH_CLIENT_SECRET', default='')  # noqa: F405
+OAUTH_STATE_MAX_AGE_SECONDS = 600
+
 # Fernet master key for credential encryption at rest (see apps.keys.crypto).
 # Required when DEBUG is False; dev default when DEBUG is True.
 CREDENTIALS_KEY = env_secret(  # noqa: F405
@@ -48,6 +57,10 @@ CREDENTIALS_KEY = env_secret(  # noqa: F405
 
 # Server-rendered app: keep CSRF/session cookies usable over plain http in dev.
 SESSION_COOKIE_SAMESITE = 'Lax'
+
+# The front proxy must overwrite X-Forwarded-Proto rather than append to or trust
+# a client-supplied value; the current nginx configuration enforces this boundary.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Jinja2 dashboard templates use auth, CSRF, and request context.
 for _tpl in TEMPLATES:  # noqa: F405

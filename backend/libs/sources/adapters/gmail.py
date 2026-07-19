@@ -17,7 +17,6 @@ from libs.sources.base import PollResult, PutItemCallback, SecretSupplier, Sourc
 from libs.sources.dedup import (
     dedupe_enabled,
     gmail_external_id,
-    should_skip_known,
     validate_dedupe_config,
 )
 
@@ -87,10 +86,12 @@ class GmailSourceAdapter(SourceAdapter):
     credential_type = 'google'
 
     def validate_config(self, config: dict[str, Any]) -> None:
-        """Require non-empty ``subject`` and ``query``; validate optional fields."""
-        subject = config.get('subject')
-        if not isinstance(subject, str) or not subject:
-            raise ValueError('subject must be a non-empty string')
+        """Require a query and validate an optional delegation subject."""
+        if 'subject' in config:
+            subject = config['subject']
+            if not isinstance(subject, str) or not subject.strip():
+                raise ValueError('subject must be a non-empty string')
+            config['subject'] = subject.strip()
         query = config.get('query')
         if not isinstance(query, str) or not query:
             raise ValueError('query must be a non-empty string')
@@ -111,46 +112,56 @@ class GmailSourceAdapter(SourceAdapter):
         known_external_ids: frozenset[str] | None = None,
     ) -> PollResult:
         """List messages by query and enqueue one ``{data, ref}`` envelope per message."""
-        max_results = config.get('max_results', _DEFAULT_MAX_RESULTS)
-        include_body = config.get('include_body', False)
-        dedupe = dedupe_enabled(config)
-        client = GmailClient(token_supplier=credential_supplier or (lambda: None), config=config)
-        message_ids = client.list_message_ids(query=config['query'], max_results=max_results)
-        enqueued = 0
-        for message_id in message_ids:
-            if should_skip_known(
-                dedupe=dedupe,
-                external_id=message_id,
-                known_external_ids=known_external_ids,
-            ):
-                continue
-            msg = client.get_message(message_id, fmt='metadata')
-            has_attachments, attachments = _attachment_meta(msg)
-            data: dict[str, Any] = {
-                'id': msg.get('id'),
-                'thread_id': msg.get('threadId'),
-                'from': _header(msg, 'From'),
-                'to': _parse_to_addresses(msg),
-                'subject': _header(msg, 'Subject'),
-                'snippet': msg.get('snippet'),
-                'received_at': _header(msg, 'Date'),
-                'label_ids': msg.get('labelIds', []),
-                'has_attachments': has_attachments,
-                'attachments': attachments,
-            }
-            body_preview = _inline_body(msg, include_body=include_body)
-            if body_preview is not None:
-                data['body_preview'] = body_preview
-            envelope = {
-                'data': data,
-                'ref': {'service': 'gmail', 'resource_type': 'message', 'resource_id': message_id},
-            }
-            ext_id = gmail_external_id(
-                message_id,
-                history_id=msg.get('historyId') if isinstance(msg.get('historyId'), str) else None,
-                dedupe=dedupe,
-            )
-            result = put_item(payload=envelope, external_id=ext_id)
-            if result.created:
-                enqueued += 1
-        return PollResult(items_seen=len(message_ids), items_enqueued=enqueued)
+        client: GmailClient | None = None
+        message_ids: list[str] | None = None
+        messages: Any = None
+        msg: dict[str, Any] | None = None
+        try:
+            max_results = config.get('max_results', _DEFAULT_MAX_RESULTS)
+            include_body = config.get('include_body', False)
+            dedupe = dedupe_enabled(config)
+            client = GmailClient(token_supplier=credential_supplier or (lambda: None), config=config)
+            skip_message_ids = (known_external_ids or frozenset()) if dedupe else frozenset()
+            with client.poll_message_metadata(
+                query=config['query'],
+                max_results=max_results,
+                skip_message_ids=skip_message_ids,
+            ) as batch:
+                message_ids, messages = batch
+                enqueued = 0
+                for message_id, msg in messages:
+                    has_attachments, attachments = _attachment_meta(msg)
+                    data: dict[str, Any] = {
+                        'id': msg.get('id'),
+                        'thread_id': msg.get('threadId'),
+                        'from': _header(msg, 'From'),
+                        'to': _parse_to_addresses(msg),
+                        'subject': _header(msg, 'Subject'),
+                        'snippet': msg.get('snippet'),
+                        'received_at': _header(msg, 'Date'),
+                        'label_ids': msg.get('labelIds', []),
+                        'has_attachments': has_attachments,
+                        'attachments': attachments,
+                    }
+                    body_preview = _inline_body(msg, include_body=include_body)
+                    if body_preview is not None:
+                        data['body_preview'] = body_preview
+                    envelope = {
+                        'data': data,
+                        'ref': {'service': 'gmail', 'resource_type': 'message', 'resource_id': message_id},
+                    }
+                    ext_id = gmail_external_id(
+                        message_id,
+                        history_id=msg.get('historyId') if isinstance(msg.get('historyId'), str) else None,
+                        dedupe=dedupe,
+                    )
+                    result = put_item(payload=envelope, external_id=ext_id)
+                    if result.created:
+                        enqueued += 1
+                return PollResult(items_seen=len(message_ids), items_enqueued=enqueued)
+        finally:
+            credential_supplier = None
+            client = None
+            message_ids = None
+            messages = None
+            msg = None

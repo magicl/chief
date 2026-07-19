@@ -4,12 +4,144 @@
 # ~
 """Verify Docker Compose and container entrypoint conventions."""
 
+import json
+import os
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
+from typing import cast
 
 from ruamel.yaml import YAML
 
 from olib.py.django.test.cases import OTestCase
+
+
+class TestGoogleOAuthApplicationConfig(OTestCase):
+    """Check optional Google OAuth app settings and their deployment contract."""
+
+    @staticmethod
+    def _load_oauth_settings(client_id: str | None, client_secret: str | None) -> list[object]:
+        """Import project settings in isolation from dotenv and ambient OAuth values."""
+        repository_root = Path(__file__).resolve().parents[3]
+        child_env = os.environ.copy()
+        for setting_name in (
+            'GOOGLE_OAUTH_CLIENT_ID',
+            'GOOGLE_OAUTH_CLIENT_ID_FILE',
+            'GOOGLE_OAUTH_CLIENT_SECRET',
+            'GOOGLE_OAUTH_CLIENT_SECRET_FILE',
+        ):
+            child_env.pop(setting_name, None)
+        if client_id is not None:
+            child_env['GOOGLE_OAUTH_CLIENT_ID'] = client_id
+        if client_secret is not None:
+            child_env['GOOGLE_OAUTH_CLIENT_SECRET'] = client_secret
+
+        script = (
+            'import json, sys\n'
+            "sys.argv = ['manage.py', 'test']\n"
+            'from chief import settings\n'
+            'print(json.dumps(['
+            'settings.GOOGLE_OAUTH_CLIENT_ID, '
+            'settings.GOOGLE_OAUTH_CLIENT_SECRET, '
+            'settings.OAUTH_STATE_MAX_AGE_SECONDS]))\n'
+        )
+        with tempfile.TemporaryDirectory() as empty_env_dir:
+            child_env['ENV_PATH'] = empty_env_dir
+            completed = subprocess.run(  # noqa: S603
+                [sys.executable, '-c', script],
+                cwd=repository_root / 'backend',
+                env=child_env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        if completed.returncode:
+            raise AssertionError(f'isolated settings import failed: {completed.stderr}')
+        return cast('list[object]', json.loads(completed.stdout))
+
+    def test_blank_settings_allow_startup_without_google_oauth(self) -> None:
+        """OAuth app credentials are optional while state lifetime stays bounded."""
+        self.assertEqual(self._load_oauth_settings(None, None), ['', '', 600])
+
+    def test_oauth_settings_propagate_configured_values(self) -> None:
+        """Project settings preserve deployment-provided OAuth application values."""
+        self.assertEqual(
+            self._load_oauth_settings('client-id-sentinel', 'client-secret-sentinel'),
+            ['client-id-sentinel', 'client-secret-sentinel', 600],
+        )
+
+    def test_env_example_places_blank_oauth_values_in_backend_group(self) -> None:
+        """Compose exposes only blank OAuth app placeholders to backend consumers."""
+        repository_root = Path(__file__).resolve().parents[3]
+        env_example = (repository_root / '.env.local.example').read_text()
+        backend_match = re.search(
+            r'^#\[backend\]\s*$\n(?P<body>.*?)(?=^#\[|\Z)',
+            env_example,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+
+        self.assertIsNotNone(backend_match)
+        backend_body = backend_match.group('body') if backend_match else ''
+        for setting_name in ('GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET'):
+            assignment = f'{setting_name}='
+            self.assertEqual(env_example.count(assignment), 1)
+            self.assertRegex(backend_body, rf'(?m)^{re.escape(assignment)}$')
+
+    def test_architecture_documents_oauth_secret_boundaries(self) -> None:
+        """Architecture fixes Knox mapping, callback, and credential ownership rules."""
+        repository_root = Path(__file__).resolve().parents[3]
+        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
+
+        self.assertEqual(architecture.count('`$KNOX/chief/oauth/google`'), 1)
+        self.assertIn('- `client_id` → `GOOGLE_OAUTH_CLIENT_ID`', architecture)
+        self.assertIn('- `client_secret` → `GOOGLE_OAUTH_CLIENT_SECRET`', architecture)
+        self.assertIn('Chief never reads Knox directly', architecture)
+        self.assertIn('`https://<origin>/settings/keys/oauth/google/callback/`', architecture)
+        self.assertIn('HTTPS outside local development', architecture)
+
+    def test_architecture_documents_oauth_proxy_and_process_boundaries(self) -> None:
+        """Architecture states the exact production proxy and process constraints."""
+        repository_root = Path(__file__).resolve().parents[3]
+        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
+        normalized = ' '.join(architecture.split())
+
+        self.assertIn(
+            'production Django application port must be network-isolated and unreachable directly',
+            normalized,
+        )
+        self.assertIn('trusted front proxy must overwrite `X-Forwarded-Proto`', normalized)
+        self.assertIn(
+            'current Docker Compose port publishing is local development only and is not a production exposure template',
+            normalized,
+        )
+        self.assertIn('`.env.local` into the backend, worker, and Beat services', normalized)
+        self.assertIn('Beat does not use the Google OAuth values', normalized)
+        self.assertIn('Production secret scoping is the deployment responsibility', normalized)
+
+    def test_architecture_documents_callback_logging_contract(self) -> None:
+        """Require query-free upstream logging and an isolated proxy boundary."""
+        repository_root = Path(__file__).resolve().parents[3]
+        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
+        normalized = ' '.join(architecture.split())
+        nginx = (repository_root / 'infra/docker/nginx.conf').read_text()
+
+        self.assertIn(
+            'Production ingress, access logs, and APM must omit the OAuth callback query string entirely before '
+            'the request reaches Django.',
+            normalized,
+        )
+        self.assertIn(
+            'Application middleware cannot redact logs already emitted by upstream infrastructure.',
+            normalized,
+        )
+        self.assertIn(
+            'The backend must remain network-isolated behind that controlled proxy.',
+            normalized,
+        )
+        self.assertIn('The current development nginx keeps `access_log off`.', normalized)
+        self.assertRegex(nginx, r'(?m)^\s*access_log off;\s*$')
 
 
 class TestComposeLocalProviderConfig(OTestCase):

@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Mapping
 
 from apps.bus.resources import publish_resource_update_after_commit
 from apps.keys import crypto
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
 from apps.keys.models import (
+    CredentialAuthKind,
     CredentialSource,
     CredentialStatus,
     SystemCredential,
@@ -60,7 +62,7 @@ def _unset_system_default_flag(type_name: str, *, except_pk: uuid.UUID | None = 
 
 
 def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> KeyMetadata:
-    """Create or replace a database-owned key and notify after commit."""
+    """Create or replace a database-owned static key and clear OAuth metadata."""
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
     validated_secret = _validate_secret(secret)
@@ -74,6 +76,8 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
             defaults={
                 'type': type_name,
                 'encrypted_value': crypto.encrypt(validated_secret),
+                'auth_kind': CredentialAuthKind.STATIC,
+                'auth_config': {},
                 'source': CredentialSource.DB,
                 'source_path': '',
                 'source_rev': '',
@@ -84,19 +88,120 @@ def upsert_user_named(user_id: int, name: str, type_name: str, secret: str) -> K
     return _user_metadata(row)
 
 
+def create_user_oauth(
+    user_id: int,
+    name: str,
+    type_name: str,
+    *,
+    provider_id: str,
+    capability_ids: Iterable[str],
+) -> KeyMetadata:
+    """Create or replace an unconnected database-owned OAuth declaration."""
+    from apps.keys.oauth.services import normalize_auth_config
+
+    validate_type(type_name)
+    validated_name = _validate_named_name(name, user_id=user_id)
+    auth_config = normalize_auth_config(
+        provider_id=provider_id,
+        credential_type=type_name,
+        capability_ids=capability_ids,
+    )
+    with transaction.atomic():
+        existing = UserCredential.objects.select_for_update().filter(user_id=user_id, name=validated_name).first()
+        if existing is not None and existing.source == CredentialSource.DISK:
+            raise KeyValidationError(f'disk-sourced credential is read-only: {validated_name}')
+        row, _ = UserCredential.objects.update_or_create(
+            user_id=user_id,
+            name=validated_name,
+            defaults={
+                'type': type_name,
+                'encrypted_value': b'',
+                'auth_kind': CredentialAuthKind.OAUTH,
+                'auth_config': auth_config,
+                'source': CredentialSource.DB,
+                'source_path': '',
+                'source_rev': '',
+                'status': CredentialStatus.ACTIVE,
+            },
+        )
+        publish_resource_update_after_commit(user_id, 'keys')
+    return _user_metadata(row)
+
+
+def _is_structural_oauth_config(auth_config: Mapping[str, object]) -> bool:
+    """Check the canonical OAuth JSON structure before provider code sees it."""
+    if set(auth_config) != {'provider', 'capabilities'}:
+        return False
+    provider_id = auth_config.get('provider')
+    capabilities = auth_config.get('capabilities')
+    return (
+        isinstance(provider_id, str)
+        and bool(provider_id.strip())
+        and isinstance(capabilities, list)
+        and bool(capabilities)
+        and all(isinstance(capability, str) and bool(capability.strip()) for capability in capabilities)
+    )
+
+
+def _normalize_disk_oauth_config(type_name: str, auth_config: Mapping[str, object]) -> dict[str, object]:
+    """Validate and canonicalize disk OAuth metadata without retaining grants."""
+    from apps.keys.oauth.services import normalize_auth_config
+
+    if not _is_structural_oauth_config(auth_config):
+        raise KeyValidationError('OAuth credential configuration is invalid')
+    provider_id = auth_config['provider']
+    capabilities = auth_config['capabilities']
+    if not isinstance(provider_id, str) or not isinstance(capabilities, list):
+        # The structural predicate above narrows values for humans, not static type checkers.
+        raise KeyValidationError('OAuth credential configuration is invalid')
+    return normalize_auth_config(
+        provider_id=provider_id,
+        credential_type=type_name,
+        capability_ids=capabilities,
+    )
+
+
+def _existing_disk_auth_config(row: UserCredential) -> dict[str, object] | None:
+    """Return canonical stored OAuth metadata, or none when it is malformed."""
+    if row.auth_kind == CredentialAuthKind.STATIC:
+        return {} if row.auth_config == {} else None
+    if row.auth_kind != CredentialAuthKind.OAUTH or not isinstance(row.auth_config, dict):
+        return None
+    if not _is_structural_oauth_config(row.auth_config):
+        return None
+    try:
+        return _normalize_disk_oauth_config(row.type, row.auth_config)
+    except KeyValidationError:
+        return None
+
+
 def upsert_user_named_from_disk(
     user_id: int,
     name: str,
     type_name: str,
-    secret: str,
+    secret: str | None,
     *,
+    auth_kind: str = CredentialAuthKind.STATIC,
+    auth_config: Mapping[str, object] | None = None,
     source_path: str,
     source_rev: str,
 ) -> tuple[KeyMetadata, bool]:
-    """Return metadata plus whether create, replacement, or restore changed the list."""
+    """Reconcile one disk declaration while preserving only semantically valid grants."""
     validate_type(type_name)
     validated_name = _validate_named_name(name, user_id=user_id)
-    validated_secret = _validate_secret(secret, allow_empty=True)
+    supplied_auth_config = auth_config if auth_config is not None else {}
+    if auth_kind == CredentialAuthKind.STATIC:
+        if not isinstance(secret, str) or dict(supplied_auth_config):
+            raise KeyValidationError('static credential configuration is invalid')
+        normalized_auth_config: dict[str, object] = {}
+        validated_secret = _validate_secret(secret, allow_empty=True)
+    elif auth_kind == CredentialAuthKind.OAUTH:
+        if secret is not None:
+            raise KeyValidationError('OAuth credential configuration is invalid')
+        normalized_auth_config = _normalize_disk_oauth_config(type_name, supplied_auth_config)
+        validated_secret = None
+    else:
+        raise KeyValidationError('credential authentication kind is invalid')
 
     with transaction.atomic():
         row = (
@@ -109,22 +214,34 @@ def upsert_user_named_from_disk(
         )
         if row is not None and row.source != CredentialSource.DISK:
             raise KeyValidationError(f'database-owned credential conflict: {validated_name}')
-        if (
+        semantic_match = (
             row is not None
             and row.type == type_name
+            and row.auth_kind == auth_kind
+            and _existing_disk_auth_config(row) == normalized_auth_config
+        )
+        if (
+            row is not None
+            and semantic_match
             and row.source_path == source_path
             and row.source_rev == source_rev
             and row.status == CredentialStatus.ACTIVE
         ):
             return _user_metadata(row), False
 
-        encrypted_value = crypto.encrypt(validated_secret)
+        encrypted_value = (
+            bytes(row.encrypted_value)
+            if auth_kind == CredentialAuthKind.OAUTH and semantic_match and row is not None
+            else b'' if auth_kind == CredentialAuthKind.OAUTH else crypto.encrypt(validated_secret or '')
+        )
         if row is None:
             row = UserCredential.objects.create(
                 user_id=user_id,
                 name=validated_name,
                 type=type_name,
                 encrypted_value=encrypted_value,
+                auth_kind=auth_kind,
+                auth_config=normalized_auth_config,
                 source=CredentialSource.DISK,
                 source_path=source_path,
                 source_rev=source_rev,
@@ -133,6 +250,8 @@ def upsert_user_named_from_disk(
         else:
             row.type = type_name
             row.encrypted_value = encrypted_value
+            row.auth_kind = auth_kind
+            row.auth_config = normalized_auth_config
             row.source_path = source_path
             row.source_rev = source_rev
             row.status = CredentialStatus.ACTIVE
@@ -140,6 +259,8 @@ def upsert_user_named_from_disk(
                 update_fields=[
                     'type',
                     'encrypted_value',
+                    'auth_kind',
+                    'auth_config',
                     'source_path',
                     'source_rev',
                     'status',

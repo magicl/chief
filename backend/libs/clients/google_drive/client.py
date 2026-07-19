@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from googleapiclient.errors import HttpError
+from libs.clients.google_auth import build_google_credentials
 from libs.clients.google_drive.config import (
     GoogleDriveConfig,
     GoogleDriveRoot,
@@ -52,9 +53,21 @@ class _OperationContext:
     parent_fetches: int = 0
 
     def clear(self) -> None:
-        """Release provider objects and responses before a failure traceback escapes."""
-        self.service = None
-        self.parent_cache.clear()
+        """Close and release provider state without replacing an operation outcome."""
+        service: Any = self.service
+        close: Any = None
+        try:
+            close = getattr(service, 'close', None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # nosec B110  # pylint: disable=broad-exception-caught  # noqa: BLE001
+                    pass
+        finally:
+            self.service = None
+            self.parent_cache.clear()
+            service = None
+            close = None
 
 
 _FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder'
@@ -94,39 +107,27 @@ _QUOTA_REASONS = frozenset(
 
 
 def _build_service(raw_credential: str, subject: str | None) -> Any:
-    """Build one Drive v3 service from a complete service-account JSON value."""
-    from google.oauth2 import service_account  # noqa: PLC0415
+    """Build one Drive v3 service from operation-local Google credentials."""
     from googleapiclient.discovery import build  # noqa: PLC0415
 
-    info: Any = None
     credentials: Any = None
+    service: Any = None
     try:
-        invalid_json = False
-        try:
-            info = json.loads(raw_credential)
-        except (TypeError, ValueError):
-            invalid_json = True
-        if invalid_json:
-            # Raise after the parser's except block so no JSONDecodeError is retained.
-            raise GoogleDriveAuthError('Google service-account credential is not valid JSON') from None
-        if not isinstance(info, dict):
-            raise GoogleDriveAuthError('Google service-account credential must be a JSON object')
         build_failed = False
         try:
-            credentials = service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
-                info,
-                scopes=(DRIVE_METADATA_SCOPE,),
+            credentials = build_google_credentials(
+                raw_credential,
+                service_account_scopes=(DRIVE_METADATA_SCOPE,),
+                subject=subject,
+                require_service_account_subject=False,
             )
-            if subject:
-                credentials = credentials.with_subject(subject)
-            return build(
+            service = build(
                 'drive',
                 'v3',
                 credentials=credentials,
                 cache_discovery=False,
             )
-        except GoogleDriveError:
-            raise
+            return service
         except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             build_failed = True
         # Do not retain vendor failures that may echo credential fields.
@@ -136,8 +137,9 @@ def _build_service(raw_credential: str, subject: str | None) -> Any:
     finally:
         # Tracebacks retain frame locals, so overwrite every credential-bearing value.
         raw_credential = ''
-        info = None
+        subject = None
         credentials = None
+        service = None
 
 
 def _status(exc: Exception) -> int | None:
@@ -223,7 +225,7 @@ class GoogleDriveClient:
         try:
             raw_credential = self._token_supplier()
             if not raw_credential:
-                raise GoogleDriveAuthError('no Google service-account credential resolved')
+                raise GoogleDriveAuthError('no Google credential resolved')
             factory_failed = False
             try:
                 return self._service_factory(raw_credential, self._config.subject)

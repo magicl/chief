@@ -317,6 +317,61 @@ Architectural rules (all features must follow):
 and `cryptography`, it may import foundational `apps.bus` publishers for committed
 user-resource hints.
 
+### Google OAuth application and grant ownership
+
+Google OAuth providers are selected through the `apps.keys.oauth` provider registry.
+The registry owns provider behavior and the catalog of human-facing capability IDs,
+descriptions, exact scopes, and `current` or `future` support status. Humans select
+those capability IDs; configuration and disk declarations never accept arbitrary
+scope URLs.
+
+The OAuth refresh grant is an encrypted grant in `UserCredential.encrypted_value`.
+It contains only the provider refresh token and validated granted scopes. Immediately
+before a Google operation, `apps.keys` combines that grant with the application
+settings and emits a runtime-only envelope. The Django-free Google client consumes
+the envelope for that operation; the envelope, client secret, refresh token, and
+access tokens are never persisted in agent config or rendered to humans.
+
+For disk-owned OAuth credentials, the YAML disk declaration owns the name, owner,
+provider, and capability selection. It never contains the provider grant or OAuth
+application values. Edit declaration metadata on disk rather than in the UI; Chief
+keeps the resulting grant encrypted in Postgres and clears it when an ownership-
+relevant declaration change requires fresh consent.
+
+Production has one structured application secret: `$KNOX/chief/oauth/google`. Its
+exact keys map to process environment settings as follows:
+
+- `client_id` → `GOOGLE_OAUTH_CLIENT_ID`
+- `client_secret` → `GOOGLE_OAUTH_CLIENT_SECRET`
+
+Chief never reads Knox directly. Deployment tooling materializes those two keys as
+environment variables; no Knox client or real values belong in this repository.
+Both settings default to blank so installations that do not use Google OAuth still
+start normally.
+
+Docker Compose already loads `.env.local` into the backend, worker, and Beat services.
+Blank placeholders live under `#[backend]` in `.env.local.example`. Only web
+authorization start/callback handling and operation-time OAuth materialization require
+the application values. Beat does not use the Google OAuth values. Production secret
+scoping is the deployment responsibility.
+
+Register the exact callback URL `https://<origin>/settings/keys/oauth/google/callback/`
+for each deployed origin, including the trailing slash. The callback path is fixed by
+Chief rather than supplied by a user, and it requires HTTPS outside local development.
+
+`SECURE_PROXY_SSL_HEADER` is safe only at a controlled TLS-termination boundary: the
+production Django application port must be network-isolated and unreachable directly,
+and the trusted front proxy must overwrite `X-Forwarded-Proto` rather than append to
+or pass through a client-supplied value. The current Docker Compose port publishing is
+local development only and is not a production exposure template.
+
+Production ingress, access logs, and APM must omit the OAuth callback query string
+entirely before the request reaches Django. Application middleware cannot redact logs
+already emitted by upstream infrastructure. The backend must remain network-isolated
+behind that controlled proxy. The current development nginx keeps `access_log off`.
+Django independently applies `Referrer-Policy: no-referrer` and `Cache-Control:
+no-store` to every callback response, including converted route failures.
+
 ---
 
 ## External integrations

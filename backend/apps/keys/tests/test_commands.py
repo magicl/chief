@@ -4,8 +4,14 @@
 # ~
 from unittest.mock import MagicMock, patch
 
+from apps.keys import crypto
 from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
-from apps.keys.models import CredentialStatus, SystemCredential, UserCredential
+from apps.keys.models import (
+    CredentialAuthKind,
+    CredentialStatus,
+    SystemCredential,
+    UserCredential,
+)
 from apps.keys.services import commands
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -24,6 +30,24 @@ class TestCredentialCommands(OTestCase):
         self.assertEqual(meta.status, 'active')
         row = UserCredential.objects.get(user_id=user.pk, name='openai-work')
         self.assertNotEqual(row.encrypted_value, b'sk-user-key')
+
+    def test_upsert_named_resets_existing_oauth_declaration_to_static(self) -> None:
+        """Replacing a database OAuth row explicitly clears its declaration metadata."""
+        user = get_user_model().objects.create_user(username='cmd-static-reset', password='x')
+        row = UserCredential.objects.create(
+            user=user,
+            name='google-work',
+            type='google',
+            encrypted_value=b'old-oauth-grant',
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'provider': 'google', 'capabilities': ['gmail_read']},
+        )
+
+        commands.upsert_user_named(user.pk, row.name, 'google', 'service-account-json')
+
+        row.refresh_from_db()
+        self.assertEqual(row.auth_kind, CredentialAuthKind.STATIC)
+        self.assertEqual(row.auth_config, {})
 
     def test_upsert_named_refuses_to_replace_disk_credential(self) -> None:
         """Keep disk-owned credential content and provenance immutable to UI writes."""
@@ -171,6 +195,103 @@ class TestCredentialCommands(OTestCase):
 
         self.assertTrue(changed)
         publish.assert_called_once_with(user.pk, 'keys')
+
+    def test_disk_oauth_upsert_preserves_grant_for_normalized_semantics(self) -> None:
+        """Preserve ciphertext across revision, ordering, and disabled-state changes."""
+        user = get_user_model().objects.create_user(username='disk-oauth-semantic')
+        commands.upsert_user_named_from_disk(
+            user.pk,
+            'work-google',
+            'google',
+            None,
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'provider': 'google', 'capabilities': ['drive_metadata', 'gmail_read']},
+            source_path='keys/work-google.yaml',
+            source_rev='sha256:first',
+        )
+        row = UserCredential.objects.get(user=user, name='work-google')
+        grant = b'encrypted-grant-sentinel'
+        UserCredential.objects.filter(pk=row.pk).update(
+            encrypted_value=grant,
+            status=CredentialStatus.DISABLED,
+        )
+
+        _, changed = commands.upsert_user_named_from_disk(
+            user.pk,
+            'work-google',
+            'google',
+            None,
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'capabilities': ['gmail_read', 'drive_metadata'], 'provider': 'google'},
+            source_path='keys/work-google.yaml',
+            source_rev='sha256:second',
+        )
+
+        self.assertTrue(changed)
+        row.refresh_from_db()
+        self.assertEqual(bytes(row.encrypted_value), grant)
+        self.assertEqual(row.status, CredentialStatus.ACTIVE)
+        self.assertEqual(row.source_rev, 'sha256:second')
+
+    def test_disk_oauth_upsert_clears_grant_for_type_change(self) -> None:
+        """Replace ciphertext when a disk declaration changes type and auth kind."""
+        user = get_user_model().objects.create_user(username='disk-oauth-type-change')
+        row = UserCredential.objects.create(
+            user=user,
+            name='work-key',
+            type='google',
+            encrypted_value=b'encrypted-grant-sentinel',
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'provider': 'google', 'capabilities': ['gmail_read']},
+            source='disk',
+            source_path='keys/work-key.yaml',
+            source_rev='sha256:first',
+        )
+
+        commands.upsert_user_named_from_disk(
+            user.pk,
+            'work-key',
+            'openai',
+            'new-static-secret',
+            auth_kind=CredentialAuthKind.STATIC,
+            auth_config={},
+            source_path='keys/work-key.yaml',
+            source_rev='sha256:second',
+        )
+
+        row.refresh_from_db()
+        self.assertEqual(row.type, 'openai')
+        self.assertEqual(row.auth_kind, CredentialAuthKind.STATIC)
+        self.assertEqual(row.auth_config, {})
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'new-static-secret')
+
+    def test_stored_oauth_corruption_is_rejected_before_provider_normalization(self) -> None:
+        """Treat structurally malformed stored capabilities as non-semantic metadata."""
+        user = get_user_model().objects.create_user(username='disk-oauth-corruption')
+        malformed_capabilities: tuple[list[object], ...] = (
+            [['nested-secret-sentinel']],
+            [{'nested-secret-sentinel': 'value'}],
+            [7],
+            [],
+            [''],
+            ['   '],
+        )
+        for index, capabilities in enumerate(malformed_capabilities):
+            with self.subTest(capabilities=capabilities):
+                row = UserCredential.objects.create(
+                    user=user,
+                    name=f'work-google-{index}',
+                    type='google',
+                    encrypted_value=b'encrypted-grant-sentinel',
+                    auth_kind=CredentialAuthKind.OAUTH,
+                    auth_config={'provider': 'google', 'capabilities': capabilities},
+                    source='disk',
+                )
+                with patch('apps.keys.oauth.services.normalize_auth_config') as normalize:
+                    normalized = commands._existing_disk_auth_config(row)  # pylint: disable=protected-access
+
+                self.assertIsNone(normalized)
+                normalize.assert_not_called()
 
     def test_delete_user_credential_idempotent_missing(self) -> None:
         user = get_user_model().objects.create_user(username='cmd-user3', password='x')

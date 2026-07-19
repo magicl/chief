@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from functools import wraps
 from typing import Any, cast
 from uuid import UUID
 
@@ -17,8 +18,17 @@ from apps.agents.delete import AgentNotFoundError, delete_agent_for_user
 from apps.agents.models import Agent, SpendPolicy
 from apps.bus.client import async_client, key_prefix
 from apps.keys.credential_guides import credential_guides_for_ui
-from apps.keys.exceptions import KeyNotFoundError, KeyValidationError
+from apps.keys.exceptions import (
+    KeyNotFoundError,
+    KeyStorageMisconfiguredError,
+    KeyValidationError,
+    OAuthConfigurationError,
+    OAuthProviderError,
+    OAuthStateError,
+)
 from apps.keys.models import CredentialSource
+from apps.keys.oauth import OAUTH_PROVIDERS
+from apps.keys.oauth import services as oauth_services
 from apps.keys.services import commands
 from apps.keys.services.queries import list_user_credentials
 from apps.keys.types import SERVICE_TYPES
@@ -46,6 +56,8 @@ from apps.web.services.queries import (
     get_session_llm_label,
 )
 from asgiref.sync import sync_to_async
+from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
 from django.http import (
@@ -61,6 +73,70 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 
 logger = logging.getLogger(__name__)
+
+
+def _html_safe_json(value: Any) -> str:
+    """Serialize page data while preventing JSON text from becoming HTML markup."""
+    return json.dumps(value).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+
+
+def _oauth_catalog_for_ui() -> dict[str, list[dict[str, str]]]:
+    """Return provider-owned, secret-free capability copy for the credential form."""
+    provider = OAUTH_PROVIDERS.get('google')
+    return {
+        provider.id: [
+            {
+                'id': capability.id,
+                'label': capability.label,
+                'description': capability.description,
+                'support': capability.support,
+                'support_label': 'Available now' if capability.support == 'current' else 'Future support',
+            }
+            for capability in provider.capabilities
+        ]
+    }
+
+
+def _fixed_google_callback_uri(request: HttpRequest) -> str:
+    """Build the sole callback URI and require HTTPS outside local development."""
+    callback_uri = request.build_absolute_uri(reverse('settings_keys_oauth_google_callback'))
+    if not settings.DEBUG and not callback_uri.startswith('https://'):
+        raise OAuthConfigurationError('OAuth callback is unavailable')
+    return callback_uri
+
+
+def _existing_session_key(request: HttpRequest, *, create: bool) -> str:
+    """Return the current session key, creating one only for authorization start."""
+    session_key = request.session.session_key
+    if session_key is None and create:
+        request.session.create()
+        session_key = request.session.session_key
+    if not isinstance(session_key, str) or not session_key:
+        raise OAuthStateError('OAuth authorization state is invalid')
+    return session_key
+
+
+def _scrub_caught_oauth_failure(failure: BaseException) -> None:
+    """Drop retained traceback chains after converting OAuth failures to fixed HTTP text."""
+    failure.__traceback__ = None
+    failure.__context__ = None
+    failure.__cause__ = None
+
+
+def _harden_oauth_callback_response(
+    view: Callable[[HttpRequest], HttpResponse],
+) -> Callable[[HttpRequest], HttpResponse]:
+    """Prevent every callback response from caching or forwarding its sensitive URL."""
+
+    @wraps(view)
+    def wrapped(request: HttpRequest) -> HttpResponse:
+        """Apply callback-only response headers after all route outcomes."""
+        response = view(request)
+        response['Referrer-Policy'] = 'no-referrer'
+        response['Cache-Control'] = 'no-store'
+        return response
+
+    return wrapped
 
 
 def _credential_write_denied(row: Any | None) -> HttpResponseBadRequest | None:
@@ -108,8 +184,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             usage_context['user_daily_limit'] = policy.daily_spend_limit_usd
             usage_context['user_monthly_limit'] = policy.monthly_spend_limit_usd
         except SpendPolicy.DoesNotExist:
-            from django.conf import settings
-
             usage_context['user_daily_limit'] = getattr(settings, 'DEFAULT_USER_DAILY_SPEND_LIMIT_USD', None)
             usage_context['user_monthly_limit'] = getattr(settings, 'DEFAULT_USER_MONTHLY_SPEND_LIMIT_USD', None)
 
@@ -335,16 +409,15 @@ def render_event_partial(request: HttpRequest, session_id: UUID) -> HttpResponse
 def settings_keys(request: HttpRequest) -> HttpResponse:
     """Write-only settings page for user-named credentials (metadata only)."""
     user = cast(AbstractBaseUser, request.user)
+    oauth_catalog = _oauth_catalog_for_ui()
     return render(
         request,
         'web/keys.html',
         {
             'named_keys': list_user_credentials(user.pk),
             'service_types': sorted(SERVICE_TYPES),
-            'credential_guides_json': json.dumps(credential_guides_for_ui())
-            .replace('<', '\\u003c')
-            .replace('>', '\\u003e')
-            .replace('&', '\\u0026'),
+            'credential_guides_json': _html_safe_json(credential_guides_for_ui()),
+            'google_oauth_capabilities': oauth_catalog['google'],
         },
     )
 
@@ -364,6 +437,7 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
     """Create a UI-owned credential unless an existing disk credential owns its name."""
     name = request.POST.get('name', '').strip()
     type_name = request.POST.get('type', '').strip()
+    auth_kind = request.POST.get('auth_kind', 'static').strip()
     secret = request.POST.get('secret', '')
     user = cast(AbstractBaseUser, request.user)
     row = get_credential_for_write_check(user.pk, name)
@@ -371,9 +445,92 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
     if denied is not None:
         return denied
     try:
-        commands.upsert_user_named(user.pk, name, type_name, secret)
+        if auth_kind == 'static':
+            commands.upsert_user_named(user.pk, name, type_name, secret)
+        elif auth_kind == 'oauth':
+            commands.create_user_oauth(
+                user.pk,
+                name,
+                type_name,
+                provider_id='google',
+                capability_ids=request.POST.getlist('capabilities'),
+            )
+        else:
+            raise KeyValidationError('credential authentication kind is invalid')
     except KeyValidationError as exc:
         return HttpResponseBadRequest(str(exc))
+    return redirect('settings_keys')
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def settings_keys_oauth_authorize(request: HttpRequest, credential_id: UUID) -> HttpResponse:
+    """Start an owned OAuth declaration using the fixed callback and current session."""
+    user_id = _require_authenticated_user_id(request)
+    try:
+        start = oauth_services.start_authorization(
+            user_id=user_id,
+            credential_id=credential_id,
+            session_key=_existing_session_key(request, create=True),
+            redirect_uri=_fixed_google_callback_uri(request),
+        )
+    except KeyNotFoundError as exc:
+        raise Http404('OAuth credential not found') from exc
+    except (KeyValidationError, OAuthConfigurationError, OAuthProviderError, OAuthStateError) as failure:
+        _scrub_caught_oauth_failure(failure)
+        return HttpResponseBadRequest('Google authorization could not be started.')
+    return redirect(start.authorization_url)
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def settings_keys_oauth_disconnect(request: HttpRequest, credential_id: UUID) -> HttpResponse:
+    """Disconnect an owned active OAuth credential while retaining its declaration."""
+    try:
+        oauth_services.disconnect_authorization(
+            user_id=_require_authenticated_user_id(request),
+            credential_id=credential_id,
+        )
+    except KeyNotFoundError as exc:
+        raise Http404('OAuth credential not found') from exc
+    except KeyValidationError as exc:
+        return HttpResponseBadRequest(str(exc))
+    return redirect('settings_keys')
+
+
+@_harden_oauth_callback_response
+@require_GET
+def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
+    """Complete Google's callback with fixed safe messages and an internal redirect."""
+    if not request.user.is_authenticated:
+        # Do not copy callback query parameters containing the authorization code into `next`.
+        return redirect('/admin/login/')
+    provider_denied = bool(request.GET.get('error'))
+    try:
+        oauth_services.complete_authorization(
+            user_id=_require_authenticated_user_id(request),
+            session_key=_existing_session_key(request, create=False),
+            state=request.GET.get('state', ''),
+            code=None if provider_denied else request.GET.get('code', ''),
+            redirect_uri=_fixed_google_callback_uri(request),
+        )
+    except (
+        KeyNotFoundError,
+        KeyStorageMisconfiguredError,
+        KeyValidationError,
+        OAuthConfigurationError,
+        OAuthProviderError,
+        OAuthStateError,
+    ) as failure:
+        _scrub_caught_oauth_failure(failure)
+        messages.error(request, 'Google authorization could not be completed.')
+    else:
+        if provider_denied:
+            messages.error(request, 'Google authorization was denied.')
+        else:
+            messages.success(request, 'Google authorization completed.')
     return redirect('settings_keys')
 
 

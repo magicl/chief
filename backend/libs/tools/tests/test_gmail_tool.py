@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, cast
+from unittest.mock import MagicMock, patch
 
 from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
 from libs.clients.gmail import GmailClient
@@ -74,6 +75,27 @@ class TestGmailTool(OTestCase):
     def test_uses_shared_google_credential_type(self) -> None:
         self.assertEqual(GmailTool.credential_type, 'google')
         self.assertEqual(GmailTool.name, 'gmail')
+
+    @patch('libs.clients.gmail.client._build_service')
+    def test_real_tool_client_normalizes_subject_without_mutating_config(self, build_service: MagicMock) -> None:
+        """Strip the delegated subject at the client boundary used by Gmail tools."""
+        service = MagicMock()
+        service.users.return_value.messages.return_value.list.return_value.execute.return_value = {'messages': []}
+        build_service.return_value = service
+        config = {'subject': ' user@example.com '}
+        instance = ToolInstance(id='gmail', type='gmail', config=config)
+        context = ToolContext(
+            spec=AgentConfigSpec(llm=LLMSpec(provider='_', model='_'), system_prompt='_'),
+            user_id=1,
+            secret_supplier_factory=lambda ref, typ: lambda: '{"type":"service_account"}',
+        )
+
+        invoke = GmailTool().bind(context, instance)
+        invoke('list', {'query': 'in:inbox'})
+
+        build_service.assert_called_once_with('{"type":"service_account"}', 'user@example.com')
+        self.assertEqual(config['subject'], ' user@example.com ')
+        service.close.assert_called_once_with()
 
     def test_list_maps_to_client(self) -> None:
         fake = _FakeGmailClient()

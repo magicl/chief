@@ -8,7 +8,12 @@ from tempfile import mkdtemp
 from unittest.mock import MagicMock, patch
 
 from apps.keys import crypto
-from apps.keys.models import CredentialSource, CredentialStatus, UserCredential
+from apps.keys.models import (
+    CredentialAuthKind,
+    CredentialSource,
+    CredentialStatus,
+    UserCredential,
+)
 from apps.keys.services.disk_sync import sync_keys_dir
 from apps.keys.services.owner import resolve_owner
 from django.contrib.auth import get_user_model
@@ -74,6 +79,21 @@ class TestKeyDiskSync(OTestCase):
         path = self.keys_path / filename
         path.write_text(
             f'name: {name}\ntype: {type_name}\nowner: {owner}\nvalue: {value}\n',
+            encoding='utf-8',
+        )
+        return path
+
+    def write_oauth(
+        self,
+        *,
+        capabilities: tuple[str, ...] = ('drive_metadata', 'gmail_read'),
+        filename: str = 'work-google.yaml',
+    ) -> Path:
+        """Write one Google OAuth declaration using capability identifiers."""
+        path = self.keys_path / filename
+        scopes = ''.join(f'  - {capability}\n' for capability in capabilities)
+        path.write_text(
+            'name: work-google\n' 'type: google\n' 'owner: alice\n' 'source: oauth\n' f'scopes:\n{scopes}',
             encoding='utf-8',
         )
         return path
@@ -146,6 +166,204 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(report.failed, 0)
         row = UserCredential.objects.get(user=self.user, name='work-openai')
         self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), '')
+
+    def test_oauth_file_creates_unconnected_normalized_declaration(self) -> None:
+        """Create an active disk OAuth row with stable provider capability order."""
+        self.write_oauth()
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        self.assertEqual(row.type, 'google')
+        self.assertEqual(row.auth_kind, CredentialAuthKind.OAUTH)
+        self.assertEqual(
+            row.auth_config,
+            {'provider': 'google', 'capabilities': ['gmail_read', 'drive_metadata']},
+        )
+        self.assertEqual(bytes(row.encrypted_value), b'')
+        self.assertEqual(row.status, CredentialStatus.ACTIVE)
+
+    def test_oauth_format_and_capability_order_changes_preserve_grant(self) -> None:
+        """Update provenance but retain a grant when normalized semantics are equal."""
+        path = self.write_oauth()
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        grant = crypto.encrypt('refresh-grant-sentinel')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=grant)
+        old_revision = row.source_rev
+        path.write_text(
+            'scopes: [gmail_read, drive_metadata]\n'
+            'source: oauth\n'
+            'owner: alice\n'
+            'type: google\n'
+            'name: work-google\n',
+            encoding='utf-8',
+        )
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(bytes(row.encrypted_value), grant)
+        self.assertNotEqual(row.source_rev, old_revision)
+        self.assertEqual(
+            row.auth_config,
+            {'provider': 'google', 'capabilities': ['gmail_read', 'drive_metadata']},
+        )
+
+    def test_oauth_capability_change_clears_grant(self) -> None:
+        """Clear an OAuth grant when the requested capability set changes."""
+        self.write_oauth(capabilities=('gmail_read',))
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=crypto.encrypt('old-grant-sentinel'))
+        self.write_oauth(capabilities=('gmail_send',))
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(bytes(row.encrypted_value), b'')
+        self.assertEqual(row.auth_config, {'provider': 'google', 'capabilities': ['gmail_send']})
+
+    def test_oauth_to_static_change_replaces_grant_and_metadata(self) -> None:
+        """Replace an OAuth grant when a declaration changes authentication kind."""
+        path = self.write_oauth(capabilities=('gmail_read',))
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=crypto.encrypt('old-grant-sentinel'))
+        path.write_text(
+            'name: work-google\ntype: google\nowner: alice\nvalue: service-account-json\n',
+            encoding='utf-8',
+        )
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(row.auth_kind, CredentialAuthKind.STATIC)
+        self.assertEqual(row.auth_config, {})
+        self.assertEqual(crypto.decrypt(bytes(row.encrypted_value)), 'service-account-json')
+
+    def test_unchanged_oauth_restore_preserves_grant(self) -> None:
+        """Restore a disabled semantically equal OAuth declaration with its grant."""
+        path = self.write_oauth(capabilities=('gmail_read', 'drive_metadata'))
+        content = path.read_text(encoding='utf-8')
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        grant = crypto.encrypt('restore-grant-sentinel')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=grant)
+        path.unlink()
+        sync_keys_dir()
+        path.write_text(content, encoding='utf-8')
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(row.status, CredentialStatus.ACTIVE)
+        self.assertEqual(bytes(row.encrypted_value), grant)
+
+    def test_changed_oauth_restore_clears_grant(self) -> None:
+        """Clear a disabled OAuth grant when its restored declaration has changed."""
+        path = self.write_oauth(capabilities=('gmail_read',))
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=crypto.encrypt('restore-grant-sentinel'))
+        path.unlink()
+        sync_keys_dir()
+        self.write_oauth(capabilities=('drive_metadata',))
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(row.status, CredentialStatus.ACTIVE)
+        self.assertEqual(bytes(row.encrypted_value), b'')
+
+    def test_unknown_and_raw_oauth_scopes_are_rejected_safely(self) -> None:
+        """Reject non-catalog capability input without logging declarations or grants."""
+        path = self.write_oauth(capabilities=('gmail_read',))
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='work-google')
+        grant_sentinel = 'stored-refresh-grant-sentinel'
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=crypto.encrypt(grant_sentinel))
+        for invalid_scope in ('unknown_capability_sentinel', 'https://www.googleapis.com/auth/gmail.readonly'):
+            with self.subTest(invalid_scope=invalid_scope):
+                path.write_text(
+                    'name: work-google\n'
+                    'type: google\n'
+                    'owner: alice\n'
+                    'source: oauth\n'
+                    f'scopes: [{invalid_scope}]\n',
+                    encoding='utf-8',
+                )
+                with self.assertLogs('apps.keys.services.disk_sync', level='ERROR') as captured:
+                    report = sync_keys_dir()
+
+                self.assertEqual(report.failed, 1)
+                output = '\n'.join(captured.output)
+                self.assertNotIn(invalid_scope, report.items[0].detail)
+                self.assertNotIn(invalid_scope, output)
+                self.assertNotIn(grant_sentinel, output)
+                row.refresh_from_db()
+                self.assertNotEqual(bytes(row.encrypted_value), b'')
+
+    @patch('apps.keys.services.disk_sync.logger.exception')
+    def test_duplicate_yaml_failure_retains_no_values(
+        self,
+        log_exception: MagicMock,
+    ) -> None:
+        """Keep duplicate YAML values out of result detail and logging state."""
+        first_sentinel = 'duplicate-first-value-secret-sentinel'
+        second_sentinel = 'duplicate-second-value-secret-sentinel'
+        path = self.keys_path / 'duplicate.yaml'
+        path.write_text(
+            f'type: openai\nowner: alice\nvalue: {first_sentinel}\nvalue: {second_sentinel}\n',
+            encoding='utf-8',
+        )
+
+        with self.assertLogs('apps.keys.services.disk_sync', level='ERROR') as captured:
+            report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 1)
+        log_exception.assert_not_called()
+        log_output = '\n'.join(captured.output)
+        retained = f'{report.items[0].detail}\n{log_output}'
+        self.assertNotIn(first_sentinel, retained)
+        self.assertNotIn(second_sentinel, retained)
+
+    @patch('apps.keys.services.disk_sync.logger.exception')
+    def test_valid_oauth_replaces_corrupt_stored_config_without_secret_trace(
+        self,
+        log_exception: MagicMock,
+    ) -> None:
+        """Clear a grant when malformed stored metadata cannot be semantically compared."""
+        grant_sentinel = 'corrupt-row-grant-secret-sentinel'
+        row = UserCredential.objects.create(
+            user=self.user,
+            name='work-google',
+            type='google',
+            encrypted_value=crypto.encrypt(grant_sentinel),
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={
+                'provider': 'google',
+                'capabilities': [['corrupt-capability-secret-sentinel']],
+            },
+            source=CredentialSource.DISK,
+            source_path='keys/work-google.yaml',
+            source_rev='sha256:old',
+        )
+        self.write_oauth(capabilities=('gmail_read',))
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        log_exception.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(bytes(row.encrypted_value), b'')
+        self.assertEqual(row.auth_config, {'provider': 'google', 'capabilities': ['gmail_read']})
 
     @patch('apps.bus.resources.publish_resource_update')
     def test_content_change_updates_ciphertext_and_revision(self, publish: MagicMock) -> None:
@@ -300,7 +518,7 @@ class TestKeyDiskSync(OTestCase):
         self.assertEqual(report.failed, 1)
         self.assertEqual(
             next(item.detail for item in report.items if not item.success),
-            'ParserError',
+            'YAMLError',
         )
         row = UserCredential.objects.get(user=self.user, name='work-openai')
         self.assertEqual(row.status, CredentialStatus.ACTIVE)

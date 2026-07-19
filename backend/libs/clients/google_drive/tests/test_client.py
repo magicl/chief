@@ -13,6 +13,7 @@ from dataclasses import FrozenInstanceError
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient.errors import HttpError
 from libs.clients.google_drive.client import (
     _FOLDER_MIME_TYPE,
@@ -306,6 +307,32 @@ class TestGoogleDriveAuth(OTestCase):
             cache_discovery=False,
         )
 
+    @patch('googleapiclient.discovery.build')
+    def test_default_factory_uses_oauth_scopes_and_ignores_subject(self, build: MagicMock) -> None:
+        """Use envelope scopes directly without service-account delegation."""
+        envelope = json.dumps(
+            {
+                'chief_google_oauth': 1,
+                'client_id': 'client-id',
+                'client_secret': 'client-secret',
+                'refresh_token': 'refresh-token',
+                'scopes': ['https://www.googleapis.com/auth/drive.metadata.readonly'],
+                'token_uri': 'https://oauth2.googleapis.com/token',
+            }
+        )
+
+        _build_service(envelope, 'ignored@example.com')
+
+        credentials = build.call_args.kwargs['credentials']
+        self.assertIsInstance(credentials, OAuthCredentials)
+        self.assertEqual(credentials.scopes, ['https://www.googleapis.com/auth/drive.metadata.readonly'])
+        build.assert_called_once_with(
+            'drive',
+            'v3',
+            credentials=credentials,
+            cache_discovery=False,
+        )
+
     def test_missing_credential_maps_to_auth_failure(self) -> None:
         """Reject an absent plaintext credential only when service creation begins."""
         client = GoogleDriveClient(
@@ -315,7 +342,7 @@ class TestGoogleDriveAuth(OTestCase):
         )
         with self.assertRaisesMessage(
             GoogleDriveAuthError,
-            'no Google service-account credential resolved',
+            'no Google credential resolved',
         ):
             client._service()
 
@@ -712,6 +739,60 @@ class TestGoogleDriveOperations(OTestCase):
             instance_id=instance_id,
             service_factory=factory,
         )
+
+    def test_success_closes_service_without_replacing_result_when_close_fails(self) -> None:
+        """Return root metadata while swallowing a private transport close failure."""
+        files = _DriveFiles(
+            {
+                'root': {
+                    'id': 'root',
+                    'name': 'Root',
+                    'mimeType': _FOLDER_MIME_TYPE,
+                }
+            }
+        )
+        service = MagicMock()
+        service.files.return_value = files
+        service.close.side_effect = RuntimeError('private-close-detail')
+        client = GoogleDriveClient(
+            token_supplier=lambda: '{}',
+            config={'roots': [{'id': 'approved', 'file_id': 'root'}]},
+            instance_id='drive',
+            service_factory=lambda _raw, _subject: service,
+        )
+
+        result = client.list_roots()
+
+        self.assertEqual(result['items'][0]['id'], 'root')
+        service.close.assert_called_once_with()
+
+    def test_primary_failure_survives_close_failure_without_service_retention(self) -> None:
+        """Preserve the mapped Drive failure while releasing the operation service."""
+        request = MagicMock()
+        request.execute.side_effect = _http_failure(403)
+        files = MagicMock()
+        files.get.return_value = request
+        service = MagicMock()
+        service.files.return_value = files
+        service.close.side_effect = RuntimeError('private-close-detail')
+        client = GoogleDriveClient(
+            token_supplier=lambda: '{}',
+            config={'roots': [{'id': 'approved', 'file_id': 'root'}]},
+            instance_id='drive',
+            service_factory=lambda _raw, _subject: service,
+        )
+
+        try:
+            client.list_roots()
+        except GoogleDriveForbiddenError as failure:
+            frames = _client_traceback_locals(failure)
+            retained_values = [value for _name, values in frames for value in values.values()]
+            self.assertFalse(any(value is service for value in retained_values))
+            self.assertNotIn('private-close-detail', repr(frames))
+            self.assertNotIn('private-close-detail', str(failure))
+            service.close.assert_called_once_with()
+        else:
+            self.fail('Drive request rejection did not raise GoogleDriveForbiddenError')
 
     def test_list_roots_fetches_only_configured_roots_and_canonicalizes_root(self) -> None:
         """Resolve every configured locator once and expose canonical root metadata."""

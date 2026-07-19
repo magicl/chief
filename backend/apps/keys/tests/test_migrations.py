@@ -9,8 +9,34 @@ from importlib import import_module
 from apps.keys.models import SystemCredential, UserCredential
 from django.apps import apps as django_apps
 from django.contrib.auth import get_user_model
+from django.db import migrations
 
 from olib.py.django.test.cases import OTestCase
+
+
+class TestCredentialAuthenticationMetadataMigration(OTestCase):
+    """Verify the generated schema migration preserves existing credential material."""
+
+    def test_generated_operations_add_defaults_without_data_rewrite(self) -> None:
+        """The schema-only migration adds static metadata and permits empty ciphertext."""
+        try:
+            migration = import_module('apps.keys.migrations.0006_usercredential_auth_config_usercredential_auth_kind')
+        except ModuleNotFoundError:
+            self.fail('credential authentication metadata migration has not been generated')
+
+        operations = migration.Migration.operations
+        added_fields = {
+            operation.name: operation.field for operation in operations if isinstance(operation, migrations.AddField)
+        }
+        altered_fields = {
+            operation.name: operation.field for operation in operations if isinstance(operation, migrations.AlterField)
+        }
+
+        self.assertEqual(added_fields['auth_kind'].default, 'static')
+        self.assertIs(added_fields['auth_config'].default, dict)
+        self.assertFalse(any(isinstance(operation, migrations.RunPython) for operation in operations))
+        self.assertTrue(altered_fields['encrypted_value'].blank)
+        self.assertIs(altered_fields['encrypted_value'].default, bytes)
 
 
 class TestRenameGmailCredentialsToGoogle(OTestCase):

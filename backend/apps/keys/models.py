@@ -9,6 +9,13 @@ from django.db.models import Q
 from olib.py.utils.uuid7 import uuid7
 
 
+class CredentialAuthKind(models.TextChoices):
+    """Select how a user credential is authenticated at runtime."""
+
+    STATIC = 'static', 'Static'
+    OAUTH = 'oauth', 'OAuth'
+
+
 class CredentialSource(models.TextChoices):
     """Identify the provider that last wrote a user credential."""
 
@@ -56,7 +63,13 @@ class UserCredential(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='credentials')
     name = models.CharField(max_length=64)
     type = models.CharField(max_length=32)
-    encrypted_value = models.BinaryField()
+    encrypted_value = models.BinaryField(blank=True, default=bytes)
+    auth_kind = models.CharField(
+        max_length=16,
+        choices=CredentialAuthKind.choices,
+        default=CredentialAuthKind.STATIC,
+    )
+    auth_config = models.JSONField(default=dict, blank=True)
     source = models.CharField(max_length=16, choices=CredentialSource.choices, default=CredentialSource.DB)
     source_path = models.CharField(max_length=512, blank=True, default='')
     source_rev = models.CharField(max_length=128, blank=True, default='')
