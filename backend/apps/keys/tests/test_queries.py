@@ -312,6 +312,62 @@ class TestCredentialQueries(OTransactionTestCase):
             capability_ids=('gmail_read',),
         )
 
+    def test_dropbox_oauth_grant_materializes_into_client_ready_envelope(self) -> None:
+        """A connected Dropbox OAuth credential resolves to an envelope the client accepts.
+
+        Exercises the real provider ``materialize_runtime`` (not mocked) end to end
+        into ``libs.clients.dropbox.client._build_sdk`` to prove the two layers agree
+        on the runtime envelope shape, without ever contacting Dropbox.
+        """
+        from apps.keys import crypto
+        from libs.clients.dropbox.client import _build_sdk
+
+        user = get_user_model().objects.create_user(username='q-dropbox-oauth-connected', password='x')
+        refresh_token = 'stored-dropbox-refresh-grant-sentinel'
+        grant = json.dumps(
+            {
+                'version': 1,
+                'refresh_token': refresh_token,
+                'granted_scopes': ['files.metadata.read'],
+            }
+        )
+        row = UserCredential.objects.create(
+            user=user,
+            name='dropbox-oauth',
+            type='dropbox',
+            encrypted_value=crypto.encrypt(grant),
+            auth_kind=CredentialAuthKind.OAUTH,
+            auth_config={'provider': 'dropbox', 'capabilities': ['files_metadata']},
+        )
+
+        with override_settings(DROPBOX_OAUTH_APP_KEY='runtime-app-key', DROPBOX_OAUTH_APP_SECRET='runtime-app-secret'):
+            supplier = queries.make_secret_supplier(user.pk, name=row.name, type='dropbox')
+            resolved = supplier()
+
+        self.assertIsInstance(resolved, str)
+        assert resolved is not None
+        self.assertEqual(
+            json.loads(resolved),
+            {
+                'chief_dropbox_oauth': 1,
+                'app_key': 'runtime-app-key',
+                'app_secret': 'runtime-app-secret',
+                'refresh_token': refresh_token,
+                'scopes': ['files.metadata.read'],
+            },
+        )
+
+        with patch('dropbox.Dropbox') as sdk_constructor:
+            _build_sdk(resolved)
+
+        sdk_constructor.assert_called_once_with(
+            oauth2_refresh_token=refresh_token,
+            app_key='runtime-app-key',
+            app_secret='runtime-app-secret',
+            max_retries_on_error=0,
+            max_retries_on_rate_limit=0,
+        )
+
     def test_resolve_oauth_rejects_malformed_config_before_decrypting(self) -> None:
         """Reject invalid stored declarations without exposing or decrypting the grant."""
         user = get_user_model().objects.create_user(username='q-oauth-malformed', password='x')

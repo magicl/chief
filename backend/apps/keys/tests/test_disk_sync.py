@@ -98,6 +98,15 @@ class TestKeyDiskSync(OTestCase):
         )
         return path
 
+    def write_dropbox_oauth(self, *, filename: str = 'team-dropbox.yaml') -> Path:
+        """Write one Dropbox OAuth declaration using the single metadata capability."""
+        path = self.keys_path / filename
+        path.write_text(
+            'name: team-dropbox\ntype: dropbox\nowner: alice\nsource: oauth\nscopes:\n  - files_metadata\n',
+            encoding='utf-8',
+        )
+        return path
+
     def test_progress_checkpoints_surround_files_and_precede_disable(self) -> None:
         """Invoke generic maintenance around file work and before missing-file disable."""
         path = self.write_key()
@@ -287,6 +296,57 @@ class TestKeyDiskSync(OTestCase):
         row.refresh_from_db()
         self.assertEqual(row.status, CredentialStatus.ACTIVE)
         self.assertEqual(bytes(row.encrypted_value), b'')
+
+    def test_dropbox_oauth_file_creates_unconnected_declaration_with_dropbox_provider(self) -> None:
+        """Create an active disk OAuth row wired to the Dropbox provider, not Google."""
+        self.write_dropbox_oauth()
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.succeeded, 1)
+        row = UserCredential.objects.get(user=self.user, name='team-dropbox')
+        self.assertEqual(row.type, 'dropbox')
+        self.assertEqual(row.auth_kind, CredentialAuthKind.OAUTH)
+        self.assertEqual(row.auth_config, {'provider': 'dropbox', 'capabilities': ['files_metadata']})
+        self.assertEqual(bytes(row.encrypted_value), b'')
+        self.assertEqual(row.health_status, 'needs_attention')
+        self.assertEqual(row.health_code, 'oauth_not_connected')
+
+    def test_dropbox_oauth_unchanged_reupsert_preserves_connected_grant(self) -> None:
+        """Re-upserting an unchanged Dropbox declaration must not disturb its grant."""
+        self.write_dropbox_oauth()
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='team-dropbox')
+        grant = crypto.encrypt('dropbox-refresh-grant-sentinel')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=grant)
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(bytes(row.encrypted_value), grant)
+        self.assertEqual(row.auth_config, {'provider': 'dropbox', 'capabilities': ['files_metadata']})
+
+    def test_dropbox_oauth_to_static_change_clears_grant(self) -> None:
+        """Clear a connected Dropbox grant when the declaration changes auth kind."""
+        path = self.write_dropbox_oauth()
+        sync_keys_dir()
+        row = UserCredential.objects.get(user=self.user, name='team-dropbox')
+        UserCredential.objects.filter(pk=row.pk).update(encrypted_value=crypto.encrypt('dropbox-old-grant-sentinel'))
+        path.write_text(
+            'name: team-dropbox\ntype: dropbox\nowner: alice\n'
+            'value: \'{"app_key":"a","app_secret":"b","refresh_token":"c"}\'\n',
+            encoding='utf-8',
+        )
+
+        report = sync_keys_dir()
+
+        self.assertEqual(report.failed, 0)
+        row.refresh_from_db()
+        self.assertEqual(row.auth_kind, CredentialAuthKind.STATIC)
+        self.assertEqual(row.auth_config, {})
+        self.assertNotEqual(bytes(row.encrypted_value), b'')
+        self.assertNotEqual(crypto.decrypt(bytes(row.encrypted_value)), 'dropbox-old-grant-sentinel')
 
     def test_unknown_and_raw_oauth_scopes_persist_invalid_declaration_and_preserve_grant(self) -> None:
         """Downgrade non-catalog capability input to a health row without losing a grant."""

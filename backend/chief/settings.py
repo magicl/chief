@@ -46,6 +46,10 @@ CHIEF_LOCAL_DIR = env.str('CHIEF_LOCAL_DIR', default='')  # noqa: F405
 # Optional application credentials for user-owned Google OAuth grants.
 GOOGLE_OAUTH_CLIENT_ID = env.str('GOOGLE_OAUTH_CLIENT_ID', default='')  # noqa: F405
 GOOGLE_OAUTH_CLIENT_SECRET = env.str('GOOGLE_OAUTH_CLIENT_SECRET', default='')  # noqa: F405
+
+# Optional application credentials for user-owned Dropbox OAuth grants.
+DROPBOX_OAUTH_APP_KEY = env.str('DROPBOX_OAUTH_APP_KEY', default='')  # noqa: F405
+DROPBOX_OAUTH_APP_SECRET = env.str('DROPBOX_OAUTH_APP_SECRET', default='')  # noqa: F405
 OAUTH_STATE_MAX_AGE_SECONDS = 600
 
 # Fernet master key for credential encryption at rest (see apps.keys.crypto).

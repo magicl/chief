@@ -93,9 +93,32 @@ class TestOAuthProviderRegistry(OTestCase):
         with self.assertRaisesRegex(KeyValidationError, r'^Unknown OAuth provider$'):
             registry.get('provider-secret-sentinel')
 
-    def test_global_registry_contains_one_google_singleton(self) -> None:
+    def test_global_registry_contains_google_and_dropbox_singletons(self) -> None:
         google = OAUTH_PROVIDERS.get('google')
+        dropbox = OAUTH_PROVIDERS.get('dropbox')
 
         self.assertEqual(google.id, 'google')
         self.assertEqual(google.credential_type, 'google')
-        self.assertEqual(OAUTH_PROVIDERS.provider_ids(), ('google',))
+        self.assertEqual(dropbox.id, 'dropbox')
+        self.assertEqual(dropbox.credential_type, 'dropbox')
+        self.assertEqual(OAUTH_PROVIDERS.provider_ids(), ('google', 'dropbox'))
+
+    def test_provider_id_for_credential_type_returns_matching_provider(self) -> None:
+        registry = OAuthProviderRegistry()
+        registry.register(_StubProvider())
+
+        self.assertEqual(registry.provider_id_for_credential_type('stub-key'), 'stub')
+
+    def test_provider_id_for_credential_type_rejects_unmapped_type_safely(self) -> None:
+        registry = OAuthProviderRegistry()
+        registry.register(_StubProvider())
+        secret_type = 'unmapped-credential-type-secret-sentinel'
+
+        with self.assertRaisesRegex(KeyValidationError, r'^credential type does not support OAuth$') as caught:
+            registry.provider_id_for_credential_type(secret_type)
+
+        self.assertNotIn(secret_type, str(caught.exception))
+
+    def test_global_registry_maps_each_credential_type_to_its_provider(self) -> None:
+        self.assertEqual(OAUTH_PROVIDERS.provider_id_for_credential_type('google'), 'google')
+        self.assertEqual(OAUTH_PROVIDERS.provider_id_for_credential_type('dropbox'), 'dropbox')

@@ -25,9 +25,8 @@ callback query strings: they can contain short-lived authorization codes. Produc
 ingress, access logs, and application monitoring must omit the entire query string
 before the request reaches Chief.
 
-Google redirects directly to Chief and therefore needs a registered callback URL.
-Dropbox credentials are currently provisioned outside Chief, so Dropbox does not use
-a Chief callback URL.
+Both Google and Dropbox redirect directly to Chief and therefore need a registered
+callback URL for each deployed origin.
 
 ## Google
 
@@ -104,9 +103,10 @@ slash.
 
 ## Dropbox
 
-Chief's Dropbox integration uses an app key, app secret, and offline refresh token.
-Chief does not currently run the Dropbox consent flow, so an operator provisions the
-refresh token separately and then stores all three values as one credential.
+Chief supports user OAuth grants for Dropbox metadata access, and one Dropbox OAuth
+application can serve all Chief users for a deployment. Existing static Dropbox JSON
+credentials (an operator-provisioned app key, app secret, and offline refresh token)
+continue to work unchanged; both forms coexist.
 
 ### Create the application
 
@@ -118,10 +118,66 @@ refresh token separately and then stores all three values as one credential.
    - **App folder** only when every configured Chief root is inside the app's folder.
 4. Give the app a unique name and create it.
 5. On **Permissions**, enable only `files.metadata.read`, then submit the change.
+6. On **Settings**, under **OAuth 2 → Redirect URIs**, add:
 
-### Generate an offline refresh token
+   ```text
+   https://<chief-origin>/settings/keys/oauth/dropbox/callback/
+   ```
 
-Open this URL in a browser, replacing `<app-key>`:
+   Replace `<chief-origin>` with the exact browser-visible hostname, including a
+   non-default port. For local development, use the HTTP origin shown in the browser,
+   for example:
+
+   ```text
+   http://localhost:8081/settings/keys/oauth/dropbox/callback/
+   ```
+
+7. Copy the app key and app secret from **Settings**.
+
+The [Dropbox OAuth Guide](https://developers.dropbox.com/oauth-guide) describes the
+underlying authorization-code and offline-token flow that Chief's callback automates.
+
+### Configure Chief
+
+For local Docker Compose development, copy `.env.local.example` to `.env.local` and
+set the application credentials under `#[backend]`:
+
+```dotenv
+DROPBOX_OAUTH_APP_KEY=<app-key>
+DROPBOX_OAUTH_APP_SECRET=<app-secret>
+```
+
+Restart the Chief services after changing these values. In production, store the
+same values in the structured Knox secret `$KNOX/chief/oauth/dropbox` using keys
+`app_key` and `app_secret`; deployment maps them to the environment variables.
+
+Users can then create a Dropbox OAuth credential on **Settings → Keys**, select the
+**Read Dropbox metadata** capability, and choose **Connect**. Chief stores each user's
+refresh grant encrypted; it does not copy the OAuth application secret into user
+credentials.
+
+A `.local/keys/` disk declaration can own a Dropbox OAuth credential's identity
+instead of the Keys UI:
+
+```yaml
+name: team-dropbox
+type: dropbox
+owner: your-username
+source: oauth
+scopes:
+  - files_metadata
+```
+
+After syncing, open **Settings → Keys** and use **Authenticate** to grant Chief a
+refresh token for that declaration; the resulting grant lives encrypted in Postgres,
+never on disk.
+
+### Static JSON (legacy, still supported)
+
+An operator may still provision a Dropbox app and an offline refresh token manually
+and store all three values as one static credential — useful when Chief-run consent
+is undesirable, or when migrating an existing deployment. Open this URL in a browser,
+replacing `<app-key>`:
 
 ```text
 https://www.dropbox.com/oauth2/authorize?client_id=<app-key>&response_type=code&token_access_type=offline
@@ -143,10 +199,6 @@ curl https://api.dropboxapi.com/oauth2/token \
 
 The response includes a `refresh_token`. The authorization code is single-use. Keep
 the app secret and refresh token out of source control, shell history, logs, and chat.
-The [Dropbox OAuth Guide](https://developers.dropbox.com/oauth-guide) describes the
-authorization-code and offline-token flow.
-
-### Configure Chief
 
 On **Settings → Keys**, add a `dropbox` credential whose value is:
 
@@ -173,9 +225,9 @@ value: |
   }
 ```
 
-Chief uses the refresh token to obtain short-lived access tokens. For Dropbox
-team-space content, also set the integration's non-secret `config.namespace_id`;
-this is separate from OAuth application setup.
+Chief uses the refresh token to obtain short-lived access tokens either way. For
+Dropbox team-space content, also set the integration's non-secret
+`config.namespace_id`; this is separate from OAuth application setup.
 
 See [Chief Agent Documentation](agents.md#credentials) for credential files,
 integration references, and cloud-file root configuration.

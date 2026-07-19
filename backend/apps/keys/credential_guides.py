@@ -82,9 +82,10 @@ _GUIDES: dict[str, CredentialGuide] = {
     'dropbox': CredentialGuide(
         label='Dropbox',
         find_steps=(
-            'Create a Dropbox API app and grant the files.metadata.read scope.',
-            'Provision an offline refresh token externally; Chief does not run the OAuth consent flow.',
-            'Paste JSON containing the app key, app secret, and refresh token below.',
+            'Static JSON: create a Dropbox API app with the files.metadata.read scope, provision an offline '
+            'refresh token externally, and paste the app key, app secret, and refresh token JSON below.',
+            'OAuth: save this declaration with the Dropbox metadata capability selected, then use '
+            'Authenticate on the Keys page to complete consent — Chief stores the resulting grant.',
         ),
         scopes='files.metadata.read',
         input_label='Dropbox app credential JSON',

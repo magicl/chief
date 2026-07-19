@@ -60,6 +60,19 @@ def _credential(**overrides: object) -> str:
     return json.dumps(payload)
 
 
+def _oauth_envelope(**overrides: object) -> dict[str, object]:
+    """Return one valid Chief Dropbox OAuth runtime envelope payload."""
+    payload: dict[str, object] = {
+        'chief_dropbox_oauth': 1,
+        'app_key': 'app-key',
+        'app_secret': 'app-secret',
+        'refresh_token': 'refresh-token',
+        'scopes': ['files.metadata.read'],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _client_traceback_locals(exc: BaseException) -> list[tuple[str, dict[str, object]]]:
     """Collect locals retained by Dropbox client frames in a failure traceback."""
     retained: list[tuple[str, dict[str, object]]] = []
@@ -237,6 +250,74 @@ class TestDropboxAuth(OTestCase):
             max_retries_on_error=0,
             max_retries_on_rate_limit=0,
         )
+
+    @patch('dropbox.Dropbox')
+    def test_builds_sdk_from_chief_oauth_envelope(self, sdk_constructor: MagicMock) -> None:
+        """Build the SDK from Chief's operation-local OAuth runtime envelope."""
+        raw = json.dumps(_oauth_envelope(), separators=(',', ':'), sort_keys=True)
+
+        _build_sdk(raw)
+
+        sdk_constructor.assert_called_once_with(
+            oauth2_refresh_token='refresh-token',
+            app_key='app-key',
+            app_secret='app-secret',
+            max_retries_on_error=0,
+            max_retries_on_rate_limit=0,
+        )
+
+    def test_rejects_invalid_oauth_envelope_version(self) -> None:
+        """Never let Python's bool-as-int behavior select the OAuth envelope path."""
+        for version in (True, False, 2, '1'):
+            raw = json.dumps(_oauth_envelope(chief_dropbox_oauth=version))
+            with self.subTest(version=version), self.assertRaises(DropboxAuthError) as caught:
+                _build_sdk(raw)
+            self.assertIsNone(caught.exception.__cause__)
+            self.assertIsNone(caught.exception.__context__)
+
+    def test_rejects_oauth_envelope_with_extra_or_missing_fields(self) -> None:
+        """Require the exact Chief OAuth envelope field set, no more and no fewer."""
+        malformed = (
+            {**_oauth_envelope(), 'extra': 'value'},
+            {k: v for k, v in _oauth_envelope().items() if k != 'app_secret'},
+        )
+        for envelope in malformed:
+            with self.subTest(envelope=envelope), self.assertRaises(DropboxAuthError):
+                _build_sdk(json.dumps(envelope))
+
+    def test_rejects_oauth_envelope_with_malformed_secrets_or_scopes(self) -> None:
+        """Require non-empty envelope secrets and a non-empty allowlisted scope list."""
+        malformed = (
+            _oauth_envelope(app_key=''),
+            _oauth_envelope(app_secret='  '),
+            _oauth_envelope(refresh_token=1),
+            _oauth_envelope(scopes=[]),
+            _oauth_envelope(scopes='files.metadata.read'),
+            _oauth_envelope(scopes=['files.metadata.read', '']),
+            _oauth_envelope(scopes=['https://attacker.example/private-scope']),
+        )
+        for envelope in malformed:
+            with self.subTest(envelope=envelope), self.assertRaises(DropboxAuthError):
+                _build_sdk(json.dumps(envelope))
+
+    @patch('dropbox.Dropbox')
+    def test_oauth_envelope_traceback_releases_secret_values(self, sdk_constructor: MagicMock) -> None:
+        """Clear OAuth envelope secrets from every retained production frame on failure."""
+        app_secret = 'OAUTH-APP-SECRET-UNIQUE-SENTINEL'
+        refresh_token = 'OAUTH-REFRESH-TOKEN-UNIQUE-SENTINEL'
+        raw = json.dumps(_oauth_envelope(app_secret=app_secret, refresh_token=refresh_token))
+        sdk_constructor.side_effect = RuntimeError('PRIVATE-PROVIDER-BODY')
+
+        with self.assertRaises(DropboxAuthError) as caught:
+            _build_sdk(raw)
+
+        retained = repr(_client_traceback_locals(caught.exception))
+        self.assertNotIn(raw, retained)
+        self.assertNotIn(app_secret, retained)
+        self.assertNotIn(refresh_token, retained)
+        self.assertNotIn('PRIVATE-PROVIDER-BODY', retained)
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertIsNone(caught.exception.__context__)
 
     def test_credential_requires_json_object_and_three_nonempty_strings(self) -> None:
         """Reject malformed JSON and missing, blank, or non-string refresh fields."""

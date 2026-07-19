@@ -144,6 +144,52 @@ class TestKeyDiskParseOutcome(OTestCase):
         self.assertIsNone(outcome.file.value)
         self.assertEqual(outcome.file.capabilities, ('gmail_read',))
 
+    def test_valid_dropbox_oauth_declaration_parses_fully_with_ready_outcome(self) -> None:
+        """A valid Dropbox OAuth declaration parses like any other registered provider."""
+        with TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            path = root / 'keys' / 'team-dropbox.yaml'
+            path.parent.mkdir()
+            path.write_text(
+                'name: team-dropbox\n'
+                'type: dropbox\n'
+                'owner: alice\n'
+                'source: oauth\n'
+                'scopes:\n'
+                '  - files_metadata\n',
+                encoding='utf-8',
+            )
+
+            outcome = parse_key_outcome(path, root=root)
+
+        self.assertEqual(outcome.health_code, '')
+        assert outcome.file is not None
+        self.assertEqual(outcome.file.type, 'dropbox')
+        self.assertEqual(outcome.file.auth_kind, 'oauth')
+        self.assertIsNone(outcome.file.value)
+        self.assertEqual(outcome.file.capabilities, ('files_metadata',))
+
+    def test_dropbox_oauth_rejects_value_combined_with_source_oauth(self) -> None:
+        """Reject a Dropbox declaration mixing static ``value`` with ``source: oauth``."""
+        with TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            path = root / 'keys' / 'team-dropbox.yaml'
+            path.parent.mkdir()
+            path.write_text(
+                'name: team-dropbox\n'
+                'type: dropbox\n'
+                'owner: alice\n'
+                'source: oauth\n'
+                'scopes: [files_metadata]\n'
+                'value: hidden\n',
+                encoding='utf-8',
+            )
+
+            outcome = parse_key_outcome(path, root=root)
+
+        self.assertEqual(outcome.health_code, INVALID_DECLARATION)
+        self.assertIsNone(outcome.file)
+
     def test_missing_scopes_is_a_recoverable_invalid_declaration(self) -> None:
         """A resolvable owner/name with missing OAuth scopes still yields an identity."""
         with TemporaryDirectory() as raw_root:

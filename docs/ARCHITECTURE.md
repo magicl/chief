@@ -328,20 +328,23 @@ Architectural rules (all features must follow):
 and `cryptography`, it may import foundational `apps.bus` publishers for committed
 user-resource hints.
 
-### Google OAuth application and grant ownership
+### OAuth application and grant ownership (Google, Dropbox)
 
-Google OAuth providers are selected through the `apps.keys.oauth` provider registry.
-The registry owns provider behavior and the catalog of human-facing capability IDs,
-descriptions, exact scopes, and `current` or `future` support status. Humans select
-those capability IDs; configuration and disk declarations never accept arbitrary
-scope URLs.
+OAuth providers (currently Google and Dropbox) are selected through the
+`apps.keys.oauth` provider registry. The registry owns provider behavior and the
+catalog of human-facing capability IDs, descriptions, exact scopes, and `current` or
+`future` support status. Humans select those capability IDs; configuration and disk
+declarations never accept arbitrary scope URLs. Adding a provider means registering
+one more plugin — the registry, disk parser, and Keys HTTP views stay generic and are
+never hardcoded to a single provider id.
 
 The OAuth refresh grant is an encrypted grant in `UserCredential.encrypted_value`.
 It contains only the provider refresh token and validated granted scopes. Immediately
-before a Google operation, `apps.keys` combines that grant with the application
-settings and emits a runtime-only envelope. The Django-free Google client consumes
-the envelope for that operation; the envelope, client secret, refresh token, and
-access tokens are never persisted in agent config or rendered to humans.
+before a provider operation, `apps.keys` combines that grant with the application
+settings and emits a runtime-only envelope. The Django-free provider client (Google or
+Dropbox) consumes the envelope for that operation; the envelope, client/app secret,
+refresh token, and access tokens are never persisted in agent config or rendered to
+humans.
 
 For disk-owned OAuth credentials, the YAML disk declaration owns the name, owner,
 provider, and capability selection. It never contains the provider grant or OAuth
@@ -349,8 +352,9 @@ application values. Edit declaration metadata on disk rather than in the UI; Chi
 keeps the resulting grant encrypted in Postgres and clears it when an ownership-
 relevant declaration change requires fresh consent.
 
-Production has one structured application secret: `$KNOX/chief/oauth/google`. Its
-exact keys map to process environment settings as follows:
+**Google.** Production has one structured application secret:
+`$KNOX/chief/oauth/google`. Its exact keys map to process environment settings as
+follows:
 
 - `client_id` → `GOOGLE_OAUTH_CLIENT_ID`
 - `client_secret` → `GOOGLE_OAUTH_CLIENT_SECRET`
@@ -369,6 +373,25 @@ scoping is the deployment responsibility.
 Register the exact callback URL `https://<origin>/settings/keys/oauth/google/callback/`
 for each deployed origin, including the trailing slash. The callback path is fixed by
 Chief rather than supplied by a user, and it requires HTTPS outside local development.
+
+**Dropbox.** A `dropbox` credential may still use the pre-existing static JSON
+(`app_key`, `app_secret`, `refresh_token`) provisioned outside Chief, or a Chief-managed
+OAuth grant. Both forms coexist; declaring one does not deprecate the other. Production
+has one structured application secret for the OAuth form: `$KNOX/chief/oauth/dropbox`.
+Its exact keys map to process environment settings as follows:
+
+- `app_key` → `DROPBOX_OAUTH_APP_KEY`
+- `app_secret` → `DROPBOX_OAUTH_APP_SECRET`
+
+Chief never reads Knox directly for Dropbox either. Both settings default to blank so
+installations that only use static Dropbox JSON still start normally. Docker Compose
+loads the same `.env.local` blank placeholders under `#[backend]`; Beat does not use the
+Dropbox OAuth values.
+
+Register the exact callback URL
+`https://<origin>/settings/keys/oauth/dropbox/callback/` for each deployed origin,
+including the trailing slash, requiring HTTPS outside local development — the same
+fixed-callback contract as Google.
 
 `SECURE_PROXY_SSL_HEADER` is safe only at a controlled TLS-termination boundary: the
 production Django application port must be network-isolated and unreachable directly,

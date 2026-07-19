@@ -2,10 +2,25 @@
 name: team-dropbox
 type: dropbox
 owner: your-username
-# Chief requires an externally provisioned offline refresh token; it does not run OAuth consent.
+# Static JSON: bring your own externally provisioned offline refresh token. Chief does
+# not run OAuth consent for this form.
 value: |
   {
     "app_key": "REPLACE-WITH-DROPBOX-APP-KEY",
     "app_secret": "REPLACE-WITH-DROPBOX-APP-SECRET",
     "refresh_token": "REPLACE-WITH-DROPBOX-OFFLINE-REFRESH-TOKEN"
   }
+
+# OAuth alternative: let Chief run the Dropbox consent flow and store the grant in
+# Postgres instead of on disk. Delete the `value:` block above and use this form instead
+# (a declaration may use only one form, not both):
+#
+# name: team-dropbox
+# type: dropbox
+# owner: your-username
+# source: oauth
+# scopes:
+#   - files_metadata
+#
+# After syncing a `source: oauth` declaration, open the Keys page and use
+# Authenticate/Reauthenticate to grant Chief a refresh token for this credential.
