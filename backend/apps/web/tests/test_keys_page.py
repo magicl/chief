@@ -141,7 +141,7 @@ class TestKeysPage(OTransactionTestCase):
         self.assertIn(b'drive.metadata.readonly', response.content)
 
     def test_google_form_renders_provider_capability_catalog_unchecked(self) -> None:
-        """Expose the exact provider descriptions and support state without preselection."""
+        """Expose provider descriptions, scope URLs, and support state without preselection."""
         self.client.force_login(self.user)
 
         response = self.client.get(reverse('settings_keys'))
@@ -151,6 +151,7 @@ class TestKeysPage(OTransactionTestCase):
         for capability in GOOGLE_CAPABILITIES:
             self.assertContains(response, capability.label)
             self.assertContains(response, capability.description)
+            self.assertContains(response, f'{capability.description} ({capability.scope})')
             support_label = 'Available now' if capability.support == 'current' else 'Future support'
             self.assertContains(response, support_label)
         self.assertContains(response, 'Google includes sending in this scope.')
