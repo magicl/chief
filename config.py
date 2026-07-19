@@ -38,7 +38,7 @@ from olib.py.cli.run.templates.buildArgoService import (
     buildArgoService,
 )
 from olib.py.cli.run.templates.cdn import CdnClusterInfoMixin as CdnClusterInfo
-from olib.py.cli.run.templates.cdn import CdnInfo, sync_dir_to_cdn
+from olib.py.cli.run.templates.cdn import CdnInfo, ensure_cdn_dir, sync_dir_to_cdn
 from olib.py.cli.run.templates.django_ import (
     DjangoConfig,
     _primary_django_config,
@@ -220,6 +220,7 @@ def cdn_upload(context: pp.ProcContext, target: str) -> None:
     cdn_info = config.cdns[cluster_info.cdn]
     release_name = cluster_info.release_name
     static_dir = cluster_info.static_dir
+    ensure_cdn_dir(cdn_info, release_name, 'public/static')
     sync_dir_to_cdn(cdn_info, release_name, static_dir, 'public/static')
 
 
