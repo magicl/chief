@@ -25,6 +25,15 @@ COPY ./olib/pyproject.toml ./olib/pyproject.toml
 RUN uv export --frozen --package chief-backend-env --no-hashes --output-file requirements.lock.txt \
     && uv pip install -r requirements.lock.txt --system --no-cache
 
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+# Register the bind-mount-compatible identity so Celery can resolve its uid and gid.
+RUN test "$APP_UID" -gt 0 \
+    && test "$APP_GID" -gt 0 \
+    && groupadd --non-unique --gid "$APP_GID" app \
+    && useradd --non-unique --uid "$APP_UID" --gid app --home-dir /app --create-home app
+
 WORKDIR /app
 
 EXPOSE 8000

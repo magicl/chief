@@ -271,14 +271,25 @@ class TestCeleryEntrypointLogging(OTestCase):
 class TestCeleryWorkerPrivileges(OTestCase):
     """Check that Celery never needs its root-safety bypass."""
 
-    def test_compose_worker_runs_as_non_root(self) -> None:
-        """Use the host identity for mounted files and keep the bypass unset."""
+    def test_compose_worker_uses_registered_host_identity(self) -> None:
+        """Map the host ids onto a named image user so Celery can resolve them."""
         repository_root = Path(__file__).resolve().parents[3]
         compose_path = repository_root / 'infra/docker/docker-compose.yml'
         compose = YAML(typ='safe').load(compose_path.read_text())
+        dockerfile_source = (repository_root / 'backend/Dockerfile.dev').read_text()
         entrypoint_source = (repository_root / 'backend/entrypoint.sh').read_text()
+        worker = compose['services']['chief-worker']
+        expected_build_args = {'APP_UID': '${UID:-1000}', 'APP_GID': '${GID:-1000}'}
 
-        self.assertEqual(compose['services']['chief-worker']['user'], '${UID:-1000}:${GID:-1000}')
+        self.assertEqual(worker['user'], 'app')
+        for service_name in ('chief-backend', 'chief-worker', 'chief-beat'):
+            self.assertEqual(compose['services'][service_name]['build']['args'], expected_build_args)
+        self.assertIn('ARG APP_UID=1000', dockerfile_source)
+        self.assertIn('ARG APP_GID=1000', dockerfile_source)
+        self.assertIn('test "$APP_UID" -gt 0', dockerfile_source)
+        self.assertIn('test "$APP_GID" -gt 0', dockerfile_source)
+        self.assertIn('groupadd --non-unique --gid "$APP_GID" app', dockerfile_source)
+        self.assertIn('useradd --non-unique --uid "$APP_UID" --gid app', dockerfile_source)
         self.assertNotIn('C_FORCE_ROOT', entrypoint_source)
 
 
