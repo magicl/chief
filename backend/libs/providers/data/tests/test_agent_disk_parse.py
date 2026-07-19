@@ -65,6 +65,21 @@ class TestAgentDiskParse(OTestCase):
         self.assertNotIn('identifier:', parsed.body_yaml)
         self.assertNotIn('name:', parsed.body_yaml)
 
+    def test_parse_formats_multiline_strings_as_literal_blocks(self) -> None:
+        """Keep multiline disk config text easy to edit in the YAML viewer."""
+        with TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            path = root / 'agents' / 'file.yaml'
+            path.parent.mkdir()
+            path.write_text(
+                'owner: alice\nschema_version: 2\nsystem_prompt: "First line.\\nSecond line."\n',
+                encoding='utf-8',
+            )
+
+            parsed = parse_agent_file(path, root=root)
+
+        self.assertIn('system_prompt: |-\n  First line.\n  Second line.\n', parsed.body_yaml)
+
     def test_parse_requires_owner(self) -> None:
         """Reject files without the required owner envelope field."""
         with TemporaryDirectory() as raw_root:

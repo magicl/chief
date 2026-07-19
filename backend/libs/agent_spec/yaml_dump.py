@@ -8,21 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import yaml
 from libs.agent_spec import AgentConfigSpec
-
-
-class _AgentSpecDumper(yaml.SafeDumper):
-    pass
-
-
-def _str_representer(dumper: yaml.SafeDumper, data: str) -> yaml.nodes.ScalarNode:
-    if '\n' in data:
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-
-
-_AgentSpecDumper.add_representer(str, _str_representer)
+from libs.file.yaml_dump import dump_editable_yaml
 
 
 def _collapse_integration_fields(entry: dict[str, Any], integrations: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -102,11 +89,8 @@ def dump_agent_config_spec(spec: AgentConfigSpec) -> str:
     data = spec.model_dump(mode='json', exclude_none=True, by_alias=True)
     _restore_explicit_null_credential_refs(spec, data)
     data = _collapse_integrations_for_dump(data)
-    return yaml.dump(
+    return dump_editable_yaml(
         data,
-        Dumper=_AgentSpecDumper,
         sort_keys=True,
-        default_flow_style=False,
-        allow_unicode=True,
         width=120,
     )
