@@ -8,9 +8,41 @@ jobs:
   test-all:
     runs-on: ol-base-chief
     steps:
+      - name: Install Git LFS
+        env:
+          GIT_LFS_VERSION: 3.7.1
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            exit 0
+          fi
+          case "$(uname -m)" in
+            x86_64)
+              archive_arch=amd64
+              archive_sha256=1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08
+              ;;
+            aarch64|arm64)
+              archive_arch=arm64
+              archive_sha256=73a9c90eeb4312133a63c3eaee0c38c019ea7bfa0953d174809d25b18588dd8d
+              ;;
+            *)
+              echo "::error::Unsupported runner architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+          archive="$RUNNER_TEMP/git-lfs.tar.gz"
+          bin_dir="$RUNNER_TEMP/git-lfs-bin"
+          curl --fail --location --silent --show-error \
+            "https://github.com/git-lfs/git-lfs/releases/download/v${GIT_LFS_VERSION}/git-lfs-linux-${archive_arch}-v${GIT_LFS_VERSION}.tar.gz" \
+            --output "$archive"
+          echo "${archive_sha256}  ${archive}" | sha256sum --check
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+          mkdir -p "$bin_dir"
+          install -m 0755 "$RUNNER_TEMP/git-lfs-${GIT_LFS_VERSION}/git-lfs" "$bin_dir/git-lfs"
+          echo "$bin_dir" >> "$GITHUB_PATH"
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          lfs: true
           # Drop GITHUB_TOKEN from git http headers so the olib PAT can authenticate the submodule.
           persist-credentials: false
       - name: Checkout olib submodule

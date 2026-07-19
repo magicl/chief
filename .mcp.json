@@ -1,20 +1,20 @@
 {
   "mcpServers": {
     "clickup": {
-      "type": "sse",
-      "url": "http://localhost:9197/sse"
+      "type": "http",
+      "url": "http://localhost:9197/mcp"
     },
     "grafana": {
-      "type": "sse",
-      "url": "http://localhost:9191/sse"
+      "type": "http",
+      "url": "http://localhost:9191/mcp"
     },
     "helm": {
-      "type": "sse",
-      "url": "http://localhost:9192/sse"
+      "type": "http",
+      "url": "http://localhost:9192/mcp"
     },
     "kubernetes": {
-      "type": "sse",
-      "url": "http://localhost:9190/sse"
+      "type": "http",
+      "url": "http://localhost:9190/mcp"
     },
     "playwright": {
       "args": [
@@ -28,12 +28,16 @@
       "command": "npx"
     },
     "posthog": {
-      "type": "sse",
-      "url": "http://localhost:9193/sse"
+      "type": "http",
+      "url": "http://localhost:9193/mcp"
+    },
+    "probe": {
+      "type": "http",
+      "url": "http://localhost:9198/mcp"
     },
     "sentry": {
-      "type": "sse",
-      "url": "http://localhost:9196/sse"
+      "type": "http",
+      "url": "http://localhost:9196/mcp"
     }
   }
 }
