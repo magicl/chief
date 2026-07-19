@@ -88,7 +88,7 @@ def _attach_page_urls(context: dict[str, Any], request: HttpRequest) -> None:
     context['page_data_json'] = _json_for_script_tag(context['page_data'])
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
 def agent_create(request: HttpRequest) -> HttpResponse:
@@ -134,7 +134,7 @@ def agent_create(request: HttpRequest) -> HttpResponse:
     return redirect(redirect_url)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def agent_create_mutate(request: HttpRequest) -> HttpResponse:
@@ -152,7 +152,7 @@ def agent_create_mutate(request: HttpRequest) -> HttpResponse:
     return JsonResponse({'yaml': new_yaml})
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def agent_config(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Render the YAML config editor and helpers for an owned agent."""
@@ -165,7 +165,7 @@ def agent_config(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return render(request, 'web/agent_config.html', context)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def agent_config_catalog(request: HttpRequest) -> JsonResponse:
     """Return the server-side catalog for autocomplete and helper dropdowns."""
@@ -173,7 +173,7 @@ def agent_config_catalog(request: HttpRequest) -> JsonResponse:
     return JsonResponse(build_config_catalog(user.pk))
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
@@ -214,7 +214,7 @@ def agent_config_save(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return redirect('agent_config', agent_id=agent.id)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
@@ -236,7 +236,7 @@ def agent_config_mutate(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return JsonResponse({'yaml': new_yaml})
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def agent_config_history(request: HttpRequest, agent_id: UUID, config_id: UUID) -> HttpResponse:
     """Show a read-only historical config revision with restore-to-editor action."""

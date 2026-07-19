@@ -30,7 +30,7 @@ class TestCreateAgentView(OTransactionTestCase):
             {'spec_yaml': spec_yaml},
         )
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/admin/login/', response['Location'])
+        self.assertIn('/loelabs-admin/login/', response['Location'])
 
     @expectLogItems([ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/create/', count=1)])
     def test_requires_spec_yaml(self) -> None:

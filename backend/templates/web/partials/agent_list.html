@@ -55,5 +55,5 @@
 {% elif user.is_authenticated %}
 <p class="empty">No agents yet. <a href="{{ url('agent_create') }}">Create one</a> from an example.</p>
 {% else %}
-<p class="empty">No agents yet. <a href="/admin/login/?next=/">Log in</a> to create one.</p>
+<p class="empty">No agents yet. <a href="/loelabs-admin/login/?next=/">Log in</a> to create one.</p>
 {% endif %}

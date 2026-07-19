@@ -29,7 +29,7 @@ class TestAgentDetailView(OTransactionTestCase):
     def test_requires_login(self) -> None:
         response = self.client.get(reverse('agent_detail', kwargs={'agent_id': self.agent.id}))
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/admin/login/', response['Location'])
+        self.assertIn('/loelabs-admin/login/', response['Location'])
 
     def test_renders_owned_agent(self) -> None:
         self.client.force_login(self.user)

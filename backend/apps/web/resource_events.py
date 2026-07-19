@@ -57,7 +57,7 @@ def _validated_resource_message(data: Any) -> dict[str, str] | None:
 
 
 @require_GET
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 async def resource_events_sse(request: HttpRequest) -> StreamingHttpResponse:
     """Tail only the authenticated user's resource refresh channel."""
     user_id = await sync_to_async(_require_authenticated_user_id)(request)

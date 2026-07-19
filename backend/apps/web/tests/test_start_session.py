@@ -30,7 +30,7 @@ class TestStartAgentSessionView(OTransactionTestCase):
     def test_requires_login(self) -> None:
         response = self.client.post(reverse('start_agent_session', kwargs={'agent_id': self.agent.id}))
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/admin/login/', response['Location'])
+        self.assertIn('/loelabs-admin/login/', response['Location'])
 
     def test_creates_session_and_redirects(self) -> None:
         self.client.force_login(self.user)

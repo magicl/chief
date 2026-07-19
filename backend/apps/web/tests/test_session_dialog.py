@@ -55,7 +55,7 @@ class TestSessionEventView(OTransactionTestCase):
         client = Client()
         response = client.get(reverse('session_detail', kwargs={'session_id': self.session.id}))
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/admin/login/', response['Location'])
+        self.assertIn('/loelabs-admin/login/', response['Location'])
 
     def test_dashboard_session_links(self) -> None:
         response = self.client.get(reverse('dashboard'))

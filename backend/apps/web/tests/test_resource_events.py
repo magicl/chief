@@ -128,7 +128,7 @@ class TestResourceEventsSse(OTransactionTestCase):
 
         status_code, location = asyncio.run(request())
         self.assertEqual(status_code, 302)
-        self.assertEqual(location, '/admin/login/?next=/events/')
+        self.assertEqual(location, '/loelabs-admin/login/?next=/events/')
 
     def test_authenticated_response_has_stream_headers(self) -> None:
         """Return SSE headers without opening Redis before iteration."""

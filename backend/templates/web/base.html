@@ -62,9 +62,9 @@
     <span style="margin-left: auto; font-size: .85rem; color: #8b93a7;">
       {% if user.is_authenticated %}
         <a href="{{ url('settings_keys') }}" style="color: #9ec5ff;">Keys</a> ·
-        {{ user.username }} · <a href="/admin/logout/" style="color: #9ec5ff;">Log out</a>
+        {{ user.username }} · <a href="/loelabs-admin/logout/" style="color: #9ec5ff;">Log out</a>
       {% else %}
-        <a href="/admin/login/?next={{ request.path }}" style="color: #9ec5ff;">Log in</a>
+        <a href="/loelabs-admin/login/?next={{ request.path }}" style="color: #9ec5ff;">Log in</a>
       {% endif %}
     </span>
   </header>

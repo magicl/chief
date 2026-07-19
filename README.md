@@ -76,7 +76,7 @@ First-time setup from repo root:
 ./olib/scripts/orunr docker compose
 ```
 
-The dashboard is at the slot's nginx port (`DOCO_PORT` in the active overlay). Django admin is at `/admin` (default superuser `admin` / `nimda`).
+The dashboard is at the slot's nginx port (`DOCO_PORT` in the active overlay). Django admin is at `/loelabs-admin/` (default superuser `admin` / `nimda`).
 
 ## Git commit messages
 

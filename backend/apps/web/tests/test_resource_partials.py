@@ -116,7 +116,7 @@ class TestResourcePartials(OTransactionTestCase):
         response = self.client.get(reverse('dashboard_agents_partial'), HTTP_HX_REQUEST='true')
         self.assertRedirects(
             response,
-            '/admin/login/?next=/partials/agents/',
+            '/loelabs-admin/login/?next=/partials/agents/',
             fetch_redirect_response=False,
         )
 
@@ -143,7 +143,7 @@ class TestResourcePartials(OTransactionTestCase):
         response = self.client.get(reverse('settings_keys_partial'), HTTP_HX_REQUEST='true')
         self.assertRedirects(
             response,
-            '/admin/login/?next=/partials/keys/',
+            '/loelabs-admin/login/?next=/partials/keys/',
             fetch_redirect_response=False,
         )
 

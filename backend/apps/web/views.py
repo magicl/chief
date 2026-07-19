@@ -194,7 +194,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def dashboard_agents_partial(request: HttpRequest) -> HttpResponse:
     """Render the authenticated user's current agent-list fragment."""
@@ -206,7 +206,7 @@ def dashboard_agents_partial(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     """Agent overview with session list and chat input."""
@@ -225,7 +225,7 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return render(request, 'web/agent_detail.html', context)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def agent_start_chat(request: HttpRequest, agent_id: UUID) -> HttpResponse:
@@ -241,7 +241,7 @@ def agent_start_chat(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return redirect('session_detail', session_id=session.id)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def delete_agent(request: HttpRequest, agent_id: UUID) -> HttpResponse:
@@ -253,7 +253,7 @@ def delete_agent(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return redirect('dashboard')
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
@@ -266,7 +266,7 @@ def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     return redirect('session_detail', session_id=session.id)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Session event log and chat continuation."""
@@ -285,7 +285,7 @@ def _sse_event(data: dict[str, Any], *, event: str = 'session_event') -> str:
 
 
 @require_GET
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 async def session_events_sse(request: HttpRequest, session_id: UUID) -> StreamingHttpResponse:
     """Replay persisted events then tail pub/sub (dedupe by seq)."""
     user_id = await sync_to_async(_require_authenticated_user_id)(request)
@@ -354,7 +354,7 @@ async def sse_spike(request: HttpRequest) -> StreamingHttpResponse:
 
 @csrf_protect
 @require_POST
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Post a follow-up chat message to an existing session."""
     get_owned_session(_require_authenticated_user_id(request), session_id)
@@ -367,7 +367,7 @@ def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
 
 @csrf_protect
 @require_POST
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Pause a running session."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
@@ -378,7 +378,7 @@ def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
 
 @csrf_protect
 @require_POST
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Resume a paused session."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
@@ -389,7 +389,7 @@ def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
 
 @csrf_protect
 @require_POST
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 def session_abort(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Abort a session."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
@@ -404,7 +404,7 @@ def render_event_partial(request: HttpRequest, session_id: UUID) -> HttpResponse
     return HttpResponse('')
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def settings_keys(request: HttpRequest) -> HttpResponse:
     """Write-only settings page for user-named credentials (metadata only)."""
@@ -422,7 +422,7 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @require_GET
 def settings_keys_partial(request: HttpRequest) -> HttpResponse:
     """Render credential metadata for the authenticated user's key-list fragment."""
@@ -430,7 +430,7 @@ def settings_keys_partial(request: HttpRequest) -> HttpResponse:
     return render(request, 'web/partials/key_list.html', {'named_keys': named_keys})
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
@@ -462,7 +462,7 @@ def settings_keys_add_named(request: HttpRequest) -> HttpResponse:
     return redirect('settings_keys')
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def settings_keys_oauth_authorize(request: HttpRequest, credential_id: UUID) -> HttpResponse:
@@ -483,7 +483,7 @@ def settings_keys_oauth_authorize(request: HttpRequest, credential_id: UUID) -> 
     return redirect(start.authorization_url)
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def settings_keys_oauth_disconnect(request: HttpRequest, credential_id: UUID) -> HttpResponse:
@@ -506,7 +506,7 @@ def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
     """Complete Google's callback with fixed safe messages and an internal redirect."""
     if not request.user.is_authenticated:
         # Do not copy callback query parameters containing the authorization code into `next`.
-        return redirect('/admin/login/')
+        return redirect('/loelabs-admin/login/')
     provider_denied = bool(request.GET.get('error'))
     try:
         oauth_services.complete_authorization(
@@ -534,7 +534,7 @@ def settings_keys_oauth_google_callback(request: HttpRequest) -> HttpResponse:
     return redirect('settings_keys')
 
 
-@login_required(login_url='/admin/login/')
+@login_required(login_url='/loelabs-admin/login/')
 @csrf_protect
 @require_POST
 def settings_keys_delete_named(request: HttpRequest, name: str) -> HttpResponse:

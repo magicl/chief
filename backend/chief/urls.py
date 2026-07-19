@@ -13,8 +13,8 @@ from django.views.generic.base import RedirectView
 from chief.views import check, livez, readyz
 
 urlpatterns = [
-    path('admin', RedirectView.as_view(url='/admin/', permanent=False)),
-    path('admin/', admin.site.urls),
+    path('loelabs-admin', RedirectView.as_view(url='/loelabs-admin/', permanent=False)),
+    path('loelabs-admin/', admin.site.urls),
     path('health/livez', livez, name='health_livez'),
     path('health/readyz', readyz, name='health_readyz'),
     path('client/check', check, name='client_check'),
