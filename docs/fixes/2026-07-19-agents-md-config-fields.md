@@ -30,6 +30,10 @@ so schema/config changes always update `docs/docs/agents.md`.
 
 | # | Severity | Status | Location | Finding | Notes |
 |---|----------|--------|----------|---------|-------|
+| 1 | Minor | Fixed | `docs/docs/agents.md` (Drive roots) | `corpus`/`drive_id` inverse constraints underdocumented | Clarified both directions |
+| 2 | Minor | Fixed | `docs/docs/agents.md` (shared `dedupe`) | Change-token semantics overgeneralized to all sources | Scoped Gmail/ClickUp vs `test` |
+| 3 | Minor | Fixed | `docs/docs/agents.md` (Dropbox `path`) | Missing concrete path normalization rejects | Documented `/`, trailing `/`, `.`/`..` |
+| 4 | Minor | Fixed | `docs/docs/agents.md` (ClickUp `include_closed`) | Presented as typed while validator does not check | Noted pass-through / no type check |
 
 Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 

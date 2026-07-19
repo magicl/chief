@@ -231,8 +231,8 @@ roots. Requires a `google` credential.
 |-------|------|----------|---------|-------------|
 | `id` | string | yes | — | Operator-chosen alias used as `root` in every tool call |
 | `file_id` | string | yes | — | Drive file/folder id (`root` is allowed and resolved to the canonical My Drive root) |
-| `corpus` | `user` \| `drive` | no | `user` | Search corpus; supplying `drive_id` forces `drive` |
-| `drive_id` | string | no | — | Shared Drive id; when set, selects the Shared Drive corpus |
+| `corpus` | `user` \| `drive` | no | `user` | Search corpus; `drive` requires `drive_id` |
+| `drive_id` | string | no | — | Shared Drive id; when set, forces `corpus: drive` (cannot combine with explicit `corpus: user`) |
 
 Root aliases and `file_id` values must each be unique within the list.
 
@@ -260,7 +260,7 @@ roots. Requires a `dropbox` credential.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `id` | string | yes | — | Operator-chosen alias used as `root` in every tool call |
-| `path` | string | yes | — | Absolute normalized Dropbox path (e.g. `/Projects`; `/` for account root) |
+| `path` | string | yes | — | Absolute Dropbox path starting with `/` (e.g. `/Projects`; `/` for account root). No trailing `/` (except root), and no `.` / `..` segments |
 
 Root aliases and paths must each be unique within the list (paths compared case-insensitively for ASCII).
 
@@ -421,7 +421,7 @@ All source adapters accept:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `dedupe` | bool | no | `true` | When `true`, use a stable `external_id` so each upstream item is enqueued at most once. When `false`, derive `external_id` from a change token (Gmail `historyId`, ClickUp `date_updated`) so updates can re-enter the queue |
+| `dedupe` | bool | no | `true` | When `true`, skip items already known by stable `external_id`. When `false`, Gmail/ClickUp derive `external_id` from a change token (`historyId` / `date_updated`) so updates can re-enter the queue; the `test` adapter still uses `prefix-N` ids and only disables skip-known behavior |
 
 ### Source types
 
@@ -446,7 +446,7 @@ Polls tasks from one ClickUp list. Requires a `clickup` credential.
 | `list_id` | string | yes | — | ClickUp list id to poll |
 | `statuses` | list of string | no | `[]` | When non-empty, only enqueue tasks in these statuses |
 | `max_results` | int | no | `50` | Max tasks to fetch per poll (must be ≥ 1) |
-| `include_closed` | bool | no | `false` | When `true`, include closed tasks from the ClickUp API |
+| `include_closed` | bool | no | `false` | Passed through to the ClickUp list API (`include_closed`); not type-checked by the source validator |
 | `base_url` | string | no | `https://api.clickup.com/api/v2` | ClickUp API base URL (mainly for tests) |
 | `dedupe` | bool | no | `true` | See shared source config |
 
