@@ -4,7 +4,7 @@ Epic: [Agent Context and Activity Clarity](../../epics/2026-07-26-agent-context-
 
 **Branch:** `feat/2026-07-26-compact-integration-records`
 
-Status: **design**
+Status: **plan**
 
 ## Goal
 
