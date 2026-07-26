@@ -32,6 +32,20 @@ ServiceFactory = Callable[[str, str | None], Any]
 
 # Max decoded attachment bytes returned to callers (10 MiB).
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+# Keep receiver evidence available for normalization; raw Received-SPF/AAR values never leave projection.
+_METADATA_HEADERS = (
+    'From',
+    'To',
+    'Cc',
+    'Reply-To',
+    'Return-Path',
+    'Subject',
+    'Message-ID',
+    'Date',
+    'Authentication-Results',
+    'Received-SPF',
+    'ARC-Authentication-Results',
+)
 
 
 def _map_http_failure(exc: Exception) -> GmailError:
@@ -209,9 +223,12 @@ class GmailClient:
     def _get_message_with_service(self, service: Any, message_id: str, *, fmt: str) -> dict[str, Any]:
         """Fetch one message through an already-owned Gmail service."""
         try:
+            request_args: dict[str, Any] = {'userId': 'me', 'id': message_id, 'format': fmt}
+            if fmt == 'metadata':
+                request_args['metadataHeaders'] = list(_METADATA_HEADERS)
             return cast(
                 dict[str, Any],
-                self._execute(service.users().messages().get(userId='me', id=message_id, format=fmt)),
+                self._execute(service.users().messages().get(**request_args)),
             )
         finally:
             service = None

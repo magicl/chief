@@ -10,14 +10,22 @@ examples). `ClickUpError`s map to the same `{ok, error}` failure result as the G
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from libs.clients.clickup.client import ClickUpClient
 from libs.clients.clickup.errors import (
+    ClickUpAPIError,
     ClickUpAuthError,
     ClickUpError,
     ClickUpNotFoundError,
+)
+from libs.clients.clickup.projection import (
+    project_lists,
+    project_mutation_ack,
+    project_spaces,
+    project_task_full,
+    project_task_list,
 )
 from libs.clients.clickup.protocol import ClickUpClientProtocol
 from libs.tools.base import Tool, ToolFunction
@@ -39,6 +47,16 @@ def _failure(exc: ClickUpError) -> dict[str, Any]:
     else:
         kind = 'api'
     return {'ok': False, 'error': {'kind': kind, 'message': str(exc)}}
+
+
+def _project(projector: Callable[..., Any], raw: object, **kwargs: Any) -> Any:
+    """Run one local projection and map malformed successful payloads to fixed safe text."""
+    if not isinstance(raw, Mapping):
+        raise ClickUpAPIError('Invalid ClickUp response')
+    try:
+        return projector(raw, **kwargs)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ClickUpAPIError('Invalid ClickUp response') from exc
 
 
 class ClickUpTool(Tool):
@@ -82,31 +100,71 @@ class ClickUpTool(Tool):
             tid = arguments.get('team_id') or team_id
             if not tid:
                 raise ValueError('team_id is required')
-            return client.list_spaces(tid)
+            return _project(project_spaces, client.list_spaces(tid))
         if function == 'list_lists':
-            return client.list_lists(arguments['space_id'])
+            return _project(project_lists, client.list_lists(arguments['space_id']))
         if function == 'list_tasks':
-            return client.list_tasks(
-                list_id=arguments['list_id'],
-                statuses=tuple(arguments.get('statuses', [])),
+            return _project(
+                project_task_list,
+                client.list_tasks(
+                    list_id=arguments['list_id'],
+                    statuses=tuple(arguments.get('statuses', [])),
+                ),
             )
         if function == 'get_task':
-            return client.get_task(arguments['task_id'])
+            task_id = arguments['task_id']
+            task = client.get_task(
+                task_id,
+                include_subtasks=True,
+                include_markdown_description=True,
+            )
+            try:
+                comments = client.list_comments(task_id)
+                advisory = None
+            except ClickUpError:
+                comments = None
+                advisory = {'code': 'comments_unavailable'}
+            return _project(
+                project_task_full,
+                task,
+                comments=comments,
+                comments_advisory=advisory,
+            )
         if function == 'create_task':
-            return client.create_task(
-                list_id=arguments['list_id'],
-                name=arguments['name'],
-                description=arguments.get('description'),
-                status=arguments.get('status'),
+            return _project(
+                project_mutation_ack,
+                client.create_task(
+                    list_id=arguments['list_id'],
+                    name=arguments['name'],
+                    description=arguments.get('description'),
+                    status=arguments.get('status'),
+                ),
             )
         if function == 'update_task':
             task_id = arguments['task_id']
             fields = {key: value for key, value in arguments.items() if key != 'task_id'}
-            return client.update_task(task_id, **fields)
+            return _project(
+                project_mutation_ack,
+                client.update_task(task_id, **fields),
+                task_id=task_id,
+            )
         if function == 'create_comment':
-            return client.create_comment(arguments['task_id'], text=arguments['text'])
+            task_id = arguments['task_id']
+            return _project(
+                project_mutation_ack,
+                client.create_comment(task_id, text=arguments['text']),
+                task_id=task_id,
+            )
         if function == 'delete_task':
-            return {'ok': True, **client.delete_task(arguments['task_id'])}
+            task_id = arguments['task_id']
+            deleted = client.delete_task(task_id)
+            if not isinstance(deleted, Mapping):
+                raise ClickUpAPIError('Invalid ClickUp response')
+            return _project(
+                project_mutation_ack,
+                {**deleted, 'deleted': True},
+                task_id=task_id,
+            )
         raise ValueError(f'Unknown function {function!r} on tool {self.name!r}')
 
     def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:

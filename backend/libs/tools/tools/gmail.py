@@ -16,6 +16,12 @@ from typing import TYPE_CHECKING, Any
 
 from libs.clients.gmail.client import GmailClient
 from libs.clients.gmail.errors import GmailAuthError, GmailError, GmailNotFoundError
+from libs.clients.gmail.projection import (
+    project_attachment,
+    project_labels,
+    project_message_full,
+    project_mutation_ack,
+)
 from libs.clients.gmail.protocol import GmailClientProtocol
 from libs.tools.base import Tool, ToolFunction
 from libs.tools.context import ToolContext, token_supplier_for
@@ -78,32 +84,42 @@ class GmailTool(Tool):
                 page_token=arguments.get('page_token'),
             )
         if function == 'read':
-            return client.get_message(arguments['message_id'], fmt='full')
+            return project_message_full(client.get_message(arguments['message_id'], fmt='full'))
         if function == 'list_labels':
-            return {'labels': client.list_labels()}
+            return {'labels': project_labels(client.list_labels())}
         if function == 'get_attachment':
-            return client.get_attachment(arguments['message_id'], arguments['attachment_id'])
+            return project_attachment(client.get_attachment(arguments['message_id'], arguments['attachment_id']))
         if function == 'label':
             add_ids = list(arguments.get('add', []))
             add_names = arguments.get('add_names', [])
             if add_names:
                 add_ids.extend(client.ensure_label_ids(tuple(add_names)))
-            return {
-                'ok': True,
-                **client.modify_labels(
+            return project_mutation_ack(
+                client.modify_labels(
                     arguments['message_id'],
                     add=tuple(add_ids),
                     remove=tuple(arguments.get('remove', [])),
                 ),
-            }
+                message_id=arguments['message_id'],
+            )
         if function == 'archive':
-            return {'ok': True, **client.archive(arguments['message_id'])}
+            return project_mutation_ack(
+                client.archive(arguments['message_id']),
+                message_id=arguments['message_id'],
+            )
         if function == 'mark_spam':
-            return {'ok': True, **client.report_spam(arguments['message_id'])}
+            return project_mutation_ack(
+                client.report_spam(arguments['message_id']),
+                message_id=arguments['message_id'],
+            )
         if function == 'trash':
-            return {'ok': True, **client.trash(arguments['message_id'])}
+            return project_mutation_ack(
+                client.trash(arguments['message_id']),
+                message_id=arguments['message_id'],
+            )
         if function == 'send':
-            return {'ok': True, **client.send_message(**arguments)}
+            sent = client.send_message(**arguments)
+            return project_mutation_ack(sent, message_id=sent.get('id', ''))
         raise ValueError(f'Unknown function {function!r} on tool {self.name!r}')
 
     def functions(self, ctx: ToolContext, instance: ToolInstance | None = None) -> list[ToolFunction]:
@@ -139,7 +155,7 @@ class GmailTool(Tool):
             ),
             ToolFunction(
                 'get_attachment',
-                'Download an attachment (base64).',
+                'Download one attachment as decoded base64.',
                 {
                     'type': 'object',
                     'properties': {

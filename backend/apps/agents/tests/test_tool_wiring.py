@@ -140,7 +140,22 @@ class TestBuildBoundTools(OTestCase):
         )
         bound = build_bound_tools(instances, ctx=ctx)
         out = bound['clickup'].invoke('list_tasks', {'list_id': '901'})
-        self.assertEqual(out['tasks'], [{'id': 't1'}])
+        self.assertEqual(
+            out['tasks'],
+            [
+                {
+                    'id': 't1',
+                    'custom_id': None,
+                    'name': '',
+                    'status': None,
+                    'assignees': [],
+                    'priority': None,
+                    'due_date': None,
+                    'url': None,
+                    'date_updated': None,
+                }
+            ],
+        )
 
     def test_gmail_tool_wires_with_config_and_credential(self) -> None:
         instances = [

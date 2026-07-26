@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
+from libs.clients.clickup.errors import ClickUpNotFoundError
 from libs.clients.clickup.mock import MockClickUpClient
 from libs.clients.clickup.protocol import ClickUpClientProtocol
 from libs.tools.context import ToolContext
@@ -31,6 +32,100 @@ def _invoke_with(client: MockClickUpClient, *, team_id: str | None = None) -> Ca
 
 
 class TestMockClickUpClient(OTestCase):
+    def test_get_task_expansions_match_protocol_and_return_copies(self) -> None:
+        client = MockClickUpClient(token_supplier=lambda: None, config={})
+        protocol_client: ClickUpClientProtocol = client
+        client.seed_task(
+            'list1',
+            {
+                'id': 'task1',
+                'name': 'Parent',
+                'markdown_description': '**Details**',
+            },
+        )
+        client.seed_task('list1', {'id': 'sub1', 'name': 'Child', 'parent': 'task1'})
+
+        default = protocol_client.get_task('task1')
+        expanded = protocol_client.get_task(
+            'task1',
+            include_subtasks=True,
+            include_markdown_description=True,
+        )
+        expanded['subtasks'][0]['name'] = 'Changed'
+
+        self.assertEqual(default, {'id': 'task1', 'name': 'Parent'})
+        self.assertEqual(
+            client.get_task('task1', include_subtasks=True, include_markdown_description=True),
+            {
+                'id': 'task1',
+                'name': 'Parent',
+                'subtasks': [{'id': 'sub1', 'name': 'Child', 'parent': 'task1'}],
+                'markdown_description': '**Details**',
+            },
+        )
+
+    def test_get_task_false_expansions_do_not_invent_sections(self) -> None:
+        client = MockClickUpClient(token_supplier=lambda: None, config={})
+        client.seed_task('list1', {'id': 'task1', 'name': 'Plain'})
+
+        task = client.get_task('task1', include_subtasks=False, include_markdown_description=False)
+
+        self.assertNotIn('subtasks', task)
+        self.assertNotIn('markdown_description', task)
+
+    def test_list_comments_returns_newest_first_copies_and_matches_protocol(self) -> None:
+        client = MockClickUpClient(token_supplier=lambda: None, config={})
+        protocol_client: ClickUpClientProtocol = client
+        client.seed_task('list1', {'id': 'task1', 'name': 'Task'})
+        client.seed_comment('task1', {'id': 'new', 'date': '200', 'comment_text': 'New'})
+        client.seed_comment('task1', {'id': 'old', 'date': '100', 'comment_text': 'Old'})
+
+        first = protocol_client.list_comments('task1')
+        first['comments'][0]['comment_text'] = 'Changed'
+        second = protocol_client.list_comments('task1')
+
+        self.assertEqual([comment['id'] for comment in second['comments']], ['new', 'old'])
+        self.assertEqual(second['comments'][0]['comment_text'], 'New')
+
+    def test_list_comments_mixes_created_and_dated_seed_comments_newest_first(self) -> None:
+        client = MockClickUpClient(token_supplier=lambda: None, config={})
+        client.seed_task('list1', {'id': 'task1', 'name': 'Task'})
+        client.seed_comment('task1', {'id': 'new-seed', 'date': '200', 'comment_text': 'New seed'})
+        client.seed_comment('task1', {'id': 'old-seed', 'date': '100', 'comment_text': 'Old seed'})
+
+        created = client.create_comment('task1', text='Created last')
+
+        self.assertEqual(
+            client.list_comments('task1'),
+            {
+                'comments': [
+                    {'id': created['id'], 'date': '201', 'comment_text': 'Created last'},
+                    {'id': 'new-seed', 'date': '200', 'comment_text': 'New seed'},
+                    {'id': 'old-seed', 'date': '100', 'comment_text': 'Old seed'},
+                ]
+            },
+        )
+        self.assertEqual(
+            client.comments,
+            [{'id': created['id'], 'task_id': 'task1', 'text': 'Created last'}],
+        )
+
+    def test_delete_then_reseed_task_does_not_restore_stale_comments(self) -> None:
+        client = MockClickUpClient(token_supplier=lambda: None, config={})
+        client.seed_task('list1', {'id': 'task1', 'name': 'Old task'})
+        client.seed_comment('task1', {'id': 'old-comment', 'date': '100', 'comment_text': 'Old'})
+
+        client.delete_task('task1')
+        client.seed_task('list1', {'id': 'task1', 'name': 'New task'})
+
+        self.assertEqual(client.list_comments('task1'), {'comments': []})
+
+    def test_list_comments_for_missing_task_raises_not_found(self) -> None:
+        client = MockClickUpClient(token_supplier=lambda: None, config={})
+
+        with self.assertRaisesRegex(ClickUpNotFoundError, 'clickup task not found: missing'):
+            client.list_comments('missing')
+
     def test_seeded_spaces_lists_and_tasks_can_be_listed_by_tool(self) -> None:
         client = MockClickUpClient(token_supplier=lambda: None, config={'team_id': 'team1'})
         protocol_client: ClickUpClientProtocol = client
@@ -45,8 +140,8 @@ class TestMockClickUpClient(OTestCase):
         lists = invoke('list_lists', {'space_id': 'sp1'})
         tasks = invoke('list_tasks', {'list_id': 'list1', 'statuses': ['open']})
 
-        self.assertEqual(spaces, {'spaces': [{'id': 'sp1', 'name': 'Ops'}]})
-        self.assertEqual(lists, {'lists': [{'id': 'list1', 'name': 'Inbox'}]})
+        self.assertEqual(spaces, {'spaces': [{'id': 'sp1', 'name': 'Ops', 'archived': False}]})
+        self.assertEqual(lists, {'lists': [{'id': 'list1', 'name': 'Inbox', 'archived': False}]})
         self.assertEqual([task['id'] for task in tasks['tasks']], ['task1'])
 
     def test_create_task_records_payload_and_returns_synthetic_id(self) -> None:
@@ -57,7 +152,7 @@ class TestMockClickUpClient(OTestCase):
             {'list_id': 'list1', 'name': 'New task', 'description': 'Details', 'status': 'open'},
         )
 
-        self.assertEqual(result, {'id': 'mock-task-1'})
+        self.assertEqual(result, {'ok': True, 'task_id': 'mock-task-1'})
         self.assertEqual(
             client.created_tasks,
             [{'id': 'mock-task-1', 'list_id': 'list1', 'name': 'New task', 'description': 'Details', 'status': 'open'}],
@@ -74,7 +169,7 @@ class TestMockClickUpClient(OTestCase):
         deleted = invoke('delete_task', {'task_id': 'task1'})
 
         self.assertEqual(updated['name'], 'Renamed')
-        self.assertEqual(comment, {'id': 'mock-comment-1'})
+        self.assertEqual(comment, {'ok': True, 'task_id': 'task1'})
         self.assertEqual(client.comments, [{'id': 'mock-comment-1', 'task_id': 'task1', 'text': 'Looks good'}])
-        self.assertEqual(deleted, {'ok': True, 'id': 'task1', 'deleted': True})
+        self.assertEqual(deleted, {'ok': True, 'task_id': 'task1', 'deleted': True})
         self.assertEqual(client.deleted_tasks, ['task1'])

@@ -1,0 +1,176 @@
+{
+  "task": {
+    "id": "task-provider-shapes",
+    "group_assignees": [
+      {
+        "id": "group-platform",
+        "name": "Platform",
+        "member_ids": [701, 702],
+        "avatar": "must-not-leak"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "attachment-1",
+        "title": "incident-report.pdf",
+        "mimetype": "application/pdf",
+        "extension": "pdf",
+        "size": 4096,
+        "date": 1785100200123,
+        "user": {
+          "id": 700,
+          "username": "Attachment Owner",
+          "profilePicture": "must-not-leak"
+        },
+        "url": "https://attachments.example/incident-report.pdf",
+        "thumbnail_large": "must-not-leak"
+      }
+    ],
+    "custom_fields": [
+      {
+        "id": "field-location",
+        "name": "Office",
+        "type": "location",
+        "value": {
+          "location": {"lat": -28.016667, "lng": 153.4, "accuracy": "must-not-leak"},
+          "formatted_address": "Gold Coast QLD, Australia",
+          "place_id": "must-not-leak"
+        }
+      },
+      {
+        "id": "field-users",
+        "name": "Reviewers",
+        "type": "users",
+        "value": [
+          {
+            "id": 701,
+            "username": "Ada Reviewer",
+            "email": "ada@example.com",
+            "profilePicture": "must-not-leak"
+          },
+          {"id": "702", "name": "Grace Reviewer", "color": "must-not-leak"}
+        ]
+      },
+      {
+        "id": "field-tasks",
+        "name": "Related tasks",
+        "type": "tasks",
+        "value": ["task-a", 42, {"id": "task-c", "name": "must-not-leak"}]
+      },
+      {
+        "id": "field-relationship",
+        "name": "Blocking",
+        "type": "list_relationship",
+        "value": [
+          {
+            "id": "task-b",
+            "name": "Provider task blob",
+            "url": "https://app.clickup.com/t/task-b",
+            "status": {"status": "open"},
+            "permission": {"read": true}
+          }
+        ]
+      },
+      {
+        "id": "field-progress",
+        "name": "Delivery progress",
+        "type": "progress",
+        "type_config": {"method": "automatic", "tracking": {"subtasks": true}},
+        "value": {
+          "current": 3,
+          "start": 0,
+          "end": 5,
+          "percent_completed": 60,
+          "tracking": {"must-not-leak": true}
+        }
+      },
+      {
+        "id": "field-automatic-progress",
+        "name": "Automatic progress",
+        "type": "automatic_progress",
+        "value": {"percent_completed": 75, "complete_on": 4, "private": true}
+      },
+      {
+        "id": "field-manual-progress",
+        "name": "Manual progress",
+        "type": "manual_progress",
+        "value": {"current": 20, "start": 10, "end": 30, "private": true}
+      },
+      {
+        "id": "field-dropdown",
+        "name": "Risk",
+        "type": "drop_down",
+        "type_config": {
+          "options": [
+            {
+              "id": "risk-high",
+              "name": "High",
+              "color": "#d33d44",
+              "orderindex": "0",
+              "private": true
+            }
+          ],
+          "sorting": "manual"
+        },
+        "value": "risk-high"
+      },
+      {
+        "id": "field-labels",
+        "name": "Signals",
+        "type": "labels",
+        "type_config": {
+          "options": [
+            {
+              "id": "signal-customer",
+              "label": "Customer",
+              "color": "#4194f6",
+              "orderindex": "0",
+              "private": true
+            },
+            {
+              "id": "signal-security",
+              "label": "Security",
+              "color": "#d33d44",
+              "orderindex": "1"
+            }
+          ]
+        },
+        "value": ["signal-security", "signal-customer"]
+      },
+      {
+        "id": "field-unknown",
+        "name": "Future provider field",
+        "type": "future_structured",
+        "value": {"private": "must-not-leak"}
+      }
+    ]
+  },
+  "comments": {
+    "comments": [
+      {
+        "id": "comment-rich-2",
+        "comment_text": "Ada, please pair with Grace.",
+        "comment": [
+          {"type": "tag", "user": {"id": 701, "username": "Ada Reviewer", "email": "ada@example.com"}},
+          {"text": ", please pair with "},
+          {"type": "tag", "user": {"id": "702", "username": "Grace Reviewer", "color": "must-not-leak"}},
+          {"text": ".", "attributes": {"bold": true}}
+        ],
+        "date": "1785100400000",
+        "user": {"id": 703, "username": "Comment Author", "profilePicture": "must-not-leak"}
+      },
+      {
+        "id": "comment-rich-1",
+        "comment_text": "Ada owns the follow-up.",
+        "comment": [
+          {"type": "tag", "user": {"id": 701, "username": "Ada Reviewer", "email": "ada@example.com"}},
+          {"text": " owns the follow-up."}
+        ],
+        "date": 1785100300000,
+        "user": {"id": 704, "username": "Second Author", "color": "must-not-leak"}
+      }
+    ],
+    "total": 2,
+    "transport": {"request_id": "must-not-leak"}
+  }
+}

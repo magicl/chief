@@ -24,6 +24,7 @@ class MockClickUpClient:
         self._lists_by_space: dict[str, list[dict[str, Any]]] = {}
         self._tasks_by_list: dict[str, list[dict[str, Any]]] = {}
         self._task_list_ids: dict[str, str] = {}
+        self._comments_by_task: dict[str, list[dict[str, Any]]] = {}
         self._next_task_seq = 1
         self._next_comment_seq = 1
         self.created_tasks: list[dict[str, Any]] = []
@@ -47,7 +48,16 @@ class MockClickUpClient:
         """Add a task record under a list id."""
         stored = deepcopy(task)
         self._tasks_by_list.setdefault(list_id, []).append(stored)
-        self._task_list_ids[str(stored['id'])] = list_id
+        task_id = str(stored['id'])
+        self._task_list_ids[task_id] = list_id
+        self._comments_by_task.setdefault(task_id, [])
+        return deepcopy(stored)
+
+    def seed_comment(self, task_id: str, comment: dict[str, Any]) -> dict[str, Any]:
+        """Add a raw provider comment under an existing task id."""
+        self._task_ref(task_id)
+        stored = deepcopy(comment)
+        self._comments_by_task.setdefault(task_id, []).append(stored)
         return deepcopy(stored)
 
     def list_spaces(self, team_id: str) -> dict[str, Any]:
@@ -68,9 +78,36 @@ class MockClickUpClient:
             tasks = [task for task in tasks if self._status_name(task) in wanted]
         return {'tasks': deepcopy(tasks), 'last_page': True}
 
-    def get_task(self, task_id: str) -> dict[str, Any]:
-        """Fetch one seeded or created task by id."""
-        return deepcopy(self._task_ref(task_id))
+    def get_task(
+        self,
+        task_id: str,
+        *,
+        include_subtasks: bool = False,
+        include_markdown_description: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch a task with only the requested seeded expansion fields."""
+        task = deepcopy(self._task_ref(task_id))
+        if include_subtasks and 'subtasks' not in task:
+            # Separate child seeds mirror ClickUp list responses, where parent ids link tasks.
+            list_id = self._task_list_ids[task_id]
+            task['subtasks'] = deepcopy(
+                [candidate for candidate in self._tasks_by_list[list_id] if str(candidate.get('parent')) == task_id]
+            )
+        elif not include_subtasks:
+            task.pop('subtasks', None)
+        if not include_markdown_description:
+            task.pop('markdown_description', None)
+        return task
+
+    def list_comments(self, task_id: str) -> dict[str, Any]:
+        """List seeded and created comments newest-first without exposing stored values."""
+        self._task_ref(task_id)
+        comments = self._comments_by_task.get(task_id, [])
+        if comments and all(str(comment.get('date', '')).isdigit() for comment in comments):
+            comments = sorted(comments, key=lambda comment: int(str(comment['date'])), reverse=True)
+        else:
+            comments = list(reversed(comments))
+        return {'comments': deepcopy(comments)}
 
     def create_task(
         self, *, list_id: str, name: str, description: str | None = None, status: str | None = None
@@ -98,8 +135,14 @@ class MockClickUpClient:
         self._task_ref(task_id)
         comment_id = f'mock-comment-{self._next_comment_seq}'
         self._next_comment_seq += 1
-        comment = {'id': comment_id, 'task_id': task_id, 'text': text}
-        self.comments.append(deepcopy(comment))
+        mutation = {'id': comment_id, 'task_id': task_id, 'text': text}
+        self.comments.append(deepcopy(mutation))
+        provider_comment = {
+            'id': comment_id,
+            'date': str(self._next_comment_date(task_id)),
+            'comment_text': text,
+        }
+        self._comments_by_task.setdefault(task_id, []).append(provider_comment)
         return {'id': comment_id}
 
     def delete_task(self, task_id: str) -> dict[str, Any]:
@@ -107,8 +150,18 @@ class MockClickUpClient:
         self._task_ref(task_id)
         list_id = self._task_list_ids.pop(task_id)
         self._tasks_by_list[list_id] = [task for task in self._tasks_by_list[list_id] if str(task.get('id')) != task_id]
+        self._comments_by_task.pop(task_id, None)
         self.deleted_tasks.append(task_id)
         return {'id': task_id, 'deleted': True}
+
+    def _next_comment_date(self, task_id: str) -> int:
+        """Return a deterministic timestamp newer than every dated comment on the task."""
+        dated = [
+            int(str(comment['date']))
+            for comment in self._comments_by_task.get(task_id, [])
+            if str(comment.get('date', '')).isdigit()
+        ]
+        return max(dated, default=0) + 1
 
     def _task_ref(self, task_id: str) -> dict[str, Any]:
         """Return the mutable stored task or raise a typed not-found failure."""
