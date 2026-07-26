@@ -10,9 +10,11 @@ Emits the shared `{data, ref}` envelope so an agent can re-fetch the live task.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from libs.clients.clickup import ClickUpClient
+from libs.clients.clickup.projection import project_task_id, project_task_summary
 from libs.sources.base import PollResult, PutItemCallback, SecretSupplier, SourceAdapter
 from libs.sources.dedup import (
     clickup_external_id,
@@ -22,14 +24,6 @@ from libs.sources.dedup import (
 )
 
 _DEFAULT_MAX_RESULTS = 50
-
-
-def _status_name(task: dict[str, Any]) -> Any:
-    """Return the status label whether ClickUp returns a string or a `{status: ...}` object."""
-    status = task.get('status')
-    if isinstance(status, dict):
-        return status.get('status')
-    return status
 
 
 class ClickUpSourceAdapter(SourceAdapter):
@@ -69,23 +63,21 @@ class ClickUpSourceAdapter(SourceAdapter):
         )
         enqueued = 0
         for task in tasks:
-            task_id = task['id']
+            if not isinstance(task, Mapping):
+                continue
+            try:
+                task_id = project_task_id(task)
+            except ValueError:
+                continue
             if should_skip_known(
                 dedupe=dedupe,
                 external_id=task_id,
                 known_external_ids=known_external_ids,
             ):
                 continue
+            summary = project_task_summary(task)
             envelope = {
-                'data': {
-                    'id': task_id,
-                    'name': task.get('name'),
-                    'status': _status_name(task),
-                    'list_id': config['list_id'],
-                    'url': task.get('url'),
-                    'date_updated': task.get('date_updated'),
-                    'text_content': task.get('text_content'),
-                },
+                'data': summary,
                 'ref': {'service': 'clickup', 'resource_type': 'task', 'resource_id': task_id},
             }
             date_updated = task.get('date_updated')

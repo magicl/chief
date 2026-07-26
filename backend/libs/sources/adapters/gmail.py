@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from libs.clients.gmail import GmailClient
+from libs.clients.gmail.projection import project_message_summary
 from libs.sources.base import PollResult, PutItemCallback, SecretSupplier, SourceAdapter
 from libs.sources.dedup import (
     dedupe_enabled,
@@ -22,63 +23,6 @@ from libs.sources.dedup import (
 
 _DEFAULT_MAX_RESULTS = 25
 _MAX_INLINE_BODY_CHARS = 2000
-
-
-def _header(message: dict[str, Any], name: str) -> str | None:
-    """Return a header value (case-insensitive) from a Gmail message payload."""
-    for hdr in message.get('payload', {}).get('headers', []):
-        if hdr.get('name', '').lower() == name.lower():
-            value = hdr.get('value')
-            return value if isinstance(value, str) else None
-    return None
-
-
-def _parse_to_addresses(message: dict[str, Any]) -> list[str]:
-    """Split the To header into individual address strings."""
-    to_hdr = _header(message, 'To')
-    if not to_hdr:
-        return []
-    return [part.strip() for part in to_hdr.split(',') if part.strip()]
-
-
-def _walk_payload_parts(part: dict[str, Any], out: list[dict[str, Any]]) -> None:
-    """Collect attachment metadata from a message payload tree (metadata format)."""
-    filename = part.get('filename')
-    body = part.get('body') or {}
-    attachment_id = body.get('attachmentId')
-    if filename and attachment_id:
-        out.append(
-            {
-                'attachment_id': attachment_id,
-                'filename': filename,
-                'mime_type': part.get('mimeType'),
-                'size': body.get('size'),
-            }
-        )
-    for child in part.get('parts', []) or []:
-        if isinstance(child, dict):
-            _walk_payload_parts(child, out)
-
-
-def _attachment_meta(message: dict[str, Any]) -> tuple[bool, list[dict[str, Any]]]:
-    """Return whether the message has attachments and lightweight metadata for each."""
-    attachments: list[dict[str, Any]] = []
-    payload = message.get('payload')
-    if isinstance(payload, dict):
-        _walk_payload_parts(payload, attachments)
-    return bool(attachments), attachments
-
-
-def _inline_body(message: dict[str, Any], *, include_body: bool) -> str | None:
-    """Return a truncated plain-text preview when ``include_body`` is enabled."""
-    if not include_body:
-        return None
-    snippet = message.get('snippet')
-    if not isinstance(snippet, str) or not snippet:
-        return None
-    if len(snippet) <= _MAX_INLINE_BODY_CHARS:
-        return snippet
-    return snippet[:_MAX_INLINE_BODY_CHARS] + '…'
 
 
 class GmailSourceAdapter(SourceAdapter):
@@ -130,22 +74,14 @@ class GmailSourceAdapter(SourceAdapter):
                 message_ids, messages = batch
                 enqueued = 0
                 for message_id, msg in messages:
-                    has_attachments, attachments = _attachment_meta(msg)
-                    data: dict[str, Any] = {
-                        'id': msg.get('id'),
-                        'thread_id': msg.get('threadId'),
-                        'from': _header(msg, 'From'),
-                        'to': _parse_to_addresses(msg),
-                        'subject': _header(msg, 'Subject'),
-                        'snippet': msg.get('snippet'),
-                        'received_at': _header(msg, 'Date'),
-                        'label_ids': msg.get('labelIds', []),
-                        'has_attachments': has_attachments,
-                        'attachments': attachments,
-                    }
-                    body_preview = _inline_body(msg, include_body=include_body)
-                    if body_preview is not None:
-                        data['body_preview'] = body_preview
+                    data: dict[str, Any] = dict(project_message_summary(msg))
+                    snippet = data.get('snippet')
+                    if include_body and isinstance(snippet, str) and snippet:
+                        data['body_preview'] = (
+                            snippet
+                            if len(snippet) <= _MAX_INLINE_BODY_CHARS
+                            else snippet[:_MAX_INLINE_BODY_CHARS] + '…'
+                        )
                     envelope = {
                         'data': data,
                         'ref': {'service': 'gmail', 'resource_type': 'message', 'resource_id': message_id},

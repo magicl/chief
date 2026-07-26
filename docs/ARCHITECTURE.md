@@ -412,22 +412,35 @@ no-store` to every callback response, including converted route failures.
 
 **Spec detail:** [Gmail](specs/2026-07-06-gmail-integration/2026-07-06-gmail-integration-design.md) · [ClickUp](specs/2026-07-06-clickup-integration/2026-07-06-clickup-integration-design.md) · [Cloud file metadata](specs/2026-07-18-cloud-file-integrations/2026-07-18-cloud-file-integrations-design.md)
 
-Each external service follows the same three-component anatomy:
+Gmail and ClickUp provider-resource paths use four logical layers:
 
 | Layer | Package | Role |
 |-------|---------|------|
-| **Client** | `libs/clients/<service>/` | Low-level API wrapper; credentials injected at call time |
-| **Source adapter** | `libs/sources/adapters/` | Polls external items → enqueues queue payloads |
-| **Tool** | `libs/tools/tools/` | Agent-callable functions gated by `allow` / `deny` |
+| **Client** | `libs/clients/<service>/` | Low-level provider transport with limited transport-safe decoding/normalization; credentials injected at call time |
+| **Projection** | `libs/clients/<service>/projection.py` and shared `libs/clients/compact.py` | Decoding, explicit field selection, bounds, truncation metadata, and safe advisories |
+| **Source adapter** | `libs/sources/adapters/` | Polls external items and queues `{data, ref}` using the service's summary projection |
+| **Tool** | `libs/tools/tools/` | Returns LLM-facing results through the same projection, gated by `allow` / `deny` |
+
+Gmail and ClickUp clients generally expose low-level provider-oriented records, with
+limited transport-safe decoding and normalization. Gmail `list_messages` is already
+compact `{message_ids, next_page_token}` output and is passed through by the tool.
+Gmail `get_attachment` decodes provider base64url to size-limited bytes at the client
+boundary before projection emits standard base64. The projected message, task, label,
+attachment, mutation, and source paths do not return raw provider payloads, transport
+bookkeeping, permission graphs, or presentation/configuration metadata to the LLM.
 
 Current integration components:
 
-| Integration | Client | Tool | Source adapter |
-|-------------|--------|------|----------------|
-| Gmail | `libs/clients/gmail/` | `libs/tools/tools/gmail.py` | `libs/sources/adapters/gmail.py` |
-| ClickUp | `libs/clients/clickup/` | `libs/tools/tools/clickup.py` | `libs/sources/adapters/clickup.py` |
-| Google Drive | `libs/clients/google_drive/` | `libs/tools/tools/google_drive.py` | None — interactive metadata tool only |
-| Dropbox | `libs/clients/dropbox/` | `libs/tools/tools/dropbox.py` | None — interactive metadata tool only |
+| Integration | Client | Projection | Tool | Source adapter |
+|-------------|--------|------------|------|----------------|
+| Gmail | `libs/clients/gmail/` | `libs/clients/gmail/projection.py` | `libs/tools/tools/gmail.py` | `libs/sources/adapters/gmail.py` |
+| ClickUp | `libs/clients/clickup/` | `libs/clients/clickup/projection.py` | `libs/tools/tools/clickup.py` | `libs/sources/adapters/clickup.py` |
+| Google Drive | `libs/clients/google_drive/` | None | `libs/tools/tools/google_drive.py` | None — interactive metadata tool only |
+| Dropbox | `libs/clients/dropbox/` | None | `libs/tools/tools/dropbox.py` | None — interactive metadata tool only |
+
+Google Drive and Dropbox do not currently use separate projection modules. Their
+metadata-only clients return normalized records directly to their tools, and neither
+integration has a source adapter.
 
 **`ToolInstance.config`** / **`SourceSpec.config`** hold non-secret addressing
 (mailbox, team id, query filters). Shared connection details can be declared once
@@ -435,9 +448,11 @@ under **`integrations[]`** and referenced via **`integration:`** on tools and
 sources (schema v3+). Secrets stay in `apps.keys`; YAML references them via
 **`credential_ref`** only (on the integration or inline on the tool/source).
 
-**Queue payload envelope:** source adapters enqueue `{data, ref}` — `data` is the
-session-facing summary; `ref` carries stable ids and fetch hints so tools can re-read
-full content (e.g. attachments) without bloating the queue item.
+**Queue payload envelope:** Gmail and ClickUp source adapters enqueue `{data, ref}` —
+`data` uses the same projected summary field names and semantics as the corresponding
+tool metadata or list path; `ref` is a stable fetch hint with service, resource type,
+and resource id so tools can re-read full content (e.g. attachments) without bloating
+the queue item.
 
 **Source dedupe (`config.dedupe`, default `true`):** each adapter maps an upstream item
 to a queue **`external_id`** (Gmail message id, ClickUp task id). With dedupe on,

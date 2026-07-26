@@ -1,0 +1,143 @@
+{
+  "id": "task-1",
+  "custom_id": "OPS-7",
+  "name": "Investigate compact records",
+  "text_content": "Task primary text",
+  "orderindex": "123",
+  "status": {
+    "status": "in progress",
+    "color": "#123456",
+    "orderindex": 2
+  },
+  "assignees": [
+    {
+      "id": 101,
+      "username": "Ada",
+      "email": "ada@example.com",
+      "profilePicture": "private-avatar",
+      "permission": {"edit": true}
+    },
+    {"id": "102", "name": "Grace", "avatar": "private-avatar"}
+  ],
+  "priority": {"id": "2", "priority": "high", "color": "#ff0000"},
+  "due_date": "2000",
+  "url": "https://app.clickup.com/t/task-1",
+  "date_updated": "1900",
+  "description": "Task description",
+  "markdown_description": "# Task description",
+  "list": {
+    "id": "list-1",
+    "name": "Inbox",
+    "orderindex": 1,
+    "access": true
+  },
+  "folder": {"id": "folder-1", "name": "Ops", "settings": {"private": true}},
+  "space": {"id": "space-1", "name": "Engineering", "features": {"private": true}},
+  "creator": {"id": 100, "username": "Lin", "email": "lin@example.com", "avatar": "private-avatar"},
+  "watchers": [
+    {"id": 103, "username": "Margaret", "profilePicture": "private-avatar"}
+  ],
+  "mentions": [
+    {"id": 104, "name": "Katherine", "email": "kat@example.com", "permission": {"read": true}}
+  ],
+  "group_assignees": [
+    {"id": "group-1", "name": "Platform Team", "avatar": "private-avatar"}
+  ],
+  "tags": [
+    {"name": "security", "tag_fg": "#fff", "tag_bg": "#000"},
+    {"name": "backend", "ordering": 4}
+  ],
+  "start_date": "1000",
+  "time_estimate": 3600000,
+  "points": 3.5,
+  "custom_fields": [
+    {
+      "id": "cf-1",
+      "name": "Impact",
+      "type": "drop_down",
+      "type_config": {"options": [{"id": "secret", "name": "High"}]},
+      "value": "high"
+    },
+    {
+      "id": "cf-2",
+      "name": "Labels",
+      "type": "labels",
+      "value": ["alpha", 2, true, {"private": "value"}]
+    },
+    {
+      "id": "cf-3",
+      "name": "Unknown field",
+      "value": "must-not-leak"
+    }
+  ],
+  "parent": "task-parent",
+  "dependencies": [
+    {
+      "task_id": "task-1",
+      "depends_on": "task-0",
+      "name": "Foundation task",
+      "url": "https://app.clickup.com/t/task-0",
+      "status": {"status": "done", "color": "#fff"},
+      "type": 1,
+      "date_created": "50",
+      "permission": {"private": true}
+    }
+  ],
+  "linked_tasks": [
+    {
+      "task_id": "task-2",
+      "name": "Related task",
+      "url": "https://app.clickup.com/t/task-2",
+      "status": {"status": "open", "color": "#fff"},
+      "link_id": "link-1",
+      "date_created": "60",
+      "features": {"private": true}
+    }
+  ],
+  "checklists": [
+    {
+      "id": "check-1",
+      "name": "Release",
+      "resolved": 1,
+      "orderindex": 0,
+      "items": [
+        {"id": "item-1", "name": "Test", "resolved": true, "orderindex": 0},
+        {"id": "item-2", "name": "Deploy", "resolved": false, "permission": {"private": true}}
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "id": "att-private",
+      "title": "report.txt",
+      "type": "text/plain",
+      "extension": "txt",
+      "size": 12,
+      "user": {"id": 105, "username": "Dorothy", "avatar": "private-avatar"},
+      "date": "1700",
+      "url": "https://files.example/report.txt",
+      "url_w_query": "https://files.example/report.txt?token=fetch",
+      "url_w_host": "https://files-host.example/report.txt",
+      "download_url": "must-not-leak",
+      "thumbnail_small": "https://files.example/private-thumbnail",
+      "transport": {"headers": {"Authorization": "secret"}}
+    }
+  ],
+  "subtasks": [
+    {
+      "id": "sub-1",
+      "custom_id": null,
+      "name": "Write tests",
+      "status": {"status": "open", "color": "#fff"},
+      "assignees": [{"id": 101, "username": "Ada", "profilePicture": "private-avatar"}],
+      "priority": {"id": "3", "priority": "normal", "color": "#fff"},
+      "due_date": null,
+      "url": "https://app.clickup.com/t/sub-1",
+      "description": "must not be duplicated",
+      "list": {"id": "list-1", "features": {"private": true}}
+    }
+  ],
+  "features": {"private": true},
+  "settings": {"private": true},
+  "transport": {"request_id": "private"}
+}

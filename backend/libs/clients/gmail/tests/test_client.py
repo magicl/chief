@@ -47,6 +47,47 @@ def _gmail_traceback_locals(failure: BaseException) -> list[tuple[str, dict[str,
 
 
 class TestGmailClient(OTestCase):
+    def test_get_message_requests_locked_metadata_headers(self) -> None:
+        """Request the complete locked projection header set for metadata reads."""
+        service = MagicMock()
+        service.users.return_value.messages.return_value.get.return_value.execute.return_value = {'id': 'm1'}
+        client = _client_with_service(service)
+
+        client.get_message('m1', fmt='metadata')
+
+        service.users.return_value.messages.return_value.get.assert_called_once_with(
+            userId='me',
+            id='m1',
+            format='metadata',
+            metadataHeaders=[
+                'From',
+                'To',
+                'Cc',
+                'Reply-To',
+                'Return-Path',
+                'Subject',
+                'Message-ID',
+                'Date',
+                'Authentication-Results',
+                'Received-SPF',
+                'ARC-Authentication-Results',
+            ],
+        )
+
+    def test_get_message_full_does_not_request_metadata_headers(self) -> None:
+        """Leave full-format Gmail requests unchanged by metadata header filtering."""
+        service = MagicMock()
+        service.users.return_value.messages.return_value.get.return_value.execute.return_value = {'id': 'm1'}
+        client = _client_with_service(service)
+
+        client.get_message('m1', fmt='full')
+
+        service.users.return_value.messages.return_value.get.assert_called_once_with(
+            userId='me',
+            id='m1',
+            format='full',
+        )
+
     def test_list_messages_parses_ids_and_page_token(self) -> None:
         service = MagicMock()
         service.users.return_value.messages.return_value.list.return_value.execute.return_value = {

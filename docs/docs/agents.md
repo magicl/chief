@@ -201,17 +201,46 @@ remains `gmail`; `gmail` is not a credential type.
 
 | Function | Description | Readonly |
 |----------|-------------|----------|
-| `list` | Search messages by Gmail query | yes |
-| `read` | Read one message (full body) | yes |
-| `list_labels` | List label id/name pairs | yes |
-| `get_attachment` | Download an attachment (base64) | yes |
-| `label` | Add/remove labels on a message | no |
-| `archive` | Remove INBOX label | no |
-| `mark_spam` | Move message to spam | no |
-| `trash` | Move message to trash | no |
-| `send` | Send a message | no |
+| `list` | Search by Gmail query; returns `message_ids` and nullable `next_page_token` | yes |
+| `read` | Return one decoded, compact message with bounded body and attachments | yes |
+| `list_labels` | Return compact `id`, `name`, and optional `type` records under `labels` | yes |
+| `get_attachment` | Return decoded bytes as standard base64 in `data_base64` | yes |
+| `label` | Add/remove labels; returns a compact message acknowledgement | no |
+| `archive` | Remove INBOX; returns a compact message acknowledgement | no |
+| `mark_spam` | Move to spam; returns a compact message acknowledgement | no |
+| `trash` | Move to trash; returns a compact message acknowledgement | no |
+| `send` | Send a message; returns a compact message acknowledgement | no |
 
 Typical deny pattern: `deny: [send, trash]` — restrict destructive operations.
+
+`read` returns the projected summary fields `id`, `thread_id`, `label_ids`, `from`,
+`to`, `cc`, `reply_to`, `return_path`, `subject`, `message_id`, `date`,
+`received_at`, and `snippet` when available. It always includes:
+
+- `has_attachments`; `attachments[]` records with `attachment_id`, `filename`,
+  `mime_type`, and nullable `size`; and `attachments_meta` with `truncated`,
+  `included`, `total`, and `omitted_count`. At most 25 attachments are returned.
+- `authentication`: `spf {verdict, domain}`, `dkim[] {verdict, domain}`,
+  `dmarc {verdict, policy, header_from}`, `arc {verdict}`, and
+  `alignment {from_domain, reply_to_domain, return_path_domain,
+  from_matches_reply_to, from_matches_return_path}`. Missing or untrusted evidence
+  produces `unknown`/`null`, not raw authentication headers.
+- `advisories[] {code, message}` for safely omitted MIME content.
+- `body {text, source}`, where `source` is `plain` or `html_to_text`. Text is limited
+  to 32,000 characters; overflow adds
+  `body_truncation {truncated: true, omitted_chars, ref}` with the Gmail message
+  fetch reference.
+
+`list` is passed through from the client because that client method already returns
+only `{message_ids, next_page_token}`. For `get_attachment`, the client decodes
+Gmail's base64url transport data to bytes and enforces the 10 MiB limit; the
+projection returns exactly `attachment_id`, decoded byte `size`, nullable `mime_type`,
+and padded standard-base64 `data_base64`. Gmail mutation successes return
+`{ok: true, message_id, label_ids?}`. Successful reads, labels, and attachment
+downloads return their compact projection, while `list` returns its compact client
+result; none adds `ok`. Failures return
+`{ok: false, error: {kind, message}}`, where `kind` is `auth`, `not_found`, or `api`.
+There is no raw-result option.
 
 #### `google_drive`
 
@@ -342,16 +371,50 @@ ClickUp task management. Requires a `clickup` credential (API token).
 
 | Function | Description | Readonly |
 |----------|-------------|----------|
-| `list_spaces` | List spaces in a workspace | yes |
-| `list_lists` | List lists in a space | yes |
-| `list_tasks` | List tasks in a list | yes |
-| `get_task` | Fetch one task | yes |
-| `create_task` | Create a task in a list | no |
-| `update_task` | Update task fields | no |
-| `create_comment` | Add a comment to a task | no |
-| `delete_task` | Delete a task | no |
+| `list_spaces` | Return compact spaces in a workspace | yes |
+| `list_lists` | Return compact lists in a space | yes |
+| `list_tasks` | Return compact task summaries and optional `last_page` | yes |
+| `get_task` | Return one bounded normalized task plus recent comments | yes |
+| `create_task` | Create a task; returns a compact task acknowledgement | no |
+| `update_task` | Update task fields; returns a compact task acknowledgement | no |
+| `create_comment` | Add a comment; acknowledges the affected task | no |
+| `delete_task` | Delete a task; acknowledges the affected task with `deleted: true` | no |
 
 Typical deny pattern: `deny: [delete_task]`.
+
+Collection results are recursively allowlisted:
+
+- `list_spaces` returns `spaces[] {id, name, archived}`.
+- `list_lists` returns `lists[] {id, name, archived, space_id?, folder_id?}`.
+- `list_tasks` returns `tasks[]` summaries with exactly `id`, nullable `custom_id`,
+  `name`, nullable `status`, `assignees[]`, nullable `priority`, nullable
+  `due_date`, nullable `url`, and nullable `date_updated`; `last_page` is present
+  only when ClickUp supplies a boolean. A person is `{id, display_name, email?}` and
+  priority is `{id, priority}` with nullable values.
+
+`get_task` includes those same summary fields plus `description`,
+`markdown_description`, `location`, `creator`, `watchers`, `mentions`, `tags`,
+`start_date`, `time_estimate`, `points`, `custom_fields`, `parent`, `dependencies`,
+`linked_tasks`, `checklists`, `attachments`, `subtasks`, `comments`, their metadata,
+and `advisories`. Plain and Markdown descriptions are each limited to 32,000
+characters; overflow adds `{truncated: true, omitted_chars}` under
+`description_truncation` or `markdown_description_truncation`. Attachments and
+subtasks are each limited to 25. Comments are the 10 most recent comments from
+ClickUp's fetched page, each with `id`, `text`, nullable `date`, nullable `user`, and
+text limited to 4,000 characters; overflow adds
+`text_truncation {truncated: true, omitted_chars}`.
+
+Each `attachments_meta`, `subtasks_meta`, and `comments_meta` is
+`{included, total, truncated, omitted_count}`. `total` is null when the provider
+does not supply one; `omitted_count` still reports locally observed omissions. If
+the optional comments request fails, the task still returns with `comments: []`,
+`comments_meta: {included: 0, total: null, truncated: false, omitted_count: 0}`, and
+`advisories: [{code: "comments_unavailable", message: "Comments could not be loaded."}]`.
+
+ClickUp mutation successes return `{ok: true, task_id}` plus only applicable `url`,
+`deleted`, `status`, or `name`. Successful reads and lists are the projection itself
+and do not add `ok`; failures return `{ok: false, error: {kind, message}}`, where
+`kind` is `auth`, `not_found`, or `api`. There is no raw-result option.
 
 #### `queue`
 
@@ -423,6 +486,14 @@ All source adapters accept:
 |-------|------|----------|---------|-------------|
 | `dedupe` | bool | no | `true` | When `true`, skip items already known by stable `external_id`. When `false`, Gmail/ClickUp derive `external_id` from a change token (`historyId` / `date_updated`) so updates can re-enter the queue; the `test` adapter still uses `prefix-N` ids and only disables skip-known behavior |
 
+Gmail and ClickUp sources enqueue `{data, ref}`. `data` uses the same projected
+summary field names and semantics as Gmail `read` metadata and ClickUp
+`list_tasks().tasks[]`, respectively; it never contains raw provider payloads.
+`ref` is the stable fetch hint
+`{service: "gmail", resource_type: "message", resource_id: <message-id>}` or
+`{service: "clickup", resource_type: "task", resource_id: <task-id>}` for a later
+tool read.
+
 ### Source types
 
 #### `gmail` source
@@ -434,7 +505,7 @@ Polls Gmail by search query. Requires a `google` credential.
 | `query` | string | yes | — | Gmail search query (e.g. `in:inbox -label:x-act`) |
 | `subject` | string | no | — | Workspace user to impersonate (service accounts). Omit for OAuth |
 | `max_results` | int | no | `25` | Max messages to fetch per poll (must be ≥ 1) |
-| `include_body` | bool | no | `false` | When `true`, include a truncated plain-text snippet in the enqueue payload |
+| `include_body` | bool | no | `false` | When `true`, copy the projected Gmail `snippet` to `data.body_preview`, limiting it to 2,000 characters plus `…` when shortened |
 | `dedupe` | bool | no | `true` | See shared source config |
 
 #### `clickup` source

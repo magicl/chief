@@ -21,8 +21,17 @@ class ClickUpClientProtocol(Protocol):
     def list_tasks(self, *, list_id: str, statuses: tuple[str, ...] = ()) -> dict[str, Any]:
         """List tasks in one list, optionally filtering by status names."""
 
-    def get_task(self, task_id: str) -> dict[str, Any]:
-        """Fetch one task by id."""
+    def get_task(
+        self,
+        task_id: str,
+        *,
+        include_subtasks: bool = False,
+        include_markdown_description: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch one task with optional raw subtask and Markdown expansions."""
+
+    def list_comments(self, task_id: str) -> dict[str, Any]:
+        """Fetch ClickUp's first comment page, newest-first, using the provider's default limit of 25."""
 
     def create_task(
         self, *, list_id: str, name: str, description: str | None = None, status: str | None = None

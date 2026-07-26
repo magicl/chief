@@ -37,6 +37,56 @@ def _client(
 
 
 class TestClickUpClient(OTestCase):
+    def test_get_task_defaults_to_no_query_params(self) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured['method'] = request.method
+            captured['path'] = request.url.path
+            captured['params'] = dict(request.url.params)
+            return httpx.Response(200, json={'id': 't1'})
+
+        out = _client(handler).get_task('t1')
+
+        self.assertEqual(out, {'id': 't1'})
+        self.assertEqual(captured, {'method': 'GET', 'path': '/api/v2/task/t1', 'params': {}})
+
+    def test_get_task_sends_only_enabled_expansion_flags(self) -> None:
+        captured_params: list[dict[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_params.append(dict(request.url.params))
+            return httpx.Response(200, json={'id': 't1'})
+
+        client = _client(handler)
+        client.get_task('t1', include_subtasks=True)
+        client.get_task('t1', include_markdown_description=True)
+        client.get_task('t1', include_subtasks=True, include_markdown_description=True)
+
+        self.assertEqual(
+            captured_params,
+            [
+                {'include_subtasks': 'true'},
+                {'include_markdown_description': 'true'},
+                {'include_subtasks': 'true', 'include_markdown_description': 'true'},
+            ],
+        )
+
+    def test_list_comments_gets_raw_provider_page(self) -> None:
+        captured: dict[str, object] = {}
+        page = {'comments': [{'id': 'c1'}]}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured['method'] = request.method
+            captured['path'] = request.url.path
+            captured['params'] = dict(request.url.params)
+            return httpx.Response(200, json=page)
+
+        out = _client(handler).list_comments('t1')
+
+        self.assertEqual(out, page)
+        self.assertEqual(captured, {'method': 'GET', 'path': '/api/v2/task/t1/comment', 'params': {}})
+
     def test_list_tasks_parses_tasks_and_sends_auth_header(self) -> None:
         captured: dict[str, str] = {}
 

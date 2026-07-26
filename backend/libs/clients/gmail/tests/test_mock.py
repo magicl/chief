@@ -44,7 +44,9 @@ class TestMockGmailClient(OTestCase):
         self.assertEqual(listing, {'message_ids': ['m1'], 'next_page_token': None})
         self.assertEqual(message['id'], 'm1')
         self.assertEqual(message['snippet'], 'hello')
-        self.assertEqual(message['labelIds'], ['INBOX'])
+        self.assertEqual(message['label_ids'], ['INBOX'])
+        self.assertEqual(message['body'], {'text': '', 'source': 'plain'})
+        self.assertNotIn('payload', message)
 
     def test_label_names_create_synthetic_ids_and_record_mutation(self) -> None:
         client = MockGmailClient(token_supplier=lambda: None, config={})
@@ -55,8 +57,7 @@ class TestMockGmailClient(OTestCase):
             {'message_id': 'm1', 'add_names': ['Follow Up'], 'remove': ['INBOX']},
         )
 
-        self.assertTrue(result['ok'])
-        self.assertEqual(result['labelIds'], ['Label_1'])
+        self.assertEqual(result, {'ok': True, 'message_id': 'm1', 'label_ids': ['Label_1']})
         self.assertEqual(client.ensure_label_ids(('Follow Up',)), ['Label_1'])
         self.assertEqual(client.labeled, [{'message_id': 'm1', 'add': ['Label_1'], 'remove': ['INBOX']}])
 
@@ -85,4 +86,12 @@ class TestMockGmailClient(OTestCase):
 
         attachment = _invoke_with(client)('get_attachment', {'message_id': 'm1', 'attachment_id': 'att1'})
 
-        self.assertEqual(attachment, {'attachment_id': 'att1', 'data': b'payload', 'size': 7})
+        self.assertEqual(
+            attachment,
+            {
+                'attachment_id': 'att1',
+                'size': 7,
+                'mime_type': None,
+                'data_base64': 'cGF5bG9hZA==',
+            },
+        )

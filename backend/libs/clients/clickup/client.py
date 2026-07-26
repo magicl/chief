@@ -137,9 +137,24 @@ class ClickUpClient:
             page += 1
         return tasks[:max_results]
 
-    def get_task(self, task_id: str) -> dict[str, Any]:
-        """Fetch one task."""
-        return self._request('GET', f'/task/{task_id}')
+    def get_task(
+        self,
+        task_id: str,
+        *,
+        include_subtasks: bool = False,
+        include_markdown_description: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch one task, optionally requesting raw subtask and Markdown fields."""
+        params: dict[str, Any] = {}
+        if include_subtasks:
+            params['include_subtasks'] = 'true'
+        if include_markdown_description:
+            params['include_markdown_description'] = 'true'
+        return self._request('GET', f'/task/{task_id}', params=params or None)
+
+    def list_comments(self, task_id: str) -> dict[str, Any]:
+        """Fetch ClickUp's first comment page, newest-first, using the provider's default limit of 25."""
+        return self._request('GET', f'/task/{task_id}/comment')
 
     def create_task(
         self, *, list_id: str, name: str, description: str | None = None, status: str | None = None
