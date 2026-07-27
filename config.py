@@ -250,7 +250,7 @@ def docker_compose_deps(context: pp.ProcContext) -> None:
 
 def _implement_run_agent() -> click.Command:
     @click.command(
-        help='Run one agent turn locally (no Celery / Redis / DB) and print session events.',
+        help='Run one agent turn locally (no Celery / Redis / DB) and print session activities.',
         context_settings={'ignore_unknown_options': False},
     )
     @click.argument('user_input')

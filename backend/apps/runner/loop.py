@@ -9,16 +9,16 @@ from __future__ import annotations
 import json
 import logging
 import time
-import traceback
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any
+from typing import Any, NoReturn
 
 from apps.agents.tool_wiring import build_bound_tools
 from apps.keys.services.queries import make_secret_supplier
-from apps.runner.backends.base import RecordedEvent, SessionBackend
+from apps.runner.activity_recorder import BackendActivityRecorder
+from apps.runner.backends.base import RecordedActivity, SessionBackend
 from apps.runner.backends.django import DjangoSessionBackend
 from apps.runner.errors import (
     SessionFailure,
@@ -29,7 +29,12 @@ from apps.runner.hooks import HookRegistry, HookSet
 from apps.runner.limits import SessionLimitChecker
 from apps.runner.llm_config import provider_config_from_spec
 from apps.runner.tool_definitions import build_tool_definitions
-from apps.sessions.models import AgentSession, AgentSessionEventKind, AgentSessionStatus
+from apps.sessions.models import (
+    AgentSession,
+    AgentSessionActivityKind,
+    AgentSessionActivityStatus,
+    AgentSessionStatus,
+)
 from django.conf import settings
 from django.utils import timezone
 
@@ -39,6 +44,7 @@ from libs.agent_spec import AgentConfigSpec, ToolInstance, TriggerSpec
 from libs.providers.llm.base import LLMProvider, ProviderError, StreamResult
 from libs.providers.llm.errors import ProviderConfigurationError
 from libs.providers.llm.registry import make_provider
+from libs.tools.activity import ActivityRef
 from libs.tools.base import parse_qualified_tool_name
 from libs.tools.context import ToolContext
 
@@ -52,6 +58,19 @@ class LoopControl:
     abort: bool = False
     pause: bool = False
     pending_inputs: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LLMCallMetadata:
+    """Best-effort provider metadata plus any collection fault."""
+
+    model: str
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: Decimal | None
+    latency_ms: int | None
+    provider_error: ProviderError | None = None
+    collection_fault: BaseException | None = None
 
 
 class SessionRunner:
@@ -70,6 +89,15 @@ class SessionRunner:
     ) -> None:
         """Create a runner for one session backend and initialize tool client wiring."""
         self.backend = backend
+        self.hooks = HookRegistry()
+        self._accounted_llm_costs: set[uuid.UUID] = set()
+        self._terminal_activity_ids: set[uuid.UUID] = set()
+        self.recorder = BackendActivityRecorder(
+            backend,
+            on_created=self._on_activity_created,
+            on_updated=self._on_activity_updated,
+            on_terminal=self._terminal_activity_ids.add,
+        )
         self.config_spec: AgentConfigSpec = backend.get_spec()
         session = getattr(backend, 'session', None)
         user_id = self.backend.user_id
@@ -85,11 +113,11 @@ class SessionRunner:
             session_id=backend.session_id,
             secret_supplier_factory=_make_supplier,
             client_factories=client_factories or {},
+            recorder=self.recorder,
         )
         self.bound_tools = build_bound_tools(self.config_spec.tools, ctx=self.ctx)
         self.control = LoopControl()
         self.emit_restart = emit_restart
-        self.hooks = HookRegistry()
 
         self._limit_checker = SessionLimitChecker(
             self.config_spec,
@@ -168,8 +196,13 @@ class SessionRunner:
         self.hooks.fire('on_run_start')
         try:
             if self.emit_restart:
-                event = self._append_event(AgentSessionEventKind.RESTART, {})
-                self.backend.publish_event(event)
+                self._create_terminal_activity(
+                    kind=AgentSessionActivityKind.RESTART,
+                    status=AgentSessionActivityStatus.SUCCEEDED,
+                    name='restart',
+                    summary='Session restarted',
+                    details={},
+                )
 
             self._drain_mailbox()
 
@@ -210,20 +243,152 @@ class SessionRunner:
                     self._record_failure(exc)
                     return
 
-                self.hooks.fire('on_generate_start', messages, tool_definitions)
-                result = provider.collect(messages, tool_definitions)
-                self.hooks.fire('on_generate_end', result)
-                if result.error:
-                    self._record_provider_error(result.error)
+                llm_ref = self._start_activity(
+                    kind=AgentSessionActivityKind.LLM,
+                    name=self.config_spec.llm.model,
+                    summary='generate',
+                    details={},
+                )
+                try:
+                    self.hooks.fire('on_generate_start', messages, tool_definitions)
+                    result = provider.collect(messages, tool_definitions)
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._fail_activity(
+                        llm_ref.id,
+                        summary='generate failed',
+                        details={'message': 'Provider request failed', 'code': 'provider_runtime_failure'},
+                    )
+                    self._record_failure(exc)
+                    return
+                except BaseException as exc:
+                    self._fail_activity_preserving_fault(
+                        llm_ref.id,
+                        exc,
+                        summary='generate interrupted',
+                        details={
+                            'message': 'Provider collection interrupted',
+                            'code': 'provider_interrupted',
+                        },
+                    )
+                metadata = self._llm_metadata(provider, result)
+                self._account_llm_cost_once(llm_ref.id, metadata.cost_usd)
+                if metadata.collection_fault is not None and not isinstance(metadata.collection_fault, Exception):
+                    self._fail_activity_preserving_fault(
+                        llm_ref.id,
+                        metadata.collection_fault,
+                        summary='generate interrupted',
+                        details={
+                            'message': 'Provider metadata collection interrupted',
+                            'code': 'provider_metadata_interrupted',
+                        },
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
+
+                try:
+                    self.hooks.fire('on_generate_end', result)
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._fail_activity(
+                        llm_ref.id,
+                        summary='generate failed',
+                        details={'message': 'Provider request failed', 'code': 'provider_runtime_failure'},
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
+                    self._record_failure(exc)
+                    return
+                except BaseException as exc:
+                    self._fail_activity_preserving_fault(
+                        llm_ref.id,
+                        exc,
+                        summary='generate interrupted',
+                        details={
+                            'message': 'Provider collection interrupted',
+                            'code': 'provider_interrupted',
+                        },
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
+                if metadata.provider_error:
+                    self._fail_activity(
+                        llm_ref.id,
+                        summary='generate failed',
+                        details={
+                            'message': 'Provider request failed',
+                            'code': metadata.provider_error.code,
+                        },
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
+                    self._account_llm_cost_once(llm_ref.id, metadata.cost_usd)
+                    self._record_provider_error(metadata.provider_error)
                     return
 
-                cost = self._emit_output(provider, result)
+                try:
+                    if metadata.collection_fault is not None:
+                        raise metadata.collection_fault
+                    self._emit_output(result, llm_id=llm_ref.id)
+                    with self.recorder.push_parent(llm_ref.id):
+                        for call in result.tool_calls:
+                            self._handle_tool_call(call)
+                    self._complete_activity(
+                        llm_ref.id,
+                        summary='generate',
+                        details={},
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._fail_activity(
+                        llm_ref.id,
+                        summary='generate failed',
+                        details={
+                            'message': 'Provider response processing failed',
+                            'code': 'provider_processing_failure',
+                        },
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
+                    self._account_llm_cost_once(llm_ref.id, metadata.cost_usd)
+                    self._record_failure(exc)
+                    return
+                except BaseException as exc:
+                    self._fail_activity_preserving_fault(
+                        llm_ref.id,
+                        exc,
+                        summary='generate interrupted',
+                        details={
+                            'message': 'Provider response processing interrupted',
+                            'code': 'provider_processing_interrupted',
+                        },
+                        model=metadata.model,
+                        input_tokens=metadata.input_tokens,
+                        output_tokens=metadata.output_tokens,
+                        cost_usd=metadata.cost_usd,
+                        latency_ms=metadata.latency_ms,
+                    )
                 self._limit_checker.record_iteration()
-                self._limit_checker.record_cost(cost)
+                self._account_llm_cost_once(llm_ref.id, metadata.cost_usd)
 
                 if result.tool_calls:
-                    for call in result.tool_calls:
-                        self._handle_tool_call(call)
                     self._drain_mailbox()
                     continue
 
@@ -236,21 +401,26 @@ class SessionRunner:
             self.hooks.fire('on_run_end')
 
     def _record_provider_error(self, error: ProviderError) -> None:
-        """Persist a provider runtime failure as a session failure event."""
+        """Persist a provider runtime failure as a terminal session activity."""
         self._record_failure(session_failure_from_provider_runtime_error(error))
 
     def _record_failure(self, exc: Exception) -> None:
-        """Persist a session failure event and move the session back to waiting."""
+        """Persist a terminal session failure activity and move back to waiting."""
         if isinstance(exc, SessionFailure):
             message = exc.message
             payload: dict[str, Any] = {'message': message, 'code': exc.code}
             logger.info('Session %s failure: %s (%s)', self.backend.session_id, message, exc.code)
         else:
-            message = str(exc)
-            payload = {'message': message, 'code': 'unexpected_failure', 'traceback': traceback.format_exc()}
+            message = 'Unexpected session failure'
+            payload = {'message': message, 'code': 'unexpected_failure'}
             logger.exception('Session %s unexpected failure', self.backend.session_id)
-        event = self._append_event(AgentSessionEventKind.FAILURE, payload)
-        self.backend.publish_event(event)
+        self._create_terminal_activity(
+            kind=AgentSessionActivityKind.FAILURE,
+            status=AgentSessionActivityStatus.FAILED,
+            name='failure',
+            summary=message[:120],
+            details=payload,
+        )
         self._set_status(AgentSessionStatus.WAITING)
 
     def _drain_mailbox(self) -> None:
@@ -269,69 +439,120 @@ class SessionRunner:
 
         self.control.pending_inputs.clear()
 
-    def _emit_output(self, provider: LLMProvider, result: StreamResult) -> Decimal | None:
-        """Record provider output and usage details as a session event. Returns computed cost."""
-        usage = result.usage
-        cost = provider.compute_cost_usd(usage, latency_ms=result.latency_ms) if usage else None
-        event = self._append_event(
-            AgentSessionEventKind.OUTPUT,
-            {'content': result.content},
-            model=usage.model if usage else self.config_spec.llm.model,
-            input_tokens=usage.input_tokens if usage else None,
-            output_tokens=usage.output_tokens if usage else None,
-            cost_usd=cost,
-            latency_ms=result.latency_ms,
-        )
-        self.backend.publish_event(event)
-        return cost
+    def _emit_output(
+        self,
+        result: StreamResult,
+        *,
+        llm_id: uuid.UUID,
+    ) -> None:
+        """Record a usage-free output child for provider reconstruction."""
+        with self.recorder.push_parent(llm_id):
+            self._create_terminal_activity(
+                kind=AgentSessionActivityKind.OUTPUT,
+                status=AgentSessionActivityStatus.SUCCEEDED,
+                name='output',
+                summary=result.content[:120],
+                details={'content': result.content},
+                parent_id=llm_id,
+            )
 
     def _handle_tool_call(self, call: dict[str, Any]) -> None:
-        """Invoke one requested tool call and record its call/result events."""
-        wire_name = call['name']
-        instance_id, function_name = self._parse_tool_name(wire_name)
+        """Invoke one requested tool inside a single nested lifecycle activity."""
+        wire_name = str(call.get('name', ''))
         arguments = call.get('arguments', {})
         call_id = call.get('id') or str(uuid.uuid4())
         self.hooks.fire('on_tool_call_start', call)
 
+        try:
+            instance_id, function_name = self._parse_tool_name(wire_name)
+            parse_failure = False
+        except (TypeError, ValueError):
+            instance_id, function_name = '', wire_name
+            parse_failure = True
         bound = self.bound_tools.get(instance_id)
         tool_type = bound.tool_type if bound is not None else None
         is_auto = bound is not None and bound.is_auto
+        # Tool arguments are retained because the provider supplied them as
+        # model-visible conversation state required for exact reconstruction.
+        details = {
+            'call_id': call_id,
+            'instance_id': instance_id,
+            'type': tool_type,
+            'function': function_name,
+            'arguments': arguments,
+        }
+        tool_ref = self._start_activity(
+            kind=AgentSessionActivityKind.TOOL,
+            name=wire_name or 'unknown',
+            summary=wire_name or 'unknown tool',
+            details=details,
+        )
+        started = time.monotonic()
 
-        if not is_auto and not self._is_allowed(instance_id, function_name):
-            result_content = json.dumps({'failure': f'Permission denied for {instance_id}.{function_name}'})
-            tool_latency_ms = 0
+        failed = True
+        if parse_failure:
+            result_content = json.dumps({'failure': 'Invalid tool name'})
         elif bound is None:
             result_content = json.dumps({'failure': f'Unknown tool instance {instance_id!r}'})
-            tool_latency_ms = 0
+        elif not is_auto and not self._is_allowed(instance_id, function_name):
+            result_content = json.dumps({'failure': f'Permission denied for {instance_id}.{function_name}'})
         else:
-            started = time.monotonic()
             try:
-                raw = bound.invoke(function_name, arguments)
-                result_content = raw if isinstance(raw, str) else json.dumps(raw)
-            except Exception as exc:  # pylint: disable=broad-except
-                result_content = json.dumps({'failure': str(exc)})
-            tool_latency_ms = int((time.monotonic() - started) * 1000)
+                with self.recorder.push_parent(tool_ref.id):
+                    raw = bound.invoke(function_name, arguments)
+                    result_content = raw if isinstance(raw, str) else json.dumps(raw)
+                # Successful and curated bound-tool failure results are already
+                # model-visible contract output, so retain their exact serialization.
+                failed = self._tool_result_failed(result_content)
+            except Exception:  # pylint: disable=broad-except
+                result_content = self._unexpected_tool_failure_result()
+            except BaseException:
+                tool_latency_ms = int((time.monotonic() - started) * 1000)
+                interrupted_result = json.dumps(
+                    {
+                        'ok': False,
+                        'error': {
+                            'code': 'tool_interrupted',
+                            'message': 'Tool execution interrupted',
+                        },
+                    }
+                )
+                self._fail_activity(
+                    tool_ref.id,
+                    summary=f'{wire_name or "tool"} interrupted',
+                    details={**details, 'result': interrupted_result},
+                    latency_ms=tool_latency_ms,
+                )
+                raise
+        tool_latency_ms = int((time.monotonic() - started) * 1000)
 
-        self.hooks.fire('on_tool_call_end', call, result_content)
-
-        tc_event = self._append_event(
-            AgentSessionEventKind.TOOL_CALL,
-            {
-                'call_id': call_id,
-                'instance_id': instance_id,
-                'type': tool_type,
-                'function': function_name,
-                'arguments': arguments,
-            },
-        )
-        self.backend.publish_event(tc_event)
-
-        tr_event = self._append_event(
-            AgentSessionEventKind.TOOL_RESULT,
-            {'call_id': call_id, 'content': result_content},
-            latency_ms=tool_latency_ms if tool_latency_ms > 0 else None,
-        )
-        self.backend.publish_event(tr_event)
+        # This exact serialized result is provider conversation state; tools are
+        # responsible for returning only contract-safe model-visible values.
+        completed_details = {**details, 'result': result_content}
+        try:
+            self.hooks.fire('on_tool_call_end', call, result_content)
+        except BaseException as fault:
+            self._fail_activity_preserving_fault(
+                tool_ref.id,
+                fault,
+                summary=f'{wire_name or "tool"} observation interrupted',
+                details=completed_details,
+                latency_ms=tool_latency_ms,
+            )
+        if failed:
+            self._fail_activity(
+                tool_ref.id,
+                summary=f'{wire_name or "tool"} failed',
+                details=completed_details,
+                latency_ms=tool_latency_ms,
+            )
+        else:
+            self._complete_activity(
+                tool_ref.id,
+                summary=f'{wire_name} completed',
+                details=completed_details,
+                latency_ms=tool_latency_ms,
+            )
 
     def _is_allowed(
         self,
@@ -370,35 +591,208 @@ class SessionRunner:
         """Parse provider tool names into configured instance and function names."""
         return parse_qualified_tool_name(qualified_name)
 
-    def _append_event(
+    @staticmethod
+    def _tool_result_failed(content: str) -> bool:
+        """Recognize the runner's uniform structured tool failure envelope."""
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(parsed, dict) and ('failure' in parsed or parsed.get('ok') is False)
+
+    @staticmethod
+    def _unexpected_tool_failure_result() -> str:
+        """Return stable model-visible output for an unexpected tool failure."""
+        return json.dumps(
+            {
+                'ok': False,
+                'error': {
+                    'code': 'tool_execution_failed',
+                    'message': 'Tool execution failed',
+                },
+            }
+        )
+
+    def _llm_metadata(
         self,
-        kind: str,
-        payload: dict[str, Any],
+        provider: LLMProvider,
+        result: StreamResult,
+    ) -> LLMCallMetadata:
+        """Collect provider metadata without letting instrumentation strand an LLM."""
+        model = self.config_spec.llm.model
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+        cost: Decimal | None = None
+        latency_ms: int | None = None
+        provider_error: ProviderError | None = None
+        collection_fault: BaseException | None = None
+        try:
+            latency_ms = result.latency_ms
+            usage = result.usage
+            if usage is not None:
+                model = usage.model
+                input_tokens = usage.input_tokens
+                output_tokens = usage.output_tokens
+                try:
+                    cost = provider.compute_cost_usd(usage, latency_ms=latency_ms)
+                except BaseException as exc:
+                    collection_fault = exc
+            provider_error = result.error
+        except BaseException as exc:
+            collection_fault = exc
+        return LLMCallMetadata(
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            provider_error=provider_error,
+            collection_fault=collection_fault,
+        )
+
+    def _account_llm_cost_once(self, activity_id: uuid.UUID, cost_usd: Decimal | None) -> None:
+        """Account one known provider cost at most once per LLM activity."""
+        if cost_usd is None or activity_id in self._accounted_llm_costs:
+            return
+        self._accounted_llm_costs.add(activity_id)
+        try:
+            self._limit_checker.record_cost(cost_usd)
+        except Exception:  # pylint: disable=broad-except
+            logger.debug('Failed provider cost accounting', exc_info=True)
+
+    def _create_terminal_activity(
+        self,
         *,
+        kind: str,
+        status: str,
+        name: str,
+        summary: str,
+        details: dict[str, Any],
+        parent_id: uuid.UUID | None = None,
+    ) -> RecordedActivity:
+        """Create one terminal activity, then notify canonical create observers."""
+        activity = self.backend.create_activity(
+            kind=kind,
+            status=status,
+            name=name,
+            summary=summary,
+            details=details,
+            parent_id=parent_id,
+        )
+        self._terminal_activity_ids.add(activity.id)
+        self._on_activity_created(activity)
+        return activity
+
+    def _start_activity(
+        self,
+        *,
+        kind: str,
+        name: str,
+        summary: str,
+        details: dict[str, Any],
+    ) -> ActivityRef:
+        """Start a recorder lifecycle and notify after durable creation."""
+        return self.recorder.start(kind=kind, name=name, summary=summary, details=details)
+
+    def _complete_activity(self, activity_id: uuid.UUID, **kwargs: Any) -> ActivityRef:
+        """Complete a recorder lifecycle and notify after durable revision."""
+        return self._persist_completed_activity(activity_id, **kwargs)
+
+    def _persist_completed_activity(self, activity_id: uuid.UUID, **kwargs: Any) -> ActivityRef:
+        """Persist success and remember it before any update hook can interrupt."""
+        ref = self.recorder.complete(activity_id, **kwargs)
+        self._terminal_activity_ids.add(activity_id)
+        return ref
+
+    def _fail_activity(
+        self,
+        activity_id: uuid.UUID,
+        *,
+        summary: str,
+        details: dict[str, Any],
         model: str | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         cost_usd: Decimal | None = None,
         latency_ms: int | None = None,
-    ) -> RecordedEvent:
-        """Append an event through the backend and notify event hooks."""
-        event = self.backend.append_event(
-            kind,
-            payload,
+    ) -> ActivityRef:
+        """Fail a recorder lifecycle and notify after durable revision."""
+        return self._persist_failed_activity(
+            activity_id,
+            summary=summary,
+            details=details,
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd,
             latency_ms=latency_ms,
         )
-        self.hooks.fire('on_event', event)
-        return event
 
-    def _record_input(self, content: str) -> RecordedEvent:
-        """Record user input through the backend and notify event hooks."""
-        event = self.backend.record_input(content)
-        self.hooks.fire('on_event', event)
-        return event
+    def _persist_failed_activity(self, activity_id: uuid.UUID, **kwargs: Any) -> ActivityRef:
+        """Persist failure and remember it before any update hook can interrupt."""
+        ref = self.recorder.fail(activity_id, **kwargs)
+        self._terminal_activity_ids.add(activity_id)
+        return ref
+
+    def _fail_activity_preserving_fault(
+        self,
+        activity_id: uuid.UUID,
+        fault: BaseException,
+        **kwargs: Any,
+    ) -> NoReturn:
+        """Terminalize if needed, then re-raise the original base-level fault."""
+        if activity_id not in self._terminal_activity_ids:
+            try:
+                self._fail_activity(activity_id, **kwargs)
+            except BaseException:
+                if activity_id not in self._terminal_activity_ids:
+                    raise
+        raise fault.with_traceback(fault.__traceback__) from None
+
+    def _on_activity_created(self, activity: RecordedActivity) -> None:
+        """Send one canonical post-persistence create snapshot to observers."""
+        self.hooks.fire(
+            'on_activity_created',
+            activity,
+            on_base_exception=lambda fault: self._compensate_created_activity(activity, fault),
+        )
+
+    def _compensate_created_activity(
+        self,
+        activity: RecordedActivity,
+        fault: BaseException,
+    ) -> None:
+        """Fail the running source whose queued create callback was cancelled."""
+        del fault  # Exception text is intentionally excluded from persisted details.
+        if (
+            activity.status
+            in {
+                AgentSessionActivityStatus.SUCCEEDED,
+                AgentSessionActivityStatus.FAILED,
+                AgentSessionActivityStatus.CANCELLED,
+            }
+            or activity.id in self._terminal_activity_ids
+        ):
+            return
+        self._persist_failed_activity(
+            activity.id,
+            summary=f'{activity.name} observation interrupted',
+            details={
+                'message': 'Activity instrumentation interrupted',
+                'code': 'activity_instrumentation_interrupted',
+            },
+        )
+
+    def _on_activity_updated(self, activity: RecordedActivity) -> None:
+        """Send one canonical post-persistence revision snapshot to observers."""
+        self.hooks.fire('on_activity_updated', activity)
+
+    def _record_input(self, content: str) -> RecordedActivity:
+        """Record user input through the backend, then notify create observers."""
+        activity = self.backend.record_input(content)
+        self._terminal_activity_ids.add(activity.id)
+        self._on_activity_created(activity)
+        return activity
 
     def _set_status(self, status: str) -> None:
         """Set the backend status and notify status hooks."""

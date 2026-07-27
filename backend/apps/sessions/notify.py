@@ -11,16 +11,25 @@ from uuid import UUID
 
 from apps.bus.channels import publish_session_message
 
-SessionChannel = Literal['session_event', 'session_update']
+SessionChannel = Literal['session_activity', 'session_update']
 
 
 def session_message(channel: SessionChannel, payload: dict[str, Any]) -> dict[str, Any]:
+    """Wrap a typed payload for the shared session Redis channel."""
     return {'channel': channel, 'payload': payload}
 
 
-def publish_session_event(session_id: UUID | str, event_dict: dict[str, Any]) -> None:
-    publish_session_message(session_id, session_message('session_event', event_dict))
+def publish_session_activity(session_id: UUID | str, activity_dict: dict[str, Any]) -> None:
+    """Publish a full activity revision using the idempotent upsert protocol."""
+    publish_session_message(
+        session_id,
+        session_message(
+            'session_activity',
+            {'operation': 'upsert', 'activity': activity_dict},
+        ),
+    )
 
 
 def publish_session_update(session_id: UUID | str, patch: dict[str, Any]) -> None:
+    """Publish a partial session metadata patch."""
     publish_session_message(session_id, session_message('session_update', patch))

@@ -59,9 +59,10 @@ class _TextStream(Protocol):
     def write(self, text: str, /) -> int | None: ...
 
 
-def write_run_agent_events(backend: MemorySessionBackend, stream: _TextStream) -> None:
-    for event in backend.events():
-        stream.write(json.dumps(event.to_stream_dict(session_id=backend.session_id), default=str))
+def write_run_agent_activities(backend: MemorySessionBackend, stream: _TextStream) -> None:
+    """Write canonical activity snapshots as JSONL."""
+    for activity in backend.activities():
+        stream.write(json.dumps(activity.to_stream_dict(), default=str))
         stream.write('\n')
 
 
@@ -82,4 +83,4 @@ def run_agent_from_options(options: dict[str, Any], *, stream: _TextStream) -> N
         spec=spec,
         user_id=user_id,
     )
-    write_run_agent_events(backend, stream)
+    write_run_agent_activities(backend, stream)

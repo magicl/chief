@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from apps.agents.models import Trigger, TriggerKind
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
+from apps.sessions.services.commands import set_session_status
 from django.utils import timezone
 
 _AUTOMATED_TERMINATE_KINDS = frozenset({TriggerKind.SCHEDULE, TriggerKind.QUEUE})
@@ -25,6 +26,4 @@ def finalize_automated_trigger_session(session: AgentSession) -> None:
         return
     if trigger.kind not in _AUTOMATED_TERMINATE_KINDS:
         return
-    session.status = AgentSessionStatus.DONE
-    session.ended_at = timezone.now()
-    session.save(update_fields=['status', 'ended_at'])
+    set_session_status(session, AgentSessionStatus.DONE, ended_at=timezone.now())

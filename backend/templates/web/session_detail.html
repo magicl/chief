@@ -106,7 +106,7 @@
               x-text="formatEventStats(evt)"
             ></span>
           </div>
-          <template x-if="evt.kind === 'OUTPUT'">
+          <template x-if="evt.kind === 'output'">
             <div>
               <div
                 class="event-body rich-output"
@@ -120,7 +120,7 @@
               ></pre>
             </div>
           </template>
-          <template x-if="evt.kind !== 'OUTPUT'">
+          <template x-if="evt.kind !== 'output'">
             <pre class="event-body" x-text="formatPayload(evt)"></pre>
           </template>
         </div>
@@ -140,7 +140,7 @@ function sessionView(sessionId, initialName, configModel) {
     ...chatboxHelpers(),
     sessionName: initialName || '',
     events: [],
-    seenSeq: new Set(),
+    activityById: new Map(),
     source: null,
     follow: true,
     beautify: true,
@@ -179,17 +179,14 @@ function sessionView(sessionId, initialName, configModel) {
     updateDocumentTitle() {
       document.title = `${this.displaySessionName} — Chief`;
     },
+    // Open the session stream and adapt full activity upserts into a flat sequence.
     connectStream() {
       this.closeStream();
       this.source = new EventSource(`/sessions/${sessionId}/events/`);
-      this.source.addEventListener('session_event', (e) => {
-        const data = JSON.parse(e.data);
-        if (this.seenSeq.has(data.seq)) return;
-        this.seenSeq.add(data.seq);
-        this.events.push(data);
-        if (this.follow) {
-          this.$nextTick(() => this.scrollToBottom());
-        }
+      this.source.addEventListener('session_activity', (e) => {
+        const message = JSON.parse(e.data);
+        if (message.operation !== 'upsert' || !message.activity) return;
+        this.upsertActivity(message.activity);
       });
       this.source.addEventListener('session_update', (e) => {
         const patch = JSON.parse(e.data);
@@ -198,15 +195,27 @@ function sessionView(sessionId, initialName, configModel) {
         }
       });
     },
+    // Replace an activity only when the stream supplies a newer full revision.
+    upsertActivity(activity) {
+      const current = this.activityById.get(activity.id);
+      if (current && current.revision >= activity.revision) return;
+      this.activityById.set(activity.id, activity);
+      this.events = Array.from(this.activityById.values());
+      this.events.sort((left, right) => left.seq - right.seq);
+      if (this.follow) {
+        this.$nextTick(() => this.scrollToBottom());
+      }
+    },
     closeStream() {
       if (this.source) {
         this.source.close();
         this.source = null;
       }
     },
+    // Reset replay state before reconnecting so Postgres can rehydrate current state.
     reconnectStream() {
       this.events = [];
-      this.seenSeq = new Set();
+      this.activityById = new Map();
       this.connectStream();
     },
     get displayModel() {
@@ -217,6 +226,7 @@ function sessionView(sessionId, initialName, configModel) {
       }
       return this.configModel;
     },
+    // Sum only current activity revisions so upserts never double count cost.
     get totalCostUsd() {
       return this.events.reduce((sum, evt) => {
         if (evt.cost_usd == null || evt.cost_usd === '') {
@@ -235,11 +245,12 @@ function sessionView(sessionId, initialName, configModel) {
     formatTotalCost() {
       return `Total: ${this.formatUsd(this.totalCostUsd)}`;
     },
+    // Format canonical activity details for the existing flat event presentation.
     formatPayload(evt) {
-      const p = evt.payload || {};
-      if (evt.kind === 'OUTPUT' || evt.kind === 'INPUT') return p.content || '';
-      if (evt.kind === 'FAILURE') return p.message || JSON.stringify(p, null, 2);
-      return JSON.stringify(p, null, 2);
+      const details = evt.details || {};
+      if (evt.kind === 'output' || evt.kind === 'input') return details.content || '';
+      if (evt.kind === 'failure') return details.message || JSON.stringify(details, null, 2);
+      return JSON.stringify(details, null, 2);
     },
     // Toggle presentation without persisting state or changing raw event payloads.
     toggleBeautify() {
@@ -258,9 +269,9 @@ function sessionView(sessionId, initialName, configModel) {
       fallback.textContent = source;
       element.replaceChildren(fallback);
     },
-    // Render one exact OUTPUT event, repeating only when its displayed source changes.
+    // Render one exact output activity, repeating only when its displayed source changes.
     renderOutput(element, event) {
-      if (event.kind !== 'OUTPUT') return Promise.resolve(false);
+      if (event.kind !== 'output') return Promise.resolve(false);
       const source = this.formatPayload(event);
       const renderer = window.chiefRichContent?.renderRichContent;
       if (!renderer) {

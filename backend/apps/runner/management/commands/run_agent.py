@@ -14,7 +14,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = 'Run one agent turn locally and print session events to the console.'
+    help = 'Run one agent turn locally and print session activities to the console.'
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument('input', help='User message for the agent')

@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from apps.runner.backends.base import RecordedEvent
+from apps.runner.backends.base import RecordedActivity
 from apps.runner.usecases.scenarios import (
     UsecaseScenario,
     build_mock_client_factories,
@@ -19,7 +19,7 @@ from apps.runner.usecases.scenarios import (
     load_usecase_scenario,
 )
 from apps.runner.usecases.setup import build_memory_session_runner
-from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
+from apps.sessions.models import AgentSessionActivityKind, AgentSessionStatus
 
 # isort: split
 
@@ -103,28 +103,40 @@ class TestInboxFunctionalUsecases(OTestCase):
             scenario=scenario,
             gmail=gmail,
             clickup=clickup,
-            events=backend.events(),
+            activities=backend.activities(),
             status=backend.get_status(),
             log_text=log_text,
         )
 
     def _assert_session_completed(self, result: _ScenarioResult) -> None:
         """Assert the memory runner completed the planned turn without queue state coupling."""
-        kinds = [event.kind for event in result.events]
+        kinds = [activity.kind for activity in result.activities]
         expected_tool_calls = result.scenario.expect['tool_calls']
         actual_tool_calls = [
-            event.payload['instance_id'] + '__' + event.payload['function']
-            for event in result.events
-            if event.kind == AgentSessionEventKind.TOOL_CALL
+            activity.details['instance_id'] + '__' + activity.details['function']
+            for activity in result.activities
+            if activity.kind == AgentSessionActivityKind.TOOL
         ]
 
         self.assertEqual(result.status, AgentSessionStatus.WAITING)
-        self.assertIn(AgentSessionEventKind.INPUT, kinds)
-        self.assertIn(AgentSessionEventKind.OUTPUT, kinds)
-        self.assertIn(AgentSessionEventKind.TOOL_RESULT, kinds)
-        self.assertNotIn(AgentSessionEventKind.FAILURE, kinds)
+        self.assertIn(AgentSessionActivityKind.INPUT, kinds)
+        self.assertIn(AgentSessionActivityKind.OUTPUT, kinds)
+        self.assertIn(AgentSessionActivityKind.TOOL, kinds)
+        self.assertNotIn(AgentSessionActivityKind.FAILURE, kinds)
         self.assertEqual(actual_tool_calls, expected_tool_calls)
-        self.assertIn('"event": "session_event"', result.log_text)
+        for activity in result.activities:
+            if activity.kind == AgentSessionActivityKind.TOOL:
+                self.assertEqual(activity.status, 'succeeded')
+                self.assertIn('call_id', activity.details)
+                self.assertIn('arguments', activity.details)
+                self.assertIn('result', activity.details)
+                same_call = [
+                    candidate
+                    for candidate in result.activities
+                    if candidate.details.get('call_id') == activity.details['call_id']
+                ]
+                self.assertEqual(same_call, [activity])
+        self.assertIn('"event": "session_activity"', result.log_text)
         self.assertGreater(len(result.log_text.strip()), 0)
 
 
@@ -135,7 +147,7 @@ class _ScenarioResult:
     scenario: UsecaseScenario
     gmail: MockGmailClient
     clickup: MockClickUpClient
-    events: list[RecordedEvent]
+    activities: list[RecordedActivity]
     status: str
     log_text: str
 

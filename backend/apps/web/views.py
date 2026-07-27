@@ -11,6 +11,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from functools import wraps
+from time import monotonic
 from typing import Any, cast
 from uuid import UUID
 
@@ -43,7 +44,6 @@ from apps.runner.dispatch import (
 )
 from apps.runner.session_start import StartSessionError
 from apps.runner.start import start_manual_session
-from apps.sessions.events import events_for
 from apps.sessions.models import AgentSession
 from apps.sessions.services.budget import (
     agent_daily_spend,
@@ -51,6 +51,7 @@ from apps.sessions.services.budget import (
     user_daily_spend,
     user_monthly_spend,
 )
+from apps.sessions.services.queries import activities_for
 from apps.web.services.queries import (
     get_agent_detail_data,
     get_credential_for_write_check,
@@ -76,8 +77,13 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 from libs.providers.key.health_codes import HEALTH_CODE_LABELS
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 logger = logging.getLogger(__name__)
+SESSION_SSE_POLL_SECONDS = 1.0
+SESSION_SSE_HEARTBEAT_SECONDS = 15.0
+SESSION_REDIS_TRANSPORT_FAILURES = (RedisConnectionError, RedisTimeoutError, OSError)
 
 
 def _html_safe_json(value: Any) -> str:
@@ -299,7 +305,7 @@ def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @login_required(login_url='/admin/login/')
 @require_GET
 def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
-    """Session event log and chat continuation."""
+    """Session activity log and chat continuation."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
     context: dict[str, Any] = {
         'session': session,
@@ -310,56 +316,163 @@ def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
     return render(request, 'web/session_detail.html', context)
 
 
-def _sse_event(data: dict[str, Any], *, event: str = 'session_event') -> str:
+def _sse_event(data: dict[str, Any], *, event: str) -> str:
+    """Format one typed server-sent event frame."""
     return f'event: {event}\ndata: {json.dumps(data)}\n\n'
+
+
+def _parse_session_message(message: Any) -> tuple[str, dict[str, Any]] | None:
+    """Return a validated session channel and object payload from Redis data."""
+    if not isinstance(message, dict) or message.get('type') != 'message':
+        return None
+    encoded = message.get('data')
+    if not isinstance(encoded, str | bytes | bytearray):
+        return None
+    try:
+        raw = json.loads(encoded)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    channel = raw.get('channel')
+    payload = raw.get('payload')
+    if (
+        not isinstance(channel, str)
+        or channel not in {'session_activity', 'session_update'}
+        or not isinstance(payload, dict)
+    ):
+        return None
+    return channel, payload
+
+
+def _accept_activity_upsert(
+    payload: dict[str, Any],
+    *,
+    session_id: UUID,
+    highest_revisions: dict[str, int],
+) -> dict[str, Any] | None:
+    """Validate and record a strictly newer full activity upsert for this session."""
+    if payload.get('operation') != 'upsert':
+        return None
+    activity = payload.get('activity')
+    if not isinstance(activity, dict):
+        return None
+    activity_id = activity.get('id')
+    revision = activity.get('revision')
+    if (
+        not isinstance(activity_id, str)
+        or not activity_id
+        or not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or activity.get('session_id') != str(session_id)
+        or revision <= highest_revisions.get(activity_id, 0)
+    ):
+        return None
+    highest_revisions[activity_id] = revision
+    return {'operation': 'upsert', 'activity': activity}
 
 
 @require_GET
 @login_required(login_url='/admin/login/')
 async def session_events_sse(request: HttpRequest, session_id: UUID) -> StreamingHttpResponse:
-    """Replay persisted events then tail pub/sub (dedupe by seq)."""
+    """Replay authoritative activities then tail only newer activity revisions."""
     user_id = await sync_to_async(_require_authenticated_user_id)(request)
     await sync_to_async(get_owned_session)(user_id, session_id)
 
     async def stream() -> AsyncIterator[str]:
-        last_seq = 0
-        events = await sync_to_async(events_for)(session_id)
-        for event in events:
-            payload = event.to_stream_dict()
-            last_seq = max(last_seq, payload['seq'])
-            yield _sse_event(payload, event='session_event')
+        """Yield replay upserts and validated messages from this session's channel."""
+        highest_revisions: dict[str, int] = {}
+
+        async def replay() -> AsyncIterator[str]:
+            """Yield the DB snapshot and release all replay ORM objects afterward."""
+            activities = await sync_to_async(activities_for)(session_id)
+            try:
+                for activity in activities:
+                    activity_payload = activity.to_stream_dict()
+                    highest_revisions[activity_payload['id']] = activity_payload['revision']
+                    yield _sse_event(
+                        {'operation': 'upsert', 'activity': activity_payload},
+                        event='session_activity',
+                    )
+            finally:
+                # The live tail needs only primitive revision state, not replay ORM objects.
+                del activities
 
         try:
             client = async_client()
-            pubsub = client.pubsub()
-            channel = f'{key_prefix()}session:{session_id}:events'
-            await pubsub.subscribe(channel)
-            try:
-                while True:
-                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                    if message is None:
-                        await asyncio.sleep(0.1)
-                        continue
-                    if message['type'] != 'message':
-                        continue
-                    raw = json.loads(message['data'])
-                    channel_name = raw.get('channel')
-                    payload = raw.get('payload', {})
-                    if channel_name == 'session_event':
-                        if payload.get('seq', 0) <= last_seq:
-                            continue
-                        last_seq = payload['seq']
-                        yield _sse_event(payload, event='session_event')
-                    elif channel_name == 'session_update':
-                        yield _sse_event(payload, event='session_update')
-                    else:
-                        logger.warning('Unknown session message channel %r', channel_name)
-            finally:
-                await pubsub.unsubscribe(channel)
-                await pubsub.close()
-                await client.close()
         except RuntimeError:
-            pass
+            # A missing Redis client still permits authoritative replay.
+            async for frame in replay():
+                yield frame
+            return
+
+        try:
+            pubsub = client.pubsub()
+            try:
+                channel = f'{key_prefix()}session:{session_id}:events'
+                subscribed = False
+                try:
+                    try:
+                        await pubsub.subscribe(channel)
+                        subscribed = True
+                    except SESSION_REDIS_TRANSPORT_FAILURES:
+                        # Preserve DB replay when Redis cannot establish the live tail.
+                        async for frame in replay():
+                            yield frame
+                        return
+
+                    # Subscribe first so commits racing the authoritative snapshot remain buffered.
+                    last_heartbeat = monotonic()
+                    async for frame in replay():
+                        yield frame
+
+                    while True:
+                        try:
+                            message = await pubsub.get_message(
+                                ignore_subscribe_messages=True,
+                                timeout=SESSION_SSE_POLL_SECONDS,
+                            )
+                        except SESSION_REDIS_TRANSPORT_FAILURES:
+                            return
+                        if message is None:
+                            now = monotonic()
+                            if now - last_heartbeat >= SESSION_SSE_HEARTBEAT_SECONDS:
+                                # Comments keep intermediaries alive without creating browser events.
+                                yield ': heartbeat\n\n'
+                                last_heartbeat = now
+                            await asyncio.sleep(0.1)
+                            continue
+                        parsed = _parse_session_message(message)
+                        if parsed is None:
+                            continue
+                        channel_name, payload = parsed
+                        if channel_name == 'session_activity':
+                            accepted = _accept_activity_upsert(
+                                payload,
+                                session_id=session_id,
+                                highest_revisions=highest_revisions,
+                            )
+                            if accepted is None:
+                                continue
+                            yield _sse_event(accepted, event='session_activity')
+                        elif channel_name == 'session_update':
+                            yield _sse_event(payload, event='session_update')
+                finally:
+                    if subscribed:
+                        try:
+                            await pubsub.unsubscribe(channel)
+                        except SESSION_REDIS_TRANSPORT_FAILURES:
+                            logger.debug('Session activity unsubscribe unavailable')
+            finally:
+                try:
+                    await pubsub.close()
+                except SESSION_REDIS_TRANSPORT_FAILURES:
+                    logger.debug('Session activity pubsub close unavailable')
+        finally:
+            try:
+                await client.close()
+            except SESSION_REDIS_TRANSPORT_FAILURES:
+                logger.debug('Session activity client close unavailable')
 
     response = StreamingHttpResponse(stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'

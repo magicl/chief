@@ -27,13 +27,14 @@ os.environ.setdefault('ENV_PATH', '.')
 if not django_apps.ready:
     django.setup()
 
+from apps.runner.backends.base import RecordedActivity
 from apps.runner.usecases.scenarios import (
     UsecaseScenario,
     build_mock_client_factories,
     load_usecase_scenario,
 )
 from apps.runner.usecases.setup import build_memory_session_runner
-from apps.sessions.models import AgentSessionEventKind
+from apps.sessions.models import AgentSessionActivityKind, AgentSessionActivityStatus
 
 # isort: split
 
@@ -74,12 +75,13 @@ class InboxSampleRunner:
         with patch('apps.runner.loop.make_provider', return_value=provider):
             runner.run()
 
-        _raise_for_missing_credentials(backend.events())
+        activities = backend.activities()
+        _raise_for_missing_credentials(activities)
         return score_inbox_state(
             expect=scenario.expect,
             gmail=gmail,
             clickup=clickup,
-            tool_calls=_tool_calls_from_events(backend.events()),
+            tool_calls=_tool_calls_from_activities(activities),
         )
 
 
@@ -181,23 +183,28 @@ def _permit_inbox_eval_actions(spec: AgentConfigSpec) -> AgentConfigSpec:
     return spec.model_copy(update={'tools': tools})
 
 
-def _tool_calls_from_events(events: list[Any]) -> list[str]:
-    """Extract qualified tool-call names from runner events in execution order."""
+def _tool_calls_from_activities(activities: list[RecordedActivity]) -> list[str]:
+    """Extract terminal qualified tool names from canonical activities in sequence order."""
+    terminal_statuses = {
+        AgentSessionActivityStatus.SUCCEEDED,
+        AgentSessionActivityStatus.FAILED,
+        AgentSessionActivityStatus.CANCELLED,
+    }
     return [
-        f"{event.payload['instance_id']}__{event.payload['function']}"
-        for event in events
-        if event.kind == AgentSessionEventKind.TOOL_CALL
+        f"{activity.details['instance_id']}__{activity.details['function']}"
+        for activity in activities
+        if activity.kind == AgentSessionActivityKind.TOOL and activity.status in terminal_statuses
     ]
 
 
-def _raise_for_missing_credentials(events: list[Any]) -> None:
-    """Translate runner-recorded provider credential failures into eval aborts."""
-    for event in events:
-        if event.kind != AgentSessionEventKind.FAILURE:
+def _raise_for_missing_credentials(activities: list[RecordedActivity]) -> None:
+    """Translate canonical provider credential failure activities into eval aborts."""
+    for activity in activities:
+        if activity.kind != AgentSessionActivityKind.FAILURE or activity.status != AgentSessionActivityStatus.FAILED:
             continue
-        code = str(event.payload.get('code', ''))
+        code = str(activity.details.get('code', ''))
         if code.startswith('missing_') and code.endswith('_credentials'):
-            message = str(event.payload.get('message') or 'missing provider credentials')
+            message = str(activity.details.get('message') or 'missing provider credentials')
             raise EvalAbortError(
                 f'{message}; set the provider API key or rerun with --allow-skip',
             )

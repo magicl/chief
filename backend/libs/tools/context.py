@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from libs.agent_spec.spec import AgentConfigSpec
+from libs.tools.activity import ActivityRecorder, NoOpActivityRecorder
 
 
 def _noop_secret_supplier_factory(
@@ -41,6 +42,7 @@ class ToolContext:
         default=_noop_secret_supplier_factory,
     )
     client_factories: dict[str, Callable[..., Any]] = field(default_factory=dict)
+    recorder: ActivityRecorder = field(default_factory=NoOpActivityRecorder)
 
 
 def token_supplier_for(
