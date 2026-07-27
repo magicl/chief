@@ -6,6 +6,14 @@ from django.apps import AppConfig
 
 
 class SessionsConfig(AppConfig):
+    """Configure session models and deletion reconciliation signals."""
+
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.sessions'
     label = 'agent_sessions'
+
+    def ready(self) -> None:
+        """Register model observers after Django loads the app registry."""
+        from apps.sessions import signals
+
+        del signals

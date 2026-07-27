@@ -13,7 +13,7 @@ from apps.runner.backends.memory import MemorySessionBackend
 from apps.runner.errors import SessionFailure
 from apps.runner.limits import SessionLimitChecker
 from apps.runner.loop import SessionRunner
-from apps.sessions.models import AgentSessionEventKind, AgentSessionStatus
+from apps.sessions.models import AgentSessionActivityKind, AgentSessionStatus
 from libs.agent_spec import AgentConfigSpec, LLMSpec, SessionLimitsSpec, ToolInstance
 from libs.providers.llm.base import StreamResult, Usage
 from libs.providers.llm.fake_provider import FakeProvider
@@ -66,9 +66,11 @@ class TestSessionIterationLimit(OTestCase):
         with patch('apps.runner.loop.make_provider', return_value=FakeProvider.for_responses(responses)):
             with self.settings(DEFAULT_MAX_SESSION_ITERATIONS=None, DEFAULT_MAX_SESSION_COST_USD=None):
                 SessionRunner(backend).run()
-        failure_events = [e for e in backend.events() if e.kind == AgentSessionEventKind.FAILURE]
-        self.assertEqual(len(failure_events), 1)
-        self.assertEqual(failure_events[0].payload['code'], 'session_iteration_limit')
+        failure_activities = [
+            activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.FAILURE
+        ]
+        self.assertEqual(len(failure_activities), 1)
+        self.assertEqual(failure_activities[0].details['code'], 'session_iteration_limit')
         self.assertEqual(backend.get_status(), AgentSessionStatus.WAITING)
 
     def test_no_limit_allows_all_iterations(self) -> None:
@@ -87,8 +89,10 @@ class TestSessionIterationLimit(OTestCase):
         with patch('apps.runner.loop.make_provider', return_value=FakeProvider.for_responses(responses)):
             with self.settings(DEFAULT_MAX_SESSION_ITERATIONS=None, DEFAULT_MAX_SESSION_COST_USD=None):
                 SessionRunner(backend).run()
-        failure_events = [e for e in backend.events() if e.kind == AgentSessionEventKind.FAILURE]
-        self.assertEqual(len(failure_events), 0)
+        failure_activities = [
+            activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.FAILURE
+        ]
+        self.assertEqual(len(failure_activities), 0)
 
 
 class TestSessionSpendLimit(OTestCase):
@@ -112,9 +116,11 @@ class TestSessionSpendLimit(OTestCase):
             self.settings(DEFAULT_MAX_SESSION_ITERATIONS=None, DEFAULT_MAX_SESSION_COST_USD=None),
         ):
             SessionRunner(backend).run()
-        failure_events = [e for e in backend.events() if e.kind == AgentSessionEventKind.FAILURE]
-        self.assertEqual(len(failure_events), 1)
-        codes = [e.payload['code'] for e in failure_events]
+        failure_activities = [
+            activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.FAILURE
+        ]
+        self.assertEqual(len(failure_activities), 1)
+        codes = [activity.details['code'] for activity in failure_activities]
         self.assertIn('session_spend_limit', codes)
 
 

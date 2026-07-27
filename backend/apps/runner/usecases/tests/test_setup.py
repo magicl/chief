@@ -10,9 +10,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from apps.runner.backends.base import RecordedEvent
+from apps.runner.backends.base import RecordedActivity
 from apps.runner.usecases.setup import build_memory_session_runner
-from apps.sessions.models import AgentSessionEventKind
+from apps.sessions.models import AgentSessionActivityKind
 
 # isort: split
 
@@ -30,18 +30,18 @@ class TestUsecaseSetup(OTestCase):
         """Helper wires MemorySessionBackend, mock Gmail, FakeProvider, and event log hooks."""
         events, log_text, _stdout = self._run_memory_runner_smoke()
 
-        self.assertIn(AgentSessionEventKind.TOOL_RESULT, [event.kind for event in events])
-        self.assertIn('"event": "session_event"', log_text)
+        self.assertIn(AgentSessionActivityKind.TOOL, [activity.kind for activity in events])
+        self.assertIn('"event": "session_activity"', log_text)
 
     def test_memory_runner_keeps_stdout_quiet(self) -> None:
         """Default observability sinks use logging so runner progress does not print to stdout."""
         _events, _log_text, stdout = self._run_memory_runner_smoke()
 
         self.assertNotIn('[generate]', stdout)
-        self.assertNotIn('[event]', stdout)
+        self.assertNotIn('[activity]', stdout)
         self.assertNotIn('[tool]', stdout)
 
-    def _run_memory_runner_smoke(self) -> tuple[list[RecordedEvent], str, str]:
+    def _run_memory_runner_smoke(self) -> tuple[list[RecordedActivity], str, str]:
         """Run the gmail list smoke scenario; return events, JSONL text, and captured stdout."""
         spec = AgentConfigSpec(
             llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
@@ -80,4 +80,4 @@ class TestUsecaseSetup(OTestCase):
 
             log_path = log_writer.path_for(partition)
             log_text = log_path.read_text(encoding='utf-8') if log_path.exists() else ''
-            return list(backend.events()), log_text, captured.getvalue()
+            return backend.activities(), log_text, captured.getvalue()

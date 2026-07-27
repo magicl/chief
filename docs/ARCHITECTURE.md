@@ -112,7 +112,8 @@ Standard Django models. Business logic lives in services, not on model methods
 
 Session-scoped Redis pub/sub carries an envelope:
 
-- `session_event` — `AgentSessionEvent` payload (dedupe by `seq` in SSE)
+- `session_activity` — full `AgentSessionActivity` upsert payload (dedupe by activity
+  `id` and strictly newer `revision` in SSE)
 - `session_update` — partial session patch, e.g. `{"name": "..."}`
 
 Commands call `publish_session_update` after DB writes. The session detail page

@@ -77,13 +77,24 @@ class UserMonthlySpendLimitExceeded(SessionFailure):
 
 def session_failure_from_provider_error(exc: ProviderConfigurationError) -> SessionFailure:
     """Map provider setup errors raised before the first LLM call."""
-    if exc.code == 'credential_storage_misconfigured':
-        return CredentialStorageMisconfigured()
-    return SessionFailure(exc.message, code=exc.code)
+    curated: dict[str, SessionFailure] = {
+        'missing_openai_credentials': MissingOpenAICredentials(),
+        'missing_anthropic_credentials': MissingAnthropicCredentials(),
+        'unsupported_llm_provider': SessionFailure('Unsupported LLM provider', code='unsupported_llm_provider'),
+        'credential_storage_misconfigured': CredentialStorageMisconfigured(),
+    }
+    return curated.get(
+        exc.code,
+        SessionFailure('Provider configuration failed', code=exc.code),
+    )
 
 
 def session_failure_from_provider_runtime_error(error: ProviderError) -> SessionFailure:
     """Map a provider runtime error to the session failure shown in the dashboard."""
+    if error.code == 'missing_openai_credentials':
+        return MissingOpenAICredentials()
+    if error.code == 'missing_anthropic_credentials':
+        return MissingAnthropicCredentials()
     if error.code == 'credential_storage_misconfigured':
         return CredentialStorageMisconfigured()
-    return SessionFailure(error.message, code=error.code)
+    return SessionFailure('Provider request failed', code=error.code)

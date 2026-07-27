@@ -9,6 +9,7 @@ from __future__ import annotations
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.runner.session_start import StartSessionError, start_trigger_session
 from apps.sessions.models import AgentSession, AgentSessionStatus
+from apps.sessions.services.commands import set_session_status
 from django.utils import timezone
 
 
@@ -37,8 +38,6 @@ def start_manual_session(agent: Agent, *, initial_message: str = '') -> AgentSes
 
         push_chat_and_dispatch(session.id, initial)
     else:
-        session.status = AgentSessionStatus.WAITING
-        session.started_at = timezone.now()
-        session.save(update_fields=['status', 'started_at'])
+        set_session_status(session, AgentSessionStatus.WAITING, started_at=timezone.now())
 
     return session

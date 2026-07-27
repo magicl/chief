@@ -5,8 +5,8 @@
 from typing import Any
 from unittest.mock import patch
 
-from apps.sessions.events import append_event
-from apps.sessions.models import AgentSessionEventKind
+from apps.sessions.models import AgentSessionActivityKind, AgentSessionActivityStatus
+from apps.sessions.services.commands import create_activity
 from apps.sessions.tasks import generate_session_name
 from apps.sessions.tests.base import make_test_session
 
@@ -18,7 +18,14 @@ class TestGenerateSessionNameTask(OTransactionTestCase):
     @patch('apps.sessions.tasks.generate_chat_name', return_value='Password reset help')
     def test_task_sets_session_name(self, _mock_generate: Any, _mock_publish: Any) -> None:
         session = make_test_session('name-task-agent')
-        append_event(session, AgentSessionEventKind.INPUT, {'content': 'How do I reset my password?'})
+        create_activity(
+            session,
+            kind=AgentSessionActivityKind.INPUT,
+            status=AgentSessionActivityStatus.SUCCEEDED,
+            name='input',
+            summary='How do I reset my password?',
+            details={'content': 'How do I reset my password?'},
+        )
         generate_session_name.run(str(session.id))
         session.refresh_from_db()
         self.assertEqual(session.name, 'Password reset help')

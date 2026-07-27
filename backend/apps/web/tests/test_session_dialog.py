@@ -2,6 +2,8 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
+import re
+
 from apps.sessions.tests.base import make_test_session
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -10,7 +12,7 @@ from django.urls import reverse
 from olib.py.django.test.cases import OTransactionTestCase
 
 
-class TestSessionEventView(OTransactionTestCase):
+class TestSessionActivityView(OTransactionTestCase):
     def setUp(self) -> None:
         self.client = Client()
         self.session = make_test_session('event-view-agent')
@@ -66,11 +68,11 @@ class TestSessionEventView(OTransactionTestCase):
         self.assertContains(response, ':class="{ \'active\': beautify }"')
 
     def test_session_page_routes_only_outputs_to_rich_renderer(self) -> None:
-        """Only exact OUTPUT event content enters the rich renderer."""
+        """Only lowercase output activity content enters the rich renderer."""
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        self.assertContains(response, '<template x-if="evt.kind === \'OUTPUT\'">')
+        self.assertContains(response, '<template x-if="evt.kind === \'output\'">')
         self.assertContains(response, 'class="event-body rich-output"')
         self.assertContains(response, 'x-show="beautify && richContentReady"')
         self.assertContains(
@@ -78,7 +80,7 @@ class TestSessionEventView(OTransactionTestCase):
             'x-effect="beautify && richContentReady && renderOutput($el, evt)"',
         )
         self.assertContains(response, 'x-show="!beautify || !richContentReady"')
-        self.assertContains(response, '<template x-if="evt.kind !== \'OUTPUT\'">')
+        self.assertContains(response, '<template x-if="evt.kind !== \'output\'">')
         self.assertContains(response, 'x-text="formatPayload(evt)"', count=2)
 
     def test_session_page_keeps_beautify_state_local(self) -> None:
@@ -170,13 +172,30 @@ class TestSessionEventView(OTransactionTestCase):
         self.assertIn('"openai / gpt-5.4-mini"', x_data)
         self.assertNotIn('x-data="sessionView', body)
 
-    def test_session_sse_listener_uses_session_event(self) -> None:
+    def test_session_sse_listener_upserts_revisioned_activities(self) -> None:
+        """The flat page adapter replaces newer activity revisions by id."""
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        self.assertContains(response, "addEventListener('session_event'")
+        body = response.content.decode()
+        listener_channels = set(re.findall(r"this\.source\.addEventListener\('([^']+)'", body))
+
+        self.assertEqual(listener_channels, {'session_activity', 'session_update'})
+        self.assertContains(response, "addEventListener('session_activity'")
         self.assertContains(response, "addEventListener('session_update'")
-        self.assertNotContains(response, "addEventListener('session-event'")
+        self.assertContains(response, 'activityById: new Map()')
+        self.assertContains(response, 'current.revision >= activity.revision')
+        self.assertContains(response, 'this.events.sort((left, right) => left.seq - right.seq)')
+
+    def test_session_page_formats_activity_details_and_deduplicates_cost(self) -> None:
+        """Activity rendering reads details while totals use only current map values."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, 'const details = evt.details || {}')
+        self.assertContains(response, "evt.kind === 'output' || evt.kind === 'input'")
+        self.assertContains(response, "evt.kind === 'failure'")
+        self.assertContains(response, 'return this.events.reduce((sum, evt) => {')
 
     def test_session_closes_sse_on_navigation(self) -> None:
         response = self.client.get(
