@@ -5,6 +5,7 @@
 
 {% block head_assets %}
 <link rel="stylesheet" href="{{ static('web/rich-content/rich_content.bundle.css') }}">
+<script src="{{ static('web/activity_tree.js') }}"></script>
 {% endblock %}
 
 {% block frame_x_data %}x-data='sessionView("{{ session.id }}", {{ (session.name or "")|tojson }}, {{ llm_label|tojson }})' x-init="init()"{% endblock %}
@@ -17,6 +18,13 @@
     </a>
     <span class="muted" style="font-weight: normal;">· <span x-text="displaySessionName">{{ session_display_name(session) }}</span></span>
   </h2>
+  {% if parent_session %}
+  <p class="session-breadcrumb">
+    <a href="{{ url('session_detail', kwargs={'session_id': parent_session.id}) }}">Parent session</a>
+    {# parent_session.name is stored name or null; hex fallback is presentation-only #}
+    <span class="muted">· {{ parent_session.name or parent_session.id.hex[:8] }}</span>
+  </p>
+  {% endif %}
   <p class="session-header-meta muted">
     <span x-text="displayModel"></span>
     · <span x-text="formatTotalCost()"></span>
@@ -66,7 +74,7 @@
 {% endblock %}
 
 {% block frame_main %}
-<section class="event-panel">
+<section class="event-panel" aria-label="Session activity">
   <div class="event-toolbar">
     <h2>Events</h2>
     <div class="event-toolbar-actions">
@@ -93,41 +101,167 @@
     x-ref="eventPanel"
     @scroll="onScroll()"
   >
-    <div class="event-stream">
-      <template x-for="evt in events" :key="evt.seq">
-        <div class="event" :class="'kind-' + evt.kind.toLowerCase()">
-          <div class="event-meta">
-            <span class="seq" x-text="'#' + evt.seq"></span>
-            <span class="pill" x-text="evt.kind"></span>
-            <span class="muted" x-show="evt.model" x-text="evt.model"></span>
-            <span
-              class="event-stats muted"
-              x-show="formatEventStats(evt)"
-              x-text="formatEventStats(evt)"
-            ></span>
-          </div>
-          <template x-if="evt.kind === 'output'">
-            <div>
-              <div
-                class="event-body rich-output"
-                x-show="beautify && richContentReady"
-                x-effect="beautify && richContentReady && renderOutput($el, evt)"
-              ></div>
-              <pre
-                class="event-body"
-                x-show="!beautify || !richContentReady"
-                x-text="formatPayload(evt)"
-              ></pre>
-            </div>
-          </template>
-          <template x-if="evt.kind !== 'output'">
-            <pre class="event-body" x-text="formatPayload(evt)"></pre>
-          </template>
+    <div id="activity-tree" class="activity-tree">
+      <template x-if="rootLoadState === 'failed'">
+        <div class="activity-load-failed">
+          <p>Could not load activity.</p>
+          <button type="button" class="frame-btn" @click="retryRoot()">Retry</button>
         </div>
       </template>
+      <ol class="activity-list" x-show="rootLoadState === 'ready'">
+        <template x-for="id in rootStore.rootIds" :key="id">
+          <li x-data="activityNode(() => rootStore, id, 0)"></li>
+        </template>
+      </ol>
     </div>
   </div>
 </section>
+
+<!--
+  activity-node-template: formatUsd, formatPayload, renderOutput, beautify,
+  and richContentReady resolve from the enclosing sessionView Alpine scope
+  (not from activityNode itself).
+-->
+<template id="activity-node-template">
+  <article
+    class="activity-row"
+    :class="{
+      'activity-row-message': activity.kind === 'input' || activity.kind === 'output',
+      'activity-depth-cap': depthView.showMarker,
+    }"
+    :style="`--activity-depth: ${depthView.indentLevel}`"
+  >
+    <span class="activity-depth-marker muted" x-show="depthView.showMarker" x-text="depthView.marker"></span>
+
+    <template x-if="activity.kind === 'input'">
+      <div class="activity-message kind-input">
+        <div class="event-meta">
+          <span class="pill">INPUT</span>
+          <span class="muted" x-text="activity.summary"></span>
+        </div>
+        <pre class="event-body" x-text="formatPayload(activity)"></pre>
+      </div>
+    </template>
+
+    <template x-if="activity.kind === 'output'">
+      <div class="activity-message kind-output">
+        <div class="event-meta">
+          <span class="pill">OUTPUT</span>
+          <span class="muted" x-text="activity.summary"></span>
+        </div>
+        <div
+          class="event-body rich-output"
+          x-show="beautify && richContentReady"
+          x-effect="beautify && richContentReady && renderOutput($el, activity)"
+        ></div>
+        <pre
+          class="event-body"
+          x-show="!beautify || !richContentReady"
+          x-text="formatPayload(activity)"
+        ></pre>
+      </div>
+    </template>
+
+    <template x-if="activity.kind !== 'input' && activity.kind !== 'output'">
+      <div class="activity-execution">
+        <div class="activity-row-main">
+          <button
+            type="button"
+            class="activity-toggle"
+            :aria-expanded="store.isExpanded(activityId).toString()"
+            :aria-controls="detailId"
+            :aria-label="toggleLabel()"
+            @click="toggle()"
+          >
+            <span x-text="formatCollapsedLine(activity)"></span>
+          </button>
+          <template x-if="activity.kind === 'subagent' && activity.child_session_id">
+            <a :href="`/sessions/${activity.child_session_id}/`">Open session</a>
+          </template>
+        </div>
+
+        <!-- detailId wraps curated details, subagent child tree, and same-session children -->
+        <div :id="detailId" x-show="store.isExpanded(activityId)">
+          <div class="activity-detail">
+            <template x-if="activity.summary">
+              <p x-text="activity.summary"></p>
+            </template>
+
+            <template x-if="activity.kind === 'tool'">
+              <dl class="activity-curated-details">
+                <template x-if="activity.details && (activity.details.args || activity.details.arguments)">
+                  <div>
+                    <dt>Arguments</dt>
+                    <dd><pre x-text="formatRawDetails(activity.details.args || activity.details.arguments)"></pre></dd>
+                  </div>
+                </template>
+                <template x-if="activity.details && activity.details.result !== undefined">
+                  <div>
+                    <dt>Result</dt>
+                    <dd><pre x-text="formatRawDetails(activity.details.result)"></pre></dd>
+                  </div>
+                </template>
+              </dl>
+            </template>
+
+            <template x-if="activity.kind === 'llm'">
+              <dl class="activity-curated-details">
+                <div><dt>Model</dt><dd x-text="activity.model || 'Unknown'"></dd></div>
+                <template x-if="activity.details && activity.details.usage">
+                  <div><dt>Usage</dt><dd><pre x-text="formatRawDetails(activity.details.usage)"></pre></dd></div>
+                </template>
+                <template x-if="activity.cost_usd != null">
+                  <div><dt>Cost</dt><dd x-text="formatUsd(Number(activity.cost_usd))"></dd></div>
+                </template>
+                <template x-if="activity.latency_ms != null">
+                  <div><dt>Latency</dt><dd x-text="`${activity.latency_ms}ms`"></dd></div>
+                </template>
+              </dl>
+            </template>
+
+            <template x-if="activity.kind === 'failure' && activity.details && activity.details.message">
+              <p class="activity-failure" x-text="activity.details.message"></p>
+            </template>
+
+            <details class="activity-raw">
+              <summary>Raw JSON</summary>
+              <pre class="activity-raw-pre" x-text="formatRawDetails(activity.details)"></pre>
+            </details>
+
+            <template x-if="activity.kind === 'subagent' && activity.child_session_id">
+              <div class="activity-child-session">
+                <p x-show="childState === 'loading'" class="muted">Loading child session…</p>
+                <p x-show="childState === 'unavailable'">Child session unavailable</p>
+                <p x-show="childState === 'cycle'">Child session cycle detected</p>
+                <template x-if="childState === 'loaded' && childStore">
+                  <ol class="activity-list activity-child-list">
+                    <template x-for="childRootId in childStore.rootIds" :key="childRootId">
+                      <li x-data="activityNode(() => childStore, childRootId, depth + 1)"></li>
+                    </template>
+                  </ol>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <ol class="activity-list activity-child-list">
+            <template x-for="childId in (store.childIds[activityId] || [])" :key="childId">
+              <li x-data="activityNode(() => store, childId, depth + 1)"></li>
+            </template>
+          </ol>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="activity.kind === 'input' || activity.kind === 'output'">
+      <ol class="activity-list activity-child-list">
+        <template x-for="childId in (store.childIds[activityId] || [])" :key="childId">
+          <li x-data="activityNode(() => store, childId, depth + 1)"></li>
+        </template>
+      </ol>
+    </template>
+  </article>
+</template>
 {% endblock %}
 
 {% block frame_extra_scripts %}
@@ -139,18 +273,17 @@ function sessionView(sessionId, initialName, configModel) {
   return {
     ...chatboxHelpers(),
     sessionName: initialName || '',
-    events: [],
-    activityById: new Map(),
-    source: null,
+    rootStore: window.chiefActivityTree.createActivityStore(sessionId),
+    rootLoadState: 'loading',
     follow: true,
     beautify: true,
     richContentReady: Boolean(window.chiefRichContent?.renderRichContent),
     renderedOutputs: new WeakMap(),
     configModel,
     get displaySessionName() {
-      return this.sessionName || sessionIdPrefix;
+      return this.rootStore.session?.name || this.sessionName || sessionIdPrefix;
     },
-    init() {
+    async init() {
       this.updateDocumentTitle();
       this.$watch('displaySessionName', () => this.updateDocumentTitle());
       // Mirror delayed ESM readiness into Alpine state and close the pre-subscription race.
@@ -159,11 +292,11 @@ function sessionView(sessionId, initialName, configModel) {
           this.richContentReady = ready;
         },
       );
-      this.connectStream();
-      this._onPageHide = () => this.closeStream();
-      this._onPageShow = (event) => {
+      this._onPageHide = () => this.rootStore.dispose();
+      this._onPageShow = async (event) => {
         if (event.persisted) {
-          this.reconnectStream();
+          this.rootLoadState = 'loading';
+          this.rootLoadState = await this.rootStore.refreshExpandedSnapshots() ? 'ready' : 'failed';
         }
       };
       window.addEventListener('pagehide', this._onPageHide);
@@ -172,69 +305,48 @@ function sessionView(sessionId, initialName, configModel) {
         window.removeEventListener('pagehide', this._onPageHide);
         window.removeEventListener('pageshow', this._onPageShow);
         this._stopWatchingRichContent?.();
-        this.closeStream();
+        this._activityResizeObserver?.disconnect();
+        this.rootStore.dispose();
+      });
+      this.rootLoadState = await this.rootStore.loadRoot() ? 'ready' : 'failed';
+      this.observeActivityHeight();
+      this.$nextTick(() => {
+        if (this.follow) this.scrollToBottom();
       });
       this.focusChatInput();
+    },
+    // Retry the root's authoritative snapshot without disturbing page preferences.
+    async retryRoot() {
+      this.rootLoadState = 'loading';
+      this.rootLoadState = await this.rootStore.loadRoot() ? 'ready' : 'failed';
+    },
+    // Follow rendered tree height changes from root and expanded-child updates.
+    observeActivityHeight() {
+      const tree = document.getElementById('activity-tree');
+      if (!tree || typeof ResizeObserver === 'undefined') return;
+      this._activityResizeObserver = new ResizeObserver(() => {
+        if (this.follow) {
+          this.$nextTick(() => this.scrollToBottom());
+        }
+      });
+      this._activityResizeObserver.observe(tree);
     },
     updateDocumentTitle() {
       document.title = `${this.displaySessionName} — Chief`;
     },
-    // Open the session stream and adapt full activity upserts into a flat sequence.
-    connectStream() {
-      this.closeStream();
-      this.source = new EventSource(`/sessions/${sessionId}/events/`);
-      this.source.addEventListener('session_activity', (e) => {
-        const message = JSON.parse(e.data);
-        if (message.operation !== 'upsert' || !message.activity) return;
-        this.upsertActivity(message.activity);
-      });
-      this.source.addEventListener('session_update', (e) => {
-        const patch = JSON.parse(e.data);
-        if (patch.name != null) {
-          this.sessionName = patch.name;
-        }
-      });
-    },
-    // Replace an activity only when the stream supplies a newer full revision.
-    upsertActivity(activity) {
-      const current = this.activityById.get(activity.id);
-      if (current && current.revision >= activity.revision) return;
-      this.activityById.set(activity.id, activity);
-      this.events = Array.from(this.activityById.values());
-      this.events.sort((left, right) => left.seq - right.seq);
-      if (this.follow) {
-        this.$nextTick(() => this.scrollToBottom());
-      }
-    },
-    closeStream() {
-      if (this.source) {
-        this.source.close();
-        this.source = null;
-      }
-    },
-    // Reset replay state before reconnecting so Postgres can rehydrate current state.
-    reconnectStream() {
-      this.events = [];
-      this.activityById = new Map();
-      this.connectStream();
-    },
     get displayModel() {
-      for (let i = this.events.length - 1; i >= 0; i -= 1) {
-        if (this.events[i].model) {
-          return this.events[i].model;
+      const activities = Object.values(this.rootStore.activities);
+      activities.sort((left, right) => right.seq - left.seq);
+      for (const activity of activities) {
+        if (activity.model) {
+          return activity.model;
         }
       }
       return this.configModel;
     },
-    // Sum only current activity revisions so upserts never double count cost.
+    // Sum only this session's current activity map; child stores remain excluded.
     get totalCostUsd() {
-      return this.events.reduce((sum, evt) => {
-        if (evt.cost_usd == null || evt.cost_usd === '') {
-          return sum;
-        }
-        const cost = Number(evt.cost_usd);
-        return Number.isNaN(cost) ? sum : sum + cost;
-      }, 0);
+      return window.chiefActivityTree.sumCostUsd(this.rootStore);
     },
     formatUsd(amount) {
       if (amount <= 0) {
@@ -245,12 +357,9 @@ function sessionView(sessionId, initialName, configModel) {
     formatTotalCost() {
       return `Total: ${this.formatUsd(this.totalCostUsd)}`;
     },
-    // Format canonical activity details for the existing flat event presentation.
-    formatPayload(evt) {
-      const details = evt.details || {};
-      if (evt.kind === 'output' || evt.kind === 'input') return details.content || '';
-      if (evt.kind === 'failure') return details.message || JSON.stringify(details, null, 2);
-      return JSON.stringify(details, null, 2);
+    // Return the prominent plain-text message body for input/output activities.
+    formatPayload(activity) {
+      return activity.details?.content || '';
     },
     // Toggle presentation without persisting state or changing raw event payloads.
     toggleBeautify() {
@@ -271,7 +380,7 @@ function sessionView(sessionId, initialName, configModel) {
     },
     // Render one exact output activity, repeating only when its displayed source changes.
     renderOutput(element, event) {
-      if (event.kind !== 'output') return Promise.resolve(false);
+      if (!window.chiefActivityTree.isBeautifiable(event)) return Promise.resolve(false);
       const source = this.formatPayload(event);
       const renderer = window.chiefRichContent?.renderRichContent;
       if (!renderer) {
@@ -286,21 +395,6 @@ function sessionView(sessionId, initialName, configModel) {
         renderer,
         this.showOutputSource,
       );
-    },
-    formatEventStats(evt) {
-      const parts = [];
-      if (evt.latency_ms != null && evt.latency_ms > 0) {
-        parts.push(evt.latency_ms >= 1000
-          ? `${(evt.latency_ms / 1000).toFixed(1)}s`
-          : `${evt.latency_ms}ms`);
-      }
-      if (evt.cost_usd != null && evt.cost_usd !== '') {
-        const cost = Number(evt.cost_usd);
-        if (!Number.isNaN(cost)) {
-          parts.push(this.formatUsd(cost));
-        }
-      }
-      return parts.join(' · ');
     },
     onScroll() {
       const el = this.$refs.eventPanel;

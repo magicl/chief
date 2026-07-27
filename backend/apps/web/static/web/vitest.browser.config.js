@@ -63,6 +63,8 @@ const richContentAssets = {
       let filePath;
       if (requestPath === '/rich-content-source/rich_content_lifecycle.js') {
         filePath = join(packageDirectory, 'rich_content_lifecycle.js');
+      } else if (requestPath === '/activity-tree-source/activity_tree.js') {
+        filePath = join(packageDirectory, 'activity_tree.js');
       } else if (requestPath.startsWith('/rich-content-bundle/')) {
         const relativePath = requestPath.slice('/rich-content-bundle/'.length);
         const candidate = resolve(bundleDirectory, relativePath);
@@ -84,7 +86,7 @@ const richContentAssets = {
 export default defineConfig({
   plugins: [richContentAssets],
   test: {
-    include: ['rich_content.browser.test.js'],
+    include: ['rich_content.browser.test.js', 'activity_tree.browser.test.js'],
     browser: {
       enabled: true,
       headless: true,

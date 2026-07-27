@@ -13,12 +13,41 @@ from uuid import UUID
 from apps.agents.models import Agent
 from apps.agents.services.config_sync import config_source_label
 from apps.sessions.models import AgentSession
+from apps.sessions.services.queries import activities_for
 from django.db.models import QuerySet
 from django.http import Http404
 from libs.agent_spec import list_examples
 from libs.agent_spec.example_catalog import ExampleSpecInfo
 
 RECENT_SESSIONS_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class DirectParentInfo:
+    """Direct owned parent session reference for web composition.
+
+    ``name`` is the stored session name, or null when unset. Callers must not
+    invent a hex display fallback here — templates/UI may apply one.
+    """
+
+    id: UUID
+    name: str | None
+
+
+def get_owned_direct_parent(session: AgentSession, *, user_id: int) -> DirectParentInfo | None:
+    """Return the direct parent when it exists and is owned by ``user_id``.
+
+    Uses a single lookup on ``parent_session_id``. Missing or foreign-owned
+    parents yield None (same presentation as a root session). Does not walk
+    the full ancestor breadcrumb chain.
+    """
+    parent_id = session.parent_session_id
+    if parent_id is None:
+        return None
+    parent = AgentSession.objects.filter(pk=parent_id, agent__user_id=user_id).only('id', 'name').first()
+    if parent is None:
+        return None
+    return DirectParentInfo(id=parent.id, name=parent.name)
 
 
 @dataclass(frozen=True)
@@ -111,3 +140,30 @@ def get_credential_for_write_check(user_id: int, name: str) -> Any | None:
     from apps.keys.models import UserCredential
 
     return UserCredential.objects.filter(user_id=user_id, name=name).first()
+
+
+def get_activity_snapshot(user_id: int, session_id: UUID) -> dict[str, Any]:
+    """Return owned session metadata plus that session's activities as stream dicts.
+
+    Activities come only from the requested session (never a child session's rows).
+    ``session.parent`` is the direct parent ``{id, name}`` when one exists, else null.
+    Parent ``name`` is the stored name or null (no hex display fallback).
+    """
+    session = get_owned_session(user_id, session_id)
+    direct_parent = get_owned_direct_parent(session, user_id=user_id)
+    parent_payload: dict[str, Any] | None = None
+    if direct_parent is not None:
+        parent_payload = {
+            'id': str(direct_parent.id),
+            'name': direct_parent.name,
+        }
+    return {
+        'session': {
+            'id': str(session.id),
+            'name': session.name,
+            'status': session.status,
+            'parent_session_id': str(session.parent_session_id) if session.parent_session_id else None,
+            'parent': parent_payload,
+        },
+        'activities': [activity.to_stream_dict() for activity in activities_for(session)],
+    }

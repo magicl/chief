@@ -53,10 +53,12 @@ from apps.sessions.services.budget import (
 )
 from apps.sessions.services.queries import activities_for
 from apps.web.services.queries import (
+    get_activity_snapshot,
     get_agent_detail_data,
     get_credential_for_write_check,
     get_dashboard_data,
     get_owned_agent,
+    get_owned_direct_parent,
     get_owned_session,
     get_session_llm_label,
 )
@@ -70,6 +72,7 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseBadRequest,
+    JsonResponse,
     StreamingHttpResponse,
 )
 from django.shortcuts import redirect, render
@@ -306,14 +309,31 @@ def start_agent_session(request: HttpRequest, agent_id: UUID) -> HttpResponse:
 @require_GET
 def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Session activity log and chat continuation."""
-    session = get_owned_session(_require_authenticated_user_id(request), session_id)
+    user_id = _require_authenticated_user_id(request)
+    session = get_owned_session(user_id, session_id)
+    direct_parent = get_owned_direct_parent(session, user_id=user_id)
+    parent_session = None
+    if direct_parent is not None:
+        parent_session = {
+            'id': direct_parent.id,
+            'name': direct_parent.name,
+        }
     context: dict[str, Any] = {
         'session': session,
         'agent': session.agent,
         'llm_label': get_session_llm_label(session),
+        'parent_session': parent_session,
     }
     context.update(_chatbox_context(agent=session.agent, session=session))
     return render(request, 'web/session_detail.html', context)
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def session_activity_snapshot(request: HttpRequest, session_id: UUID) -> JsonResponse:
+    """Return the authorized JSON snapshot of one session's current activities."""
+    payload = get_activity_snapshot(_require_authenticated_user_id(request), session_id)
+    return JsonResponse(payload)
 
 
 def _sse_event(data: dict[str, Any], *, event: str) -> str:
