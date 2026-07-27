@@ -2,9 +2,8 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-import re
-
 from apps.sessions.tests.base import make_test_session
+from apps.web.tests.test_activity_snapshot import make_parent_with_subagent
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
@@ -37,13 +36,39 @@ class TestSessionActivityView(OTransactionTestCase):
         self.assertContains(response, 'Back to agent')
         self.assertContains(response, 'New session')
 
-    def test_session_page_includes_follow_and_stats_logic(self) -> None:
+    def test_session_page_includes_follow_and_tree_logic(self) -> None:
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
         self.assertContains(response, 'toggleFollow')
         self.assertContains(response, 'scrollToBottom')
-        self.assertContains(response, 'formatEventStats')
+        self.assertContains(response, 'rootStore')
+        self.assertNotContains(response, 'formatEventStats')
+
+    def test_session_page_loads_activity_tree_module(self) -> None:
+        """The page loads the recursive store and exposes semantic tree markup."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        body = response.content.decode()
+        self.assertContains(response, 'web/activity_tree.js')
+        self.assertContains(response, 'id="activity-tree"')
+        self.assertContains(response, 'aria-expanded')
+        self.assertLess(body.index('web/activity_tree.js'), body.index('function sessionView'))
+
+    def test_session_page_includes_compact_activity_tree_styles(self) -> None:
+        """Shared frame styles define compact tree layout, focus, and raw JSON bounds."""
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': self.session.id}),
+        )
+        self.assertContains(response, 'class="activity-tree"')
+        self.assertContains(response, 'class="activity-row-main"')
+        self.assertContains(response, 'class="activity-toggle"')
+        self.assertContains(response, 'class="activity-raw-pre"')
+        self.assertContains(response, '.activity-tree {')
+        self.assertContains(response, '.activity-toggle:focus-visible {')
+        self.assertContains(response, '.activity-raw-pre {')
+        self.assertContains(response, '@media (max-width: 640px)')
 
     def test_session_page_loads_rich_output_assets(self) -> None:
         """The session page loads the rich renderer bundle and styles."""
@@ -72,16 +97,16 @@ class TestSessionActivityView(OTransactionTestCase):
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        self.assertContains(response, '<template x-if="evt.kind === \'output\'">')
+        self.assertContains(response, '<template x-if="activity.kind === \'output\'">')
         self.assertContains(response, 'class="event-body rich-output"')
         self.assertContains(response, 'x-show="beautify && richContentReady"')
         self.assertContains(
             response,
-            'x-effect="beautify && richContentReady && renderOutput($el, evt)"',
+            'x-effect="beautify && richContentReady && renderOutput($el, activity)"',
         )
         self.assertContains(response, 'x-show="!beautify || !richContentReady"')
-        self.assertContains(response, '<template x-if="evt.kind !== \'output\'">')
-        self.assertContains(response, 'x-text="formatPayload(evt)"', count=2)
+        self.assertContains(response, '<template x-if="activity.kind === \'input\'">')
+        self.assertContains(response, 'x-text="formatPayload(activity)"', count=2)
 
     def test_session_page_keeps_beautify_state_local(self) -> None:
         """Beautify state stays page-local and cancels hidden rich output."""
@@ -113,6 +138,25 @@ class TestSessionActivityView(OTransactionTestCase):
         self.assertNotContains(response, 'event-log-toggle')
         self.assertNotContains(response, 'Conversation')
         self.assertNotContains(response, 'dialog-messages')
+
+    def test_child_session_page_shows_parent_breadcrumb(self) -> None:
+        """A child session links back to its direct parent."""
+        parent, child, _ = make_parent_with_subagent('ui-crumb')
+        user = get_user_model().objects.get(username='user-ui-crumb')
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse('session_detail', kwargs={'session_id': child.id}),
+        )
+
+        self.assertContains(response, 'Parent session')
+        self.assertContains(
+            response,
+            reverse('session_detail', kwargs={'session_id': parent.id}),
+        )
+        # Stored name when set; otherwise template falls back to id hex prefix.
+        expected_label = parent.name or parent.id.hex[:8]
+        self.assertContains(response, expected_label)
 
     def test_session_requires_login(self) -> None:
         client = Client()
@@ -172,35 +216,31 @@ class TestSessionActivityView(OTransactionTestCase):
         self.assertIn('"openai / gpt-5.4-mini"', x_data)
         self.assertNotIn('x-data="sessionView', body)
 
-    def test_session_sse_listener_upserts_revisioned_activities(self) -> None:
-        """The flat page adapter replaces newer activity revisions by id."""
+    def test_session_page_delegates_revisioned_activity_streams_to_store(self) -> None:
+        """The page controller uses the canonical store without a flat adapter."""
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        body = response.content.decode()
-        listener_channels = set(re.findall(r"this\.source\.addEventListener\('([^']+)'", body))
+        self.assertContains(response, 'createActivityStore(sessionId)')
+        self.assertContains(response, 'await this.rootStore.loadRoot()')
+        self.assertNotContains(response, 'events: []')
+        self.assertNotContains(response, 'activityById')
+        self.assertNotContains(response, 'upsertActivity')
 
-        self.assertEqual(listener_channels, {'session_activity', 'session_update'})
-        self.assertContains(response, "addEventListener('session_activity'")
-        self.assertContains(response, "addEventListener('session_update'")
-        self.assertContains(response, 'activityById: new Map()')
-        self.assertContains(response, 'current.revision >= activity.revision')
-        self.assertContains(response, 'this.events.sort((left, right) => left.seq - right.seq)')
-
-    def test_session_page_formats_activity_details_and_deduplicates_cost(self) -> None:
-        """Activity rendering reads details while totals use only current map values."""
+    def test_session_page_formats_tree_details_and_root_cost(self) -> None:
+        """Tree rows show curated/raw details while totals use only the root store."""
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        self.assertContains(response, 'const details = evt.details || {}')
-        self.assertContains(response, "evt.kind === 'output' || evt.kind === 'input'")
-        self.assertContains(response, "evt.kind === 'failure'")
-        self.assertContains(response, 'return this.events.reduce((sum, evt) => {')
+        self.assertContains(response, 'Raw JSON')
+        self.assertContains(response, 'formatRawDetails(activity.details)')
+        self.assertContains(response, 'Object.values(this.rootStore.activities)')
+        self.assertNotContains(response, 'Object.values(this.rootStore.childStores)')
 
     def test_session_closes_sse_on_navigation(self) -> None:
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        self.assertContains(response, 'closeStream')
+        self.assertContains(response, 'rootStore.dispose()')
         self.assertContains(response, 'pagehide')
-        self.assertContains(response, 'reconnectStream')
+        self.assertContains(response, 'refreshExpandedSnapshots')

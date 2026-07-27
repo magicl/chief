@@ -9,6 +9,6 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'jsdom',
-    include: ['rich_content.test.js'],
+    include: ['rich_content.test.js', 'activity_tree.test.js'],
   },
 });

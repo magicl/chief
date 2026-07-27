@@ -17,7 +17,9 @@ from apps.sessions.models import (
     AgentSessionActivityKind,
     AgentSessionActivityStatus,
 )
+from apps.sessions.services.commands import create_activity
 from apps.sessions.tests.base import make_test_session
+from apps.web.tests.test_activity_snapshot import make_parent_with_subagent
 from apps.web.views import session_events_sse
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
@@ -501,21 +503,29 @@ class TestSessionActivitiesSse(OTransactionTestCase):
 
         self.assertLess(source.index('del activities'), source.index('while True'))
 
-    def test_parent_and_child_replays_remain_session_scoped(self) -> None:
-        """A parent replay excludes its child session's authoritative activities."""
-        parent = make_test_session('sse-parent')
-        child = AgentSession.objects.create(
-            agent=parent.agent,
-            agent_config=parent.agent_config,
-            status=parent.status,
-            trigger_type=parent.trigger_type,
-            parent_session=parent,
+    def test_replays_tool_activity_upsert_for_owned_session(self) -> None:
+        """Owned-session replay includes tool upserts with the upsert client contract."""
+        session = make_test_session('sse-act')
+        create_activity(
+            session,
+            kind=AgentSessionActivityKind.TOOL,
+            status=AgentSessionActivityStatus.SUCCEEDED,
+            name='demo.op',
+            summary='Tool finished',
+            details={},
         )
-        parent_activity = self._activity(parent, seq=1, revision=1, content='parent-only')
-        child_activity = self._activity(child, seq=1, revision=1, content='child-only')
+
+        _, _, body = self._collect(session)
+
+        self.assertIn('"operation": "upsert"', body)
+        self.assertIn('"kind": "tool"', body)
+
+    def test_parent_and_child_replays_remain_session_scoped(self) -> None:
+        """Parent replay keeps the subagent link and never child-session activity ids."""
+        parent, _child, child_activity_id = make_parent_with_subagent('sse-sep')
 
         _, _, body = self._collect(parent)
 
-        self.assertIn(str(parent_activity.id), body)
-        self.assertNotIn(str(child_activity.id), body)
-        self.assertNotIn('child-only', body)
+        self.assertNotIn(str(child_activity_id), body)
+        self.assertIn('"kind": "subagent"', body)
+        self.assertIn('"operation": "upsert"', body)

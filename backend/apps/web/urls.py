@@ -27,6 +27,11 @@ urlpatterns = [
     path('agents/<uuid:agent_id>/start/', views.start_agent_session, name='start_agent_session'),
     path('debug/sse-spike/', views.sse_spike, name='sse_spike'),
     path('sessions/<uuid:session_id>/', views.session_detail, name='session_detail'),
+    path(
+        'sessions/<uuid:session_id>/activities/',
+        views.session_activity_snapshot,
+        name='session_activity_snapshot',
+    ),
     path('sessions/<uuid:session_id>/events/', views.session_events_sse, name='session_events_sse'),
     path('sessions/<uuid:session_id>/chat/', views.session_chat, name='session_chat'),
     path('sessions/<uuid:session_id>/pause/', views.session_pause, name='session_pause'),
