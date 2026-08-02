@@ -398,17 +398,26 @@ function initTriggerHelper(catalog) {
     document.getElementById('helper-trigger-prompt')
   );
   const cronRow = document.getElementById('helper-trigger-cron-row');
+  const buttonTextRow = document.getElementById('helper-trigger-button-text-row');
+  const buttonTextInput = /** @type {HTMLInputElement | null} */ (
+    document.getElementById('helper-trigger-button-text')
+  );
   const defaults = catalog.trigger_prompt_defaults || {};
 
   /** Show prompt/cron fields appropriate for the selected trigger kind. */
   const sync = () => {
     const kind = kindSelect?.value || 'manual';
     const isManual = kind === 'manual';
+    const isButton = kind === 'button';
     if (promptRow) promptRow.hidden = isManual;
     if (cronRow) cronRow.hidden = kind !== 'schedule';
+    if (buttonTextRow) buttonTextRow.hidden = !isButton;
     if (promptInput) {
       promptInput.required = !isManual;
       promptInput.placeholder = defaults[kind] || '';
+    }
+    if (buttonTextInput) {
+      buttonTextInput.required = isButton;
     }
   };
 

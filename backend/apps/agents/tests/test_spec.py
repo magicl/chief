@@ -328,6 +328,139 @@ class TestTriggerSpec(OTestCase):
         )
         self.assertEqual(spec.triggers[0].max_sessions, 1)
 
+    def test_button_trigger_requires_button_text(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'prompt': 'Triage now.',
+                        },
+                    ],
+                }
+            )
+
+    def test_button_trigger_requires_prompt(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'button_text': 'Triage',
+                        },
+                    ],
+                }
+            )
+
+    def test_button_trigger_rejects_cron(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'button_text': 'Triage',
+                            'prompt': 'Triage now.',
+                            'cron': '0 * * * *',
+                        },
+                    ],
+                }
+            )
+
+    def test_button_trigger_rejects_empty_cron(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'button_text': 'Triage',
+                            'prompt': 'Triage now.',
+                            'cron': '',
+                        },
+                    ],
+                }
+            )
+
+    def test_button_trigger_rejects_queue(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'button_text': 'Triage',
+                            'prompt': 'Triage now.',
+                            'queue': 'inbox',
+                        },
+                    ],
+                    'queues': [{'id': 'inbox', 'sources': []}],
+                }
+            )
+
+    def test_button_trigger_rejects_empty_queue(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'button_text': 'Triage',
+                            'prompt': 'Triage now.',
+                            'queue': '',
+                        },
+                    ],
+                }
+            )
+
+    def test_button_trigger_rejects_overlong_button_text(self) -> None:
+        with self.assertRaises(ValidationError):
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {
+                            'name': 'triage',
+                            'kind': 'button',
+                            'button_text': 'x' * 41,
+                            'prompt': 'Triage now.',
+                        },
+                    ],
+                }
+            )
+
+    def test_button_max_sessions_defaults_to_none(self) -> None:
+        spec = AgentConfigSpec.model_validate(
+            {
+                **MINIMAL_SPEC_DICT,
+                'triggers': [
+                    {
+                        'name': 'triage',
+                        'kind': 'button',
+                        'button_text': 'Triage',
+                        'prompt': 'Triage now.',
+                    },
+                ],
+            }
+        )
+        button = next(t for t in spec.triggers if t.kind == 'button')
+        self.assertEqual(button.button_text, 'Triage')
+        self.assertIsNone(button.max_sessions)
+
 
 class TestSessionLimitsSpec(OTestCase):
     def test_session_limits_spec_defaults_to_uncapped(self) -> None:

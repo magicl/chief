@@ -33,7 +33,7 @@ _DUMMY_CTX = ToolContext(
     user_id=0,
 )
 
-TRIGGER_KINDS = ['schedule', 'manual', 'agent', 'queue']
+TRIGGER_KINDS = ['schedule', 'manual', 'agent', 'queue', 'button']
 
 
 def _spec_summary_from_spec(spec: Any) -> dict[str, Any]:
@@ -76,6 +76,7 @@ SCHEMA_KEYS = [
     'triggers[].kind',
     'triggers[].cron',
     'triggers[].queue',
+    'triggers[].button_text',
     'triggers[].prompt',
     'triggers[].max_sessions',
     'tools',
@@ -161,6 +162,7 @@ def build_config_catalog(user_id: int) -> dict[str, Any]:
             'schedule': DEFAULT_SCHEDULE_TRIGGER_PROMPT,
             'queue': DEFAULT_QUEUE_TRIGGER_PROMPT,
             'agent': DEFAULT_AGENT_TRIGGER_PROMPT,
+            'button': 'add prompt here',
         },
         'schema_keys': SCHEMA_KEYS,
         'credentials': by_type,

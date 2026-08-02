@@ -49,6 +49,8 @@ def _trigger_entry(mutation: dict[str, Any]) -> CommentedMap:
     entry['kind'] = kind
     if mutation.get('cron'):
         entry['cron'] = mutation['cron']
+    if mutation.get('button_text'):
+        entry['button_text'] = mutation['button_text']
     if mutation.get('queue'):
         entry['queue'] = mutation['queue']
     if prompt:

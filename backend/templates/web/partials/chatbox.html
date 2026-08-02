@@ -1,4 +1,14 @@
 <div class="frame-chatbox">
+  {% if button_triggers %}
+  <div class="chatbox-buttons">
+    {% for t in button_triggers %}
+    <form method="post" action="{{ url('agent_run_button_trigger', kwargs={'agent_id': agent.id, 'trigger_id': t.id}) }}">
+      <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <button type="submit" class="frame-btn">{{ t.spec['button_text'] }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if chat_mode == 'start' %}
   <form
     method="post"

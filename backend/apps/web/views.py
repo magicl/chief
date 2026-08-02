@@ -43,7 +43,7 @@ from apps.runner.dispatch import (
     push_control_and_maybe_dispatch,
 )
 from apps.runner.session_start import StartSessionError
-from apps.runner.start import start_manual_session
+from apps.runner.start import start_button_session, start_manual_session
 from apps.sessions.models import AgentSession
 from apps.sessions.services.budget import (
     agent_daily_spend,
@@ -53,6 +53,7 @@ from apps.sessions.services.budget import (
 )
 from apps.sessions.services.queries import activities_for
 from apps.web.services.queries import (
+    get_active_button_trigger,
     get_activity_snapshot,
     get_agent_detail_data,
     get_credential_for_write_check,
@@ -61,6 +62,7 @@ from apps.web.services.queries import (
     get_owned_direct_parent,
     get_owned_session,
     get_session_llm_label,
+    list_active_button_triggers,
 )
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -194,18 +196,21 @@ def _require_authenticated_user_id(request: HttpRequest) -> int:
 
 def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str, Any]:
     """Build template context for the chat input box."""
+    button_triggers = list_active_button_triggers(agent)
     if session is None:
         return {
             'agent': agent,
             'session': None,
             'chat_mode': 'start',
             'chat_post_url': reverse('agent_start_chat', kwargs={'agent_id': agent.id}),
+            'button_triggers': button_triggers,
         }
     return {
         'agent': agent,
         'session': session,
         'chat_mode': 'continue',
         'chat_post_url': reverse('session_chat', kwargs={'session_id': session.id}),
+        'button_triggers': button_triggers,
     }
 
 
@@ -290,6 +295,20 @@ def delete_agent(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     except AgentNotFoundError as exc:
         raise Http404('Agent not found') from exc
     return redirect('dashboard')
+
+
+@login_required(login_url='/admin/login/')
+@csrf_protect
+@require_POST
+def agent_run_button_trigger(request: HttpRequest, agent_id: UUID, trigger_id: UUID) -> HttpResponse:
+    """Start a new session from a button trigger and redirect to session detail."""
+    agent = get_owned_agent(_require_authenticated_user_id(request), agent_id)
+    trigger = get_active_button_trigger(agent, trigger_id)
+    try:
+        session = start_button_session(agent, trigger)
+    except StartSessionError as exc:
+        return HttpResponseBadRequest(str(exc))
+    return redirect('session_detail', session_id=session.id)
 
 
 @login_required(login_url='/admin/login/')

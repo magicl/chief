@@ -159,6 +159,10 @@ triggers:
     queue: inbox
     prompt: Process the next item.
     max_sessions: 2
+  - name: triage
+    kind: button
+    button_text: Triage inbox
+    prompt: Triage the inbox now.
 ```
 
 ### Trigger kinds
@@ -169,17 +173,19 @@ triggers:
 | `schedule` | Cron-based periodic execution | `cron`, `prompt` |
 | `queue` | Fires when items appear on a named queue | `queue`, `prompt` |
 | `agent` | Reserved schema kind; no runtime dispatcher is currently implemented | `prompt` |
+| `button` | User-initiated quick action with a labeled button in the chat UI | `button_text`, `prompt` |
 
 ### Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Unique trigger name within the agent |
-| `kind` | enum | One of `manual`, `schedule`, `queue`, `agent` |
+| `kind` | enum | One of `manual`, `schedule`, `queue`, `agent`, `button` |
 | `cron` | string | Cron expression (required for `schedule`) |
 | `queue` | string | Queue id from `queues[]` (required for `queue` kind) |
+| `button_text` | string | Short button label, max 40 characters (required for `button`) |
 | `prompt` | string | Injected user-message at session start (required unless `manual`) |
-| `max_sessions` | int | Max concurrent sessions; defaults to `1` for schedule/queue, `null` for manual |
+| `max_sessions` | int | Max concurrent sessions; defaults to `1` for schedule/queue, `null` for manual and button |
 | `max_iterations` | int | Optional per-session iteration cap; must be at least `1` |
 | `max_cost_usd` | decimal | Optional positive per-session cost cap in USD |
 
