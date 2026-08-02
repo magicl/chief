@@ -32,8 +32,12 @@ ALLOWED_MODELS = (
 )
 
 
-def resolve_local_root(*, local_root: Path | None = None, environ: dict[str, str] | None = None) -> Path:
-    """Resolve the personal overlay root from an explicit path, CHIEF_LOCAL_DIR, or repo `.local`."""
+def resolve_eval_local_root(*, local_root: Path | None = None, environ: dict[str, str] | None = None) -> Path:
+    """Resolve the personal overlay root from an explicit path, CHIEF_LOCAL_DIR, or repo `.local`.
+
+    Unlike local_sync's resolve_local_root (which returns None when unset), eval discovery
+    always needs a concrete path and falls back to the repo `.local` directory.
+    """
     if local_root is not None:
         return Path(local_root)
     env = environ if environ is not None else os.environ
@@ -45,7 +49,7 @@ def resolve_local_root(*, local_root: Path | None = None, environ: dict[str, str
 
 def local_inbox_scenario_dir(*, local_root: Path | None = None, environ: dict[str, str] | None = None) -> Path:
     """Return the inbox scenario directory under the personal overlay root."""
-    return resolve_local_root(local_root=local_root, environ=environ) / 'evals' / 'inbox' / 'scenarios'
+    return resolve_eval_local_root(local_root=local_root, environ=environ) / 'evals' / 'inbox' / 'scenarios'
 
 
 @dataclass(frozen=True)

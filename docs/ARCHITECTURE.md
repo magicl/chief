@@ -195,6 +195,8 @@ Docker Compose fixes this layout at the repository's `.local/` directory: it rea
 `.local/keys/*.yaml` and `.local/agents/*.yaml`, mounting `.local/` at
 `/mnt/local` in the backend, worker, and beat containers. `CHIEF_LOCAL_DIR`
 remains the generic application setting for non-Compose environments.
+The same overlay root may also hold optional private inbox eval scenarios at
+`evals/inbox/scenarios/` (discovered by `orunr eval`, not by local sync).
 
 Celery Beat enqueues one finite reconciliation task every five seconds; stale Beat
 deliveries expire after five seconds. A token-owned Redis lease prevents overlapping
