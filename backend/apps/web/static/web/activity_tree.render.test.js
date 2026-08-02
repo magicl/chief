@@ -121,20 +121,20 @@ const settle = async () => {
 };
 
 /**
- * Flush repeatedly until `predicate` holds, then return.
- * One flush is not a reliable barrier for a store mutation that reaches the DOM
- * through an Alpine effect: this suite failed intermittently (~2 runs in 10)
- * when the vitest projects ran side by side. Returns once satisfied or after
- * the attempt budget, leaving the caller's assertion to report the failure.
+ * Flush repeatedly until `predicate` holds, or until the deadline passes.
+ *
+ * One flush is a fixed scheduling budget that a loaded machine outruns: Alpine
+ * applies `x-show` from a queued effect, so the DOM can trail a store change by
+ * several macrotasks, and this suite failed intermittently (~2 runs in 10) when
+ * the vitest projects ran side by side. Returning quietly on timeout is
+ * deliberate — the caller's assertion then reports the real mismatch instead of
+ * this helper masking it with a timeout failure.
  */
-const settleUntil = async (predicate) => {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+const settleUntil = async (predicate, timeoutMs = 2000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
     // Sequential by design: each flush must complete before re-checking.
-
     await settle();
-    if (predicate()) {
-      return;
-    }
   }
 };
 
@@ -218,7 +218,9 @@ describe('recursive activity row rendering', () => {
     `;
 
     Alpine.start();
-    await settle();
+    // The subagent row fetches its child session, so the tree is only fully
+    // mounted once that separately authorized subtree has rendered.
+    await settleUntil(() => runtimeWindow.document.querySelector('.activity-child-session .activity-toggle'));
   });
 
   // Tear the tree down while the jsdom document still exists; Alpine's mutation
