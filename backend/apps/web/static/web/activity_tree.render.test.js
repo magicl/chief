@@ -120,6 +120,10 @@ const settle = async () => {
   await new Promise((resolve) => { setTimeout(resolve, 0); });
 };
 
+// Far above the two to four macrotasks the collapse needed on a loaded machine,
+// so only a genuinely stuck condition can exhaust it.
+const SETTLE_BUDGET_MS = 2000;
+
 /**
  * Flush repeatedly until `predicate` holds, or until the deadline passes.
  *
@@ -127,10 +131,10 @@ const settle = async () => {
  * applies `x-show` from a queued effect, so the DOM can trail a store change by
  * several macrotasks, and this suite failed intermittently (~2 runs in 10) when
  * the vitest projects ran side by side. Returning quietly on timeout is
- * deliberate — the caller's assertion then reports the real mismatch instead of
- * this helper masking it with a timeout failure.
+ * deliberate — an assertion reports the real mismatch better than a timeout
+ * stack trace would, so callers must assert the predicate themselves afterwards.
  */
-const settleUntil = async (predicate, timeoutMs = 2000) => {
+const settleUntil = async (predicate, timeoutMs = SETTLE_BUDGET_MS) => {
   const deadline = Date.now() + timeoutMs;
   while (!predicate() && Date.now() < deadline) {
     // Sequential by design: each flush must complete before re-checking.
@@ -219,8 +223,12 @@ describe('recursive activity row rendering', () => {
 
     Alpine.start();
     // The subagent row fetches its child session, so the tree is only fully
-    // mounted once that separately authorized subtree has rendered.
-    await settleUntil(() => runtimeWindow.document.querySelector('.activity-child-session .activity-toggle'));
+    // mounted once that separately authorized subtree has rendered. Assert it
+    // here so a child session that never loads fails as a mount problem rather
+    // than as a puzzling assertion in whichever test runs first.
+    const childMounted = () => runtimeWindow.document.querySelector('.activity-child-session .activity-toggle');
+    await settleUntil(childMounted);
+    expect(childMounted()).not.toBeNull();
   });
 
   // Tear the tree down while the jsdom document still exists; Alpine's mutation

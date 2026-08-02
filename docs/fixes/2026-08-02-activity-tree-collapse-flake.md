@@ -64,6 +64,8 @@ against 12 busy-loop processes on a 32-core host to mimic a loaded CI runner.
 - Result: 3 failed / 3 passed — the flake, reproduced.
 - Command: `pnpm run test:unit` × 15, under CPU load, after the fix
 - Result: 15 passed, 0 failed.
+- Command: `pnpm run test:unit` × 12, under CPU load, after the review fixes
+- Result: 12 passed, 0 failed.
 - Command: `pnpm run test:unit` with the child-session subtree moved out of the
   disclosure container in `session_detail.html` (temporary mutation, reverted)
 - Result: failed after the 2s budget with the original
@@ -82,6 +84,9 @@ against 12 busy-loop processes on a 32-core host to mimic a loaded CI runner.
 
 | # | Severity | Status | Location | Finding | Notes |
 |---|----------|--------|----------|---------|-------|
+| 1 | Minor | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js:218` | A silent `waitUntil` timeout in `beforeAll` turns a child session that never mounts into a puzzling later failure instead of a mount failure | Assert the child-session row after the wait |
+| 2 | Minor | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js:123` | The docstring promised the caller's assertion reports the mismatch, which only held for the collapse test | Reworded to require callers to assert the condition themselves |
+| 3 | Minor | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js:132` | Bare `2000` budget gave no hint of how it relates to the measured delay | Named `SETTLE_BUDGET_MS` with the measured two-to-four-macrotask bound |
 
 Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 
