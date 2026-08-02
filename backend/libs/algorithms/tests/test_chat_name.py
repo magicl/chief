@@ -2,12 +2,21 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-from libs.algorithms.chat_name import ChatNameConfig, generate_chat_name
+from libs.algorithms.chat_name import (
+    DEFAULT_CHAT_NAME_CONFIG,
+    ChatNameConfig,
+    generate_chat_name,
+)
 
 from olib.py.django.test.cases import OTestCase
 
 
 class TestGenerateChatName(OTestCase):
+    def test_default_config_uses_gpt_5_4_nano(self) -> None:
+        """Session naming defaults to the cheap OpenAI nano model."""
+        self.assertEqual(DEFAULT_CHAT_NAME_CONFIG.provider, 'openai')
+        self.assertEqual(DEFAULT_CHAT_NAME_CONFIG.model, 'gpt-5.4-nano')
+
     def test_disabled_returns_fallback(self) -> None:
         title = generate_chat_name(
             'How do I reset my password?',
