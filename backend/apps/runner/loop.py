@@ -452,7 +452,16 @@ class SessionRunner:
         *,
         llm_id: uuid.UUID,
     ) -> None:
-        """Record a usage-free output child for provider reconstruction."""
+        """Record a usage-free output child for provider reconstruction.
+
+        A turn that only requests tools carries no assistant text. Recording an
+        empty output row would render as a blank message card on the session
+        page, and provider reconstruction does not need it: rebuild synthesizes
+        the assistant tool-call carrier message from the tool activity itself
+        (see ``apps.sessions.rebuild._tool_messages``).
+        """
+        if not result.content.strip():
+            return
         with self.recorder.push_parent(llm_id):
             self._create_terminal_activity(
                 kind=AgentSessionActivityKind.OUTPUT,

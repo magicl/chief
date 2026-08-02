@@ -99,6 +99,46 @@ class TestRebuildMessages(OTransactionTestCase):
             ],
         )
 
+    def test_tool_without_preceding_output_rebuilds_same_as_with_empty_output(self) -> None:
+        """Dropping a text-free output row must not change the provider message list.
+
+        The runner no longer records an ``output`` activity for a turn that only
+        requests tools, so the assistant tool-call carrier has to come from the
+        ``tool`` activity itself.
+        """
+        with_empty_output = make_test_session('rebuild-empty-output')
+        self._activity(with_empty_output, kind=AgentSessionActivityKind.INPUT, details={'content': 'go'})
+        self._activity(with_empty_output, kind=AgentSessionActivityKind.OUTPUT, details={'content': ''})
+        without_output = make_test_session('rebuild-no-output')
+        self._activity(without_output, kind=AgentSessionActivityKind.INPUT, details={'content': 'go'})
+        for session in (with_empty_output, without_output):
+            self._activity(
+                session,
+                kind=AgentSessionActivityKind.TOOL,
+                details={
+                    'call_id': 'c1',
+                    'instance_id': 'clock',
+                    'function': 'now',
+                    'arguments': {},
+                    'result': 'noon',
+                },
+            )
+            self._activity(session, kind=AgentSessionActivityKind.OUTPUT, details={'content': 'It is noon.'})
+
+        expected = [
+            {'role': 'system', 'content': 'sys'},
+            {'role': 'user', 'content': 'go'},
+            {
+                'role': 'assistant',
+                'content': '',
+                'tool_calls': [{'id': 'c1', 'type': 'function', 'function': {'name': 'clock.now', 'arguments': {}}}],
+            },
+            {'role': 'tool', 'tool_call_id': 'c1', 'content': 'noon'},
+            {'role': 'assistant', 'content': 'It is noon.'},
+        ]
+        self.assertEqual(rebuild_messages(with_empty_output, system_prompt='sys'), expected)
+        self.assertEqual(rebuild_messages(without_output, system_prompt='sys'), expected)
+
     def test_failed_tool_with_complete_result_is_reconstructed(self) -> None:
         session = make_test_session('failed-tool')
         self._activity(

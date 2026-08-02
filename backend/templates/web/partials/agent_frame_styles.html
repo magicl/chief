@@ -212,7 +212,9 @@
   }
   .kind-output .pill { background: #1f4023; color: #9be7a8; }
   .kind-input .pill { background: #1d3a5f; color: #9ec5ff; }
-  .kind-tool_call .pill, .kind-tool_result .pill { background: #4a2f5e; color: #e0b6ff; }
+  .kind-tool .pill, .kind-subagent .pill { background: #4a2f5e; color: #e0b6ff; }
+  .kind-llm .pill { background: #1f3f47; color: #8fd7e6; }
+  .kind-span .pill, .kind-status .pill, .kind-restart .pill { background: #2a3040; color: #b8c0d4; }
   .kind-failure .pill { background: #4a2326; color: #ff9ea3; }
   button.frame-btn {
     padding: .35rem .75rem;
@@ -333,29 +335,43 @@
     text-decoration-thickness: .08em;
   }
   .activity-row-main > a:hover { color: #c5dcff; }
+  /*
+    Execution rows get a surface so a tool row reads as a row rather than as
+    loose text, but stay one line tall: the nested-activity-ui design keeps
+    them denser than the input/output message cards.
+  */
   .activity-toggle {
     flex: 1;
     min-width: 0;
     min-height: 2.25rem;
     display: flex;
     align-items: center;
-    padding: .35rem .5rem;
-    border: 1px solid transparent;
+    gap: .5rem;
+    padding: .3rem .55rem;
+    border: 1px solid #1e222c;
     border-radius: 6px;
-    background: transparent;
+    background: #12151c;
     color: inherit;
     font: inherit;
     font-size: .82rem;
     line-height: 1.35;
     text-align: left;
     cursor: pointer;
+  }
+  .activity-kind-pill {
+    flex-shrink: 0;
+    font-size: .68rem;
+    letter-spacing: .04em;
+  }
+  .activity-toggle-text {
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .activity-toggle:hover {
     background: #1a1e28;
-    border-color: #232732;
+    border-color: #2c3240;
   }
   .activity-toggle:focus-visible {
     outline: 2px solid #9ec5ff;
@@ -435,10 +451,13 @@
       align-items: flex-start;
     }
     .activity-toggle {
+      width: 100%;
+      align-items: flex-start;
+    }
+    .activity-toggle-text {
       white-space: normal;
       overflow: visible;
       text-overflow: unset;
-      width: 100%;
     }
     .activity-row-main > a { margin-left: .5rem; }
     .activity-row {

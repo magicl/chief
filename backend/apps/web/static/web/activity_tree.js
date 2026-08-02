@@ -91,19 +91,30 @@
     return ended - started;
   };
 
+  /** Uppercase an activity kind for the collapsed-row pill (TOOL, LLM, …). */
+  const formatKindLabel = (activity) => (activity?.kind ? String(activity.kind).toUpperCase() : '');
+
   /**
-   * Build a compact collapsed-row label without dumping tool arguments.
-   * Joins kind, name, summary, status, and latency with ·; omits empty segments.
-   * Returns plain text for x-text (no HTML escaping).
+   * Build the collapsed-row text that follows the kind pill, without dumping
+   * tool arguments. Joins name, summary, status, and latency with ·; omits
+   * empty segments. Returns plain text for x-text (no HTML escaping).
    */
-  const formatCollapsedLine = (activity) => {
-    const kind = activity?.kind ? String(activity.kind).toUpperCase() : '';
+  const formatCollapsedDetail = (activity) => {
     const name = activity?.name ? String(activity.name) : '';
     const summary = activity?.summary ? String(activity.summary) : '';
     const status = formatStatusLabel(activity?.status);
     const latency = formatLatency(resolveLatencyMs(activity));
-    return [kind, name, summary, status, latency].filter(Boolean).join(' · ');
+    return [name, summary, status, latency].filter(Boolean).join(' · ');
   };
+
+  /**
+   * Build the whole collapsed-row label as one plain string, kind included.
+   * The rendered row splits kind (pill) from detail; this single-string form is
+   * for consumers that cannot show markup, such as accessible labels.
+   */
+  const formatCollapsedLine = (activity) => (
+    [formatKindLabel(activity), formatCollapsedDetail(activity)].filter(Boolean).join(' · ')
+  );
 
   /**
    * Pretty-print activity details for curated Result/Arguments and Raw JSON.
@@ -1107,6 +1118,8 @@
 
       /** Expose compact plain-text formatting to Alpine template expressions. */
       formatCollapsedLine,
+      formatCollapsedDetail,
+      formatKindLabel,
 
       /** Expose raw-safe JSON formatting to Alpine template expressions. */
       formatRawDetails,
@@ -1120,7 +1133,9 @@
     MAX_VISUAL_DEPTH,
     SNAPSHOT_PATH,
     createActivityStore,
+    formatCollapsedDetail,
     formatCollapsedLine,
+    formatKindLabel,
     formatRawDetails,
     isBeautifiable,
     sumCostUsd,

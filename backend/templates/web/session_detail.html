@@ -163,7 +163,7 @@
     </template>
 
     <template x-if="activity.kind !== 'input' && activity.kind !== 'output'">
-      <div class="activity-execution">
+      <div class="activity-execution" :class="`kind-${activity.kind}`">
         <div class="activity-row-main">
           <button
             type="button"
@@ -173,7 +173,8 @@
             :aria-label="toggleLabel()"
             @click="toggle()"
           >
-            <span x-text="formatCollapsedLine(activity)"></span>
+            <span class="pill activity-kind-pill" x-text="formatKindLabel(activity)"></span>
+            <span class="activity-toggle-text" x-text="formatCollapsedDetail(activity)"></span>
           </button>
           <template x-if="activity.kind === 'subagent' && activity.child_session_id">
             <a :href="`/sessions/${activity.child_session_id}/`">Open session</a>
