@@ -33,4 +33,4 @@ Capture an optional `status_code` on `ProviderError` from OpenAI/Anthropic API e
 
 ## Links
 
-- PR: (pending)
+- PR: https://github.com/magicl/chief/pull/40
