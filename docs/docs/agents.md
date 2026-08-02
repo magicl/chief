@@ -16,6 +16,22 @@ With Docker Compose, place agent files in `.local/agents/*.yaml` and key files i
 container. `CHIEF_LOCAL_DIR` remains the generic application setting for
 non-Compose environments.
 
+`.local/` is gitignored and may be a symlink to a private git checkout (for
+example `chief-private`) so personal agents, keys, and eval fixtures stay
+versioned without landing in the public repo. Layout:
+
+```text
+.local/                    # or $CHIEF_LOCAL_DIR
+  agents/*.yaml
+  keys/*.yaml              # keep secrets out of git even in a private remote
+  evals/inbox/scenarios/   # optional private inbox eval scenarios
+```
+
+Inbox evals load public scenarios from `evals/inbox/scenarios/` and, when
+present, merge `$CHIEF_LOCAL_DIR/evals/inbox/scenarios/` (host-side fallback:
+repo `.local/evals/inbox/scenarios/`). Duplicate scenario `id` values across
+the two trees fail the suite loudly.
+
 An agent is a single YAML file with two layers:
 
 1. **Envelope** — metadata fields that identify the agent on disk.
