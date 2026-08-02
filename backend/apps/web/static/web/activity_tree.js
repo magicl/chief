@@ -91,6 +91,17 @@
     return ended - started;
   };
 
+  /**
+   * Report whether a message activity has a body worth drawing a card for.
+   * Sessions recorded before the runner stopped persisting text-free outputs
+   * still contain `output` rows with empty content; without this guard they
+   * render as blank cards.
+   */
+  const hasMessageBody = (activity) => (
+    (activity?.kind === 'input' || activity?.kind === 'output')
+    && String(activity?.details?.content ?? '').trim() !== ''
+  );
+
   /** Uppercase an activity kind for the collapsed-row pill (TOOL, LLM, …). */
   const formatKindLabel = (activity) => (activity?.kind ? String(activity.kind).toUpperCase() : '');
 
@@ -106,15 +117,6 @@
     const latency = formatLatency(resolveLatencyMs(activity));
     return [name, summary, status, latency].filter(Boolean).join(' · ');
   };
-
-  /**
-   * Build the whole collapsed-row label as one plain string, kind included.
-   * The rendered row splits kind (pill) from detail; this single-string form is
-   * for consumers that cannot show markup, such as accessible labels.
-   */
-  const formatCollapsedLine = (activity) => (
-    [formatKindLabel(activity), formatCollapsedDetail(activity)].filter(Boolean).join(' · ')
-  );
 
   /**
    * Pretty-print activity details for curated Result/Arguments and Raw JSON.
@@ -1117,9 +1119,11 @@
       },
 
       /** Expose compact plain-text formatting to Alpine template expressions. */
-      formatCollapsedLine,
       formatCollapsedDetail,
       formatKindLabel,
+
+      /** Expose the empty-message guard to Alpine template expressions. */
+      hasMessageBody,
 
       /** Expose raw-safe JSON formatting to Alpine template expressions. */
       formatRawDetails,
@@ -1134,9 +1138,9 @@
     SNAPSHOT_PATH,
     createActivityStore,
     formatCollapsedDetail,
-    formatCollapsedLine,
     formatKindLabel,
     formatRawDetails,
+    hasMessageBody,
     isBeautifiable,
     sumCostUsd,
     visualDepth,
