@@ -2,7 +2,7 @@
 
 **Branch:** `feat/2026-08-02-queue-items-ui`
 
-Status: **design**
+Status: **plan**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Queues:
 [`2026-07-04-sources-and-queues`](../2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-design.md)
@@ -333,4 +333,3 @@ client.
 - Resolve `user_id` for publish via `queue.agent.user_id` (select_related as needed).
 - Keep page size and debounce constants named and documented in one place.
 - Do not invent a second SSE endpoint; reuse `/events/` user resource stream.
-`)
