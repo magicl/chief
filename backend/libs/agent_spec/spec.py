@@ -54,13 +54,22 @@ class SessionLimitsSpec(BaseModel):
 
 class TriggerSpec(BaseModel):
     name: str
-    kind: Literal['schedule', 'manual', 'agent', 'queue']
+    kind: Literal['schedule', 'manual', 'agent', 'queue', 'button']
     cron: str | None = None
     queue: str | None = None
     prompt: str | None = None
+    button_text: str | None = None
     max_sessions: int | None = None
     max_iterations: int | None = None
     max_cost_usd: Decimal | None = None
+
+    @field_validator('button_text')
+    @classmethod
+    def _strip_button_text(cls, v: str | None) -> str | None:
+        """Strip surrounding whitespace from button labels when present."""
+        if v is None:
+            return None
+        return v.strip()
 
     @field_validator('max_iterations')
     @classmethod
@@ -103,6 +112,15 @@ class TriggerSpec(BaseModel):
             raise ValueError('cron is required when kind is schedule')
         if self.kind == 'queue' and not self.queue:
             raise ValueError('queue is required when kind is queue')
+        if self.kind == 'button':
+            if not self.button_text:
+                raise ValueError('button_text is required when kind is button')
+            if len(self.button_text) > 40:
+                raise ValueError('button_text must be at most 40 characters')
+            if self.cron is not None:
+                raise ValueError('cron must not be set when kind is button')
+            if self.queue is not None:
+                raise ValueError('queue must not be set when kind is button')
         if self.kind == 'manual':
             if self.prompt is not None and self.prompt.strip():
                 raise ValueError('prompt must not be set when kind is manual')

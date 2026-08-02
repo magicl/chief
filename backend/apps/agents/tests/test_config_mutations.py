@@ -48,6 +48,22 @@ class ConfigMutationTests(OTestCase):
         )
         self.assertIn('system_prompt: |-\n  First line.\n  Second line.\n', updated)
 
+    def test_add_button_trigger_includes_button_text(self) -> None:
+        raw = dump_agent_config_spec(load_example('clock-assistant'))
+        updated = apply_config_mutation(
+            raw,
+            {
+                'action': 'add_trigger',
+                'name': 'triage',
+                'kind': 'button',
+                'button_text': 'Triage inbox',
+                'prompt': 'Triage the inbox now.',
+            },
+        )
+        self.assertIn('kind: button', updated)
+        self.assertIn('button_text: Triage inbox', updated)
+        self.assertIn('prompt: Triage the inbox now.', updated)
+
     def test_add_schedule_trigger_uses_default_prompt_when_omitted(self) -> None:
         raw = dump_agent_config_spec(load_example('clock-assistant'))
         updated = apply_config_mutation(

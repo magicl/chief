@@ -94,6 +94,7 @@ class TriggerKind(models.TextChoices):
     MANUAL = 'manual', 'Manual'
     AGENT = 'agent', 'Agent'
     QUEUE = 'queue', 'Queue'
+    BUTTON = 'button', 'Button'
 
 
 class TriggerStatus(models.TextChoices):

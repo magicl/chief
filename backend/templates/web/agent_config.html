@@ -295,6 +295,10 @@ body.config-page main { max-width: none; }
               <textarea name="prompt" id="helper-trigger-prompt" rows="3"></textarea>
             </label>
             <label id="helper-trigger-cron-row">Cron (schedule only) <input name="cron" placeholder="0 * * * *"></label>
+            <label id="helper-trigger-button-text-row" hidden>
+              Button text
+              <input name="button_text" id="helper-trigger-button-text" maxlength="40">
+            </label>
             <button type="submit">Add trigger</button>
           </form>
         </details>

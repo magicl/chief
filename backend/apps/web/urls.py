@@ -23,6 +23,11 @@ urlpatterns = [
     ),
     path('agents/config/catalog/', config_views.agent_config_catalog, name='agent_config_catalog'),
     path('agents/<uuid:agent_id>/chat/', views.agent_start_chat, name='agent_start_chat'),
+    path(
+        'agents/<uuid:agent_id>/triggers/<uuid:trigger_id>/run/',
+        views.agent_run_button_trigger,
+        name='agent_run_button_trigger',
+    ),
     path('agents/<uuid:agent_id>/delete/', views.delete_agent, name='delete_agent'),
     path('agents/<uuid:agent_id>/start/', views.start_agent_session, name='start_agent_session'),
     path('debug/sse-spike/', views.sse_spike, name='sse_spike'),

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from apps.agents.models import Agent
+from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.agents.services.config_sync import config_source_label
 from apps.sessions.models import AgentSession
 from apps.sessions.services.queries import activities_for
@@ -81,6 +81,28 @@ def get_dashboard_data(*, user_id: int | None) -> DashboardData:
         sessions=sessions[:RECENT_SESSIONS_LIMIT],
         examples=examples,
     )
+
+
+def list_active_button_triggers(agent: Agent) -> list[Trigger]:
+    """Return active button triggers on the agent's current config, in YAML order."""
+    if agent.status != AgentStatus.ACTIVE or agent.current_config is None:
+        return []
+    return list(
+        Trigger.objects.filter(
+            agent=agent,
+            agent_config=agent.current_config,
+            kind=TriggerKind.BUTTON,
+            status=TriggerStatus.ACTIVE,
+        ).order_by('id')
+    )
+
+
+def get_active_button_trigger(agent: Agent, trigger_id: UUID) -> Trigger:
+    """Return one active button trigger on the agent's current config, or raise Http404."""
+    for trigger in list_active_button_triggers(agent):
+        if trigger.id == trigger_id:
+            return trigger
+    raise Http404('Trigger not found')
 
 
 def get_owned_agent(user_id: int, agent_id: UUID) -> Agent:
