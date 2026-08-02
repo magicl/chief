@@ -34,4 +34,6 @@ Companion private-repo PR: `chief-private` example scenario + README.
 
 | # | Severity | Finding | Status |
 |---|----------|---------|--------|
-| | | | |
+| 1 | Minor | Default suite path (`local_scenario_dir=None`) not covered by tests | Fixed |
+| 2 | Minor | `resolve_local_root` name collisions with local_sync helper | Fixed (`resolve_eval_local_root`) |
+| 3 | Minor | ARCHITECTURE.md omitted evals overlay layout | Fixed |
