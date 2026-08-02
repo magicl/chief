@@ -103,14 +103,17 @@ _GUIDES: dict[str, CredentialGuide] = {
         input_placeholder='pk_…',
     ),
     'obsidian': CredentialGuide(
-        label='Obsidian',
+        label='Obsidian Sync',
         find_steps=(
-            'Enable the Local REST API community plugin in Obsidian, or use your vault API token.',
-            'Copy the API key from the plugin settings.',
+            'Run the Obsidian Headless (`ob`) login flow for the account that owns the vault to obtain a '
+            'Sync auth token (see https://obsidian.md/sync).',
+            'If the vault has end-to-end encryption enabled, also note its vault password.',
+            'Paste the JSON below with auth_token (required) and encryption_password (optional, only for '
+            'E2E-encrypted vaults).',
         ),
         scopes=None,
-        input_label='API key',
-        input_placeholder='obsidian-api-key',
+        input_label='Obsidian Sync credential JSON',
+        input_placeholder='{"auth_token": "…", "encryption_password": "…optional…"}',
     ),
 }
 

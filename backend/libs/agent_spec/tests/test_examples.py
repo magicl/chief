@@ -64,6 +64,15 @@ class AgentSpecsTests(OTestCase):
             assert tool is not None
             self.assertEqual({function.name for function in tool.functions(ctx, instance)}, expected_functions)
 
+    def test_journal_obsidian_example_validates(self) -> None:
+        """Validate the Gmail-to-Obsidian journal example's tool types and roots."""
+        spec = load_example('journal-obsidian')
+        validate_spec_tools(spec)
+        self.assertEqual([tool.type for tool in spec.tools], ['gmail', 'obsidian'])
+        self.assertEqual(spec.tools[1].config['vault'], 'personal')
+        self.assertEqual(spec.tools[1].config['roots'], ['Journal'])
+        self.assertEqual(spec.queues[0].sources[0].adapter_type, 'gmail')
+
     def test_skills_demo_example_validates(self) -> None:
         spec = load_example('skills-demo')
         validate_spec_tools(spec)

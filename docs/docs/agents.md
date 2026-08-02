@@ -478,6 +478,43 @@ ClickUp mutation successes return `{ok: true, task_id}` plus only applicable `ur
 and do not add `ok`; failures return `{ok: false, error: {kind, message}}`, where
 `kind` is `auth`, `not_found`, or `api`. There is no raw-result option.
 
+#### `obsidian`
+
+Root-scoped `list` / `read` / `write` / `append` access to one Obsidian Sync vault.
+Requires an `obsidian` credential (Obsidian Sync auth token). The vault itself is
+kept in sync by a separate `services/obsidian` process — see
+[`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — not by `apps.keys` or the Chief
+backend directly.
+
+**Config fields** (tool or integration `config`):
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `vault` | string | yes | — | Remote Sync vault id/name known to the vault service |
+| `roots` | list of string | yes | — | Non-empty list of allowed vault-relative path prefixes |
+
+| Function | Description | Readonly |
+|----------|-------------|----------|
+| `list` | List direct child entry names under a vault directory | yes |
+| `read` | Read the UTF-8 text content of one vault file | yes |
+| `write` | Create or overwrite one vault file with new content | no |
+| `append` | Append content to one vault file, creating it (and parent dirs) if missing | no |
+
+Every path must resolve within one of the tool instance's configured `roots`
+(enforced server-side by the vault service). Until a vault's **initial full
+Sync** completes, file operations stall/retry on a retryable `sync_pending`
+condition with backoff; the tool call blocks rather than failing immediately,
+for roughly 30 seconds total (a geometric delay schedule) before surfacing the
+retryable failure kind to the caller. Results use the shared `{ok, …}` /
+typed `{ok: false, error: {kind, message}}` shape, where `kind` includes
+`auth`, `forbidden`, `outside_root`, `not_found`, `sync_pending`,
+`unavailable`, and `config`.
+
+The Chief backend never sends the vault service's inter-service URL or auth
+token through `apps.keys` — those come from Docker Compose environment
+injection (`OBSIDIAN_VAULT_URL` / `OBSIDIAN_VAULT_TOKEN`). Only the Obsidian
+Sync credential itself (`credential_ref`) lives in `apps.keys`.
+
 #### `queue`
 
 Agent-scoped queue operations. No external credential — bound to the session's
@@ -629,6 +666,7 @@ Type-specific `config` keys by integration `type`:
 | `google_drive` | Tools → `google_drive` | `subject`, `roots` |
 | `dropbox` | Tools → `dropbox` | `namespace_id`, `roots` |
 | `clickup` | Tools → `clickup` / Sources → `clickup` | `team_id` / `list_id`, `base_url` |
+| `obsidian` | Tools → `obsidian` | `vault`, `roots` |
 
 ---
 
@@ -822,6 +860,7 @@ The repository ships reference agent configs under
 | `cloud-files-browser.yaml` | Metadata-only Google Drive and Dropbox browser with explicit roots |
 | `queue-echo.yaml` | Queue processing with test source |
 | `clickup-inbox.yaml` | ClickUp INBOX router with gated tool and list source |
+| `journal-obsidian.yaml` | Gmail journal messages appended into an Obsidian Sync vault |
 | `inbox-triage-usecase.yaml` | Full inbox triage use-case |
 | `skills-demo.yaml` | On-demand prompt loading through the automatic `load_skill` tool |
 

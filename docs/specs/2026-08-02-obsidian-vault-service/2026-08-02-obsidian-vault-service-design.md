@@ -1,7 +1,7 @@
 # Obsidian vault service — Design
 
 **Branch:** `feat/2026-08-02-obsidian-vault-service`
-Status: **plan**
+Status: **implementing**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Credentials:
 [`docs/specs/2026-07-03-key-management/`](../2026-07-03-key-management/2026-07-03-key-management-design.md) ·
