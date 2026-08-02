@@ -24,7 +24,7 @@ _SYSTEM_PROMPT = (
 
 class ChatNameConfig(BaseModel):
     provider: str = 'openai'
-    model: str = 'gpt-4o-mini'
+    model: str = 'gpt-5.4-nano'
     temperature: float = 0.2
     max_title_chars: int = 80
     enabled: bool = True
