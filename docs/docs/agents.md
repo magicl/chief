@@ -2,7 +2,8 @@
 
 Chief agents are YAML-configured LLM sessions that perform routine tasks, triggered
 manually, on a schedule, or in response to queue items. This document covers the
-agent file format, available tools, triggers, queues, integrations, and credentials.
+agent file format, LLM providers and models, available tools, triggers, queues,
+integrations, and credentials.
 
 For working examples, see [`backend/libs/agent_spec/examples/`](../../backend/libs/agent_spec/examples/).
 
@@ -63,6 +64,61 @@ skills: []         # prompt blocks loaded on demand (see Skills)
 | `tools` | list of `ToolInstance` | no | Tool instances the LLM can call |
 | `queues` | list of `QueueSpec` | no | Agent-scoped work queues |
 | `skills` | list of `SkillSpec` | no | Named prompt blocks available on demand |
+
+---
+
+## LLM
+
+`llm` selects the backend provider and model for every session of the agent.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | string | yes | Registered provider id (see below) |
+| `model` | string | yes | Model id for that provider |
+| `temperature` | float | no | Sampling temperature when the model supports it |
+| `credential_ref` | string | no | Named API key; falls back to env vars when omitted |
+
+### Providers
+
+Registered in `libs.providers.llm.registry.PROVIDERS`:
+
+| Provider | Purpose | Credential |
+|----------|---------|------------|
+| `openai` | OpenAI Chat Completions | `openai` key or `OPENAI_API_KEY` |
+| `anthropic` | Anthropic Messages API | `anthropic` key or `ANTHROPIC_API_KEY` |
+| `local_openai` | OpenAI-compatible local server (default host `localhost:11434`) | optional `LOCAL_OPENAI_API_KEY` (defaults to `local`) |
+| `repeat` | Test provider that echoes the latest user message | none |
+
+Unknown `provider` values fail at session start. Model ids are not schema-validated;
+any string is accepted, but only the models below have known pricing / catalog
+entries used by the config editor helper.
+
+### Models
+
+**OpenAI** (`provider: openai`)
+
+| Model | Notes |
+|-------|-------|
+| `gpt-5.5` | Does not support `temperature` |
+| `gpt-5.4-mini` | Default in most examples |
+| `gpt-5.4-nano` | |
+
+**Anthropic** (`provider: anthropic`)
+
+| Model | Notes |
+|-------|-------|
+| `claude-opus-4-8` | |
+| `claude-sonnet-4-6` | |
+| `claude-haiku-4-5` | Preferred id; `claude-haiku-4.5` is accepted and normalized to this |
+
+**Local OpenAI** (`provider: local_openai`)
+
+| Model | Notes |
+|-------|-------|
+| `llama3.2` | Cost is estimated from power draw × latency, not per-token rates |
+
+**Repeat** (`provider: repeat`) has no catalog models; any `model` string works for
+tests (examples often use `repeat`).
 
 ---
 
