@@ -180,7 +180,7 @@
           </template>
         </div>
 
-        <!-- detailId wraps curated details, subagent child tree, and same-session children -->
+        <!-- detailId wraps curated details and the subagent child-session tree -->
         <div :id="detailId" x-show="store.isExpanded(activityId)">
           <div class="activity-detail">
             <template x-if="activity.summary">
@@ -243,13 +243,20 @@
               </div>
             </template>
           </div>
-
-          <ol class="activity-list activity-child-list">
-            <template x-for="childId in (store.childIds[activityId] || [])" :key="childId">
-              <li x-data="activityNode(() => store, childId, depth + 1)"></li>
-            </template>
-          </ol>
         </div>
+
+        <!--
+          Same-session children stay outside the disclosure. Collapsing an
+          execution row hides its details, not the tree beneath it: the runtime
+          parents generated output messages and tool calls to the LLM turn that
+          produced them, so gating this list would hide the conversation behind
+          rows that start collapsed.
+        -->
+        <ol class="activity-list activity-child-list">
+          <template x-for="childId in (store.childIds[activityId] || [])" :key="childId">
+            <li x-data="activityNode(() => store, childId, depth + 1)"></li>
+          </template>
+        </ol>
       </div>
     </template>
 
