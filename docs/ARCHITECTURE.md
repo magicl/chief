@@ -499,3 +499,19 @@ provider-returned **`path_lower`** segments rather than Python lowercasing or ra
 prefixes. Both clients recheck returned metadata against the selected root. These
 integrations intentionally have no source adapters or queue ingestion path. Example:
 [`backend/libs/agent_spec/examples/cloud-files-browser.yaml`](../backend/libs/agent_spec/examples/cloud-files-browser.yaml).
+
+**Obsidian vault service (`services/obsidian`):** unlike the client/projection/tool
+layers above, Obsidian Sync is not reachable via a stateless remote API — it requires
+a live Headless Sync process per vault. `services/obsidian` is therefore a **separate
+process with no Chief DB access**, maintaining **one working-tree checkout per vault**
+(shared across every agent bound to that vault, refcounted) rather than one client
+call per request. The `obsidian` tool (`libs/tools/tools/obsidian.py` +
+`libs/clients/obsidian/`) calls it over HTTP using a **Docker-injected inter-service
+URL and token** (`OBSIDIAN_VAULT_URL` / `OBSIDIAN_VAULT_TOKEN`), which is deliberately
+kept out of `apps.keys` since it is deployment plumbing, not a per-user provider
+credential. Obsidian **Sync** secrets (headless auth token, optional E2E vault
+password) are a normal `apps.keys` credential referenced by `credential_ref` and are
+**pushed to the vault service only at agent config materialize** (`ensure_agent_vaults`,
+alongside the tool's configured `roots`) — the tool's invoke path never re-sends them.
+Until a vault's initial full Sync completes, the vault service returns a retryable
+`sync_pending` error that the tool stalls/retries on with backoff.

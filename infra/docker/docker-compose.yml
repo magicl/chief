@@ -24,6 +24,21 @@ services:
     image: redis:alpine
     ports:
       - "${DOCO_PORT_REDIS:-6379}:6379"
+  # Obsidian vault service: supervises Headless Sync checkouts and serves path-gated file ops.
+  # Deliberately minimal env: only the inter-service token via its own split
+  # group (never the backend env_file), so this container never sees
+  # Postgres, CREDENTIALS_KEY, or other backend/LLM/OAuth secrets.
+  chief-obsidian:
+    build:
+      context: ../..
+      dockerfile: services/obsidian/Dockerfile
+    env_file:
+      - ../../.output/env.compose.obsidian
+    environment:
+      OBSIDIAN_VAULT_DATA: /data
+      PORT: "8100"
+    volumes:
+      - obsidian_vault_data:/data
   # Reverse proxy: routes /static to static nginx, everything else to backend.
   chief-nginx:
     image: nginx:alpine
@@ -82,6 +97,7 @@ services:
         required: false
     environment:
       CHIEF_LOCAL_DIR: /mnt/local
+      OBSIDIAN_VAULT_URL: http://chief-obsidian:8100
     volumes:
       - ../../backend:/app
       - ../../olib:/app/olib
@@ -90,6 +106,8 @@ services:
       chief-postgres:
         condition: service_healthy
       chief-redis:
+        condition: service_started
+      chief-obsidian:
         condition: service_started
     tty: true
     stdin_open: true
@@ -121,6 +139,7 @@ services:
     environment:
       ENTRYPOINT: celery-worker
       CHIEF_LOCAL_DIR: /mnt/local
+      OBSIDIAN_VAULT_URL: http://chief-obsidian:8100
     # Use the image's host-mapped account so Celery can resolve both uid and gid.
     user: app
     env_file:
@@ -158,6 +177,7 @@ services:
     environment:
       ENTRYPOINT: celery-beat
       CHIEF_LOCAL_DIR: /mnt/local
+      OBSIDIAN_VAULT_URL: http://chief-obsidian:8100
     env_file:
       - ../../.output/env.compose.backend
       - path: ../../.env.local
@@ -176,3 +196,5 @@ volumes:
     name: ${DOCO_PG_VOLUME:-chief_postgres_data}
   chief_static_data:
     name: ${DOCO_STATIC_VOLUME:-chief_static_data}
+  obsidian_vault_data:
+    name: ${DOCO_OBSIDIAN_VOLUME:-chief_obsidian_vault_data}

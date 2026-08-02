@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 from apps.agents.ingest import create_agent_from_spec, persist_agent_config
 from apps.agents.tool_wiring import build_bound_tools
@@ -315,6 +316,54 @@ class TestBuildBoundTools(OTestCase):
         self.assertEqual(factory_kwargs['token_supplier'](), '{"refresh_token": true}')
         self.assertEqual(factory_kwargs['config'], config)
         self.assertEqual(factory_kwargs['instance_id'], 'files')
+
+    def test_obsidian_tool_wires_with_config_and_injected_client_factory(self) -> None:
+        """Wire Obsidian with merged config, string agent id, and instance identity."""
+        config = {'vault': 'Personal', 'roots': ['Journal']}
+        instances = [
+            ToolInstance(
+                id='vault',
+                type='obsidian',
+                allow=['list'],
+                config=config,
+            ),
+        ]
+        fake_client = MagicMock()
+        fake_client.list_dir.return_value = ['a.md']
+        client_factory = MagicMock(return_value=fake_client)
+        agent_id = uuid4()
+        ctx = _make_ctx(
+            user_id=1,
+            agent_id=agent_id,
+            client_factories={'obsidian': client_factory},
+        )
+
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['vault'].invoke('list', {'path': 'Journal'})
+
+        self.assertEqual(out, {'ok': True, 'entries': ['a.md']})
+        client_factory.assert_called_once()
+        factory_kwargs = client_factory.call_args.kwargs
+        self.assertEqual(set(factory_kwargs), {'agent_id', 'config', 'instance_id'})
+        self.assertEqual(factory_kwargs['agent_id'], str(agent_id))
+        self.assertEqual(factory_kwargs['config'], config)
+        self.assertEqual(factory_kwargs['instance_id'], 'vault')
+        fake_client.list_dir.assert_called_once_with(vault_id='Personal', path='Journal')
+
+    def test_obsidian_tool_without_agent_id_returns_safe_config_failure(self) -> None:
+        """Default-factory binding requires an agent id; missing it is a safe config failure."""
+        instances = [
+            ToolInstance(id='vault', type='obsidian', allow=['list'], config={'vault': 'Personal', 'roots': ['J']})
+        ]
+        ctx = _make_ctx(user_id=1)
+
+        bound = build_bound_tools(instances, ctx=ctx)
+        out = bound['vault'].invoke('list', {'path': 'J'})
+
+        self.assertEqual(
+            out,
+            {'ok': False, 'error': {'kind': 'config', 'message': 'obsidian tool requires an agent id'}},
+        )
 
     def test_credential_tool_receives_instance_config(self) -> None:
         instances = [

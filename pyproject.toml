@@ -13,4 +13,5 @@ members = [
   "backend",
   "infra",
   "olib",
+  "services/obsidian",
 ]

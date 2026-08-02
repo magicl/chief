@@ -15,6 +15,7 @@ def wire_tools() -> None:
     from libs.tools.tools.gmail import GmailTool
     from libs.tools.tools.google_drive import GoogleDriveTool
     from libs.tools.tools.load_skill import LoadSkillTool
+    from libs.tools.tools.obsidian import ObsidianTool
     from libs.tools.tools.queue import QueueTool
 
     register_tool('clock', ClockTool())
@@ -23,4 +24,5 @@ def wire_tools() -> None:
     register_tool('dropbox', DropboxTool())
     register_tool('clickup', ClickUpTool())
     register_tool('queue', QueueTool())
+    register_tool('obsidian', ObsidianTool())
     register_tool('load_skill', LoadSkillTool())
