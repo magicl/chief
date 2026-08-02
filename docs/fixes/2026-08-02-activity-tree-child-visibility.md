@@ -33,6 +33,13 @@ an execution row hides that row's details, not the tree beneath it. Expansion
 keeps owning curated details, Raw JSON, and the separately authorized sub-agent
 child-session tree.
 
+This deliberately reverses Important #1 of
+`docs/specs/2026-07-26-nested-activity-ui/…-review.md`, which pulled the
+same-session `<ol>` inside `detailId` so the toggle's `aria-controls` covered
+it. `aria-controls` must name what the toggle actually shows and hides; rows
+that stay visible regardless of the toggle do not belong in that container.
+That review row is now annotated as superseded.
+
 ## Changes
 
 - `backend/templates/web/session_detail.html`: the same-session child `<ol>` is
@@ -40,7 +47,10 @@ child-session tree.
 - `backend/apps/web/static/web/activity_tree.render.test.js`: the fixture now
   includes an `output` message parented to a nested `llm` turn (the real runtime
   shape), plus visibility assertions that distinguish a rendered row from one
-  buried in a collapsed ancestor.
+  buried in a collapsed ancestor, and a collapse test proving the sub-agent
+  child-session subtree is still gated by expansion.
+- `docs/specs/2026-07-26-nested-activity-ui/…-review.md`: annotated the
+  superseded `aria-controls` finding.
 
 ## Verification
 
@@ -48,7 +58,7 @@ child-session tree.
 - Result: the two new visibility tests fail (`expected false to be true`); the
   collapsed-details guard passes.
 - Command: `./olib/scripts/orunr js test-unit`
-- Result: passed — olib 12, web unit 65, web browser (chromium) 6.
+- Result: passed — olib 12, web unit 66, web browser (chromium) 6.
 - Command: `./olib/scripts/orunr js lint`
 - Result: passed (exit 0).
 - Command: `./olib/scripts/orunr js tsc`
@@ -62,6 +72,11 @@ child-session tree.
 
 | # | Severity | Status | Location | Finding | Notes |
 |---|----------|--------|----------|---------|-------|
+| 1 | Important | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js` | `isVisible(undefined)` returns `true`, so a stale selector would pass the regression tests instead of failing them | `isVisible` throws on a missing element, and `elementOf(selector, textPrefix)` replaces the `.find()` lookups |
+| 2 | Important | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js` | No assertion that the sub-agent child-session tree is still gated by expansion — the risky twin of this change | Added a collapse test asserting the child-session row hides while the nested same-session output stays visible |
+| 3 | Minor | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js` | `elementOf('.activity-detail')` relied on the tool row being first in the fixture | Scoped to the row whose toggle reads `TOOL · clickup.get_task` |
+| 4 | Minor | Fixed | `docs/fixes/2026-08-02-activity-tree-child-visibility.md` | Approach did not record that this reverses the earlier `aria-controls` review finding | Documented here and annotated the superseded row in the nested-activity-ui review file |
+| 5 | Minor | Rejected | `docs/specs/2026-07-26-nested-activity-ui/…-design.md` | Design could state explicitly that all same-session children stay visible, not only messages | The design is merged and its spec is in review; the decision and its rationale live in this fix note and in the superseded review row, which is where a future reviewer of that finding will look |
 
 Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 

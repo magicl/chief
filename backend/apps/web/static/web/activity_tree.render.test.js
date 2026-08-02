@@ -85,6 +85,10 @@ const textsOf = (selector) => Array.from(
  * rendered row from one buried in a collapsed ancestor's disclosure.
  */
 const isVisible = (element) => {
+  // A missing element would otherwise skip the loop and report "visible".
+  if (!element) {
+    throw new Error('cannot judge visibility of a missing element');
+  }
   for (let node = element; node; node = node.parentElement) {
     if (node.style?.display === 'none') {
       return false;
@@ -93,11 +97,19 @@ const isVisible = (element) => {
   return true;
 };
 
-/** Return the first element matching a selector, failing loudly when absent. */
-const elementOf = (selector) => {
-  const found = runtimeWindow.document.querySelector(selector);
+/**
+ * Return the first element matching a selector, optionally the first whose
+ * trimmed text starts with `textPrefix`. Throws rather than returning
+ * undefined so a stale selector fails the test instead of passing it.
+ */
+const elementOf = (selector, textPrefix = null) => {
+  const matches = Array.from(runtimeWindow.document.querySelectorAll(selector));
+  const found = textPrefix === null
+    ? matches[0]
+    : matches.find((element) => element.textContent.trim().startsWith(textPrefix));
   if (!found) {
-    throw new Error(`no element matched ${selector}`);
+    const suffix = textPrefix === null ? '' : ` starting with "${textPrefix}"`;
+    throw new Error(`no element matched ${selector}${suffix}`);
   }
   return found;
 };
@@ -126,6 +138,9 @@ const CHILD_SNAPSHOT = {
 };
 
 describe('recursive activity row rendering', () => {
+  /** Root store of the mounted tree; tests drive disclosure state through it. */
+  let store;
+
   beforeAll(async () => {
     runtimeWindow.Alpine = Alpine;
     runtimeWindow.fetch = async (url) => (
@@ -134,7 +149,7 @@ describe('recursive activity row rendering', () => {
         : { ok: false, json: async () => ({}) }
     );
 
-    const store = runtimeWindow.chiefActivityTree.createActivityStore('s1');
+    store = runtimeWindow.chiefActivityTree.createActivityStore('s1');
     store.applySnapshot({
       session: {
         id: 's1', status: 'running', name: 'demo', parent_session_id: null, parent: null,
@@ -206,21 +221,16 @@ describe('recursive activity row rendering', () => {
   });
 
   test('shows a message nested under a collapsed execution row', () => {
-    const nestedBody = Array.from(
-      runtimeWindow.document.querySelectorAll('.kind-output pre.event-body'),
-    ).find((element) => element.textContent.trim() === 'nested reply');
-    expect(isVisible(nestedBody)).toBe(true);
+    expect(isVisible(elementOf('.kind-output pre.event-body', 'nested reply'))).toBe(true);
   });
 
   test('shows nested execution rows while their parent stays collapsed', () => {
-    const nestedLine = Array.from(
-      runtimeWindow.document.querySelectorAll('.activity-toggle'),
-    ).find((element) => element.textContent.trim().startsWith('LLM · gpt-5'));
-    expect(isVisible(nestedLine)).toBe(true);
+    expect(isVisible(elementOf('.activity-toggle', 'LLM · gpt-5'))).toBe(true);
   });
 
   test('hides curated details of a collapsed execution row', () => {
-    expect(isVisible(elementOf('.activity-detail'))).toBe(false);
+    const toolRow = elementOf('.activity-toggle', 'TOOL · clickup.get_task').closest('.activity-row');
+    expect(isVisible(toolRow.querySelector('.activity-detail'))).toBe(false);
   });
 
   test('renders collapsed execution lines for non-message activities', () => {
@@ -238,5 +248,19 @@ describe('recursive activity row rendering', () => {
     ]);
     const childLink = runtimeWindow.document.querySelector('.activity-row-main a');
     expect(childLink.getAttribute('href')).toBe('/sessions/kid/');
+  });
+
+  // Runs last: it drives disclosure state on the shared mounted tree.
+  test('hides only the child-session subtree when a subagent row collapses', async () => {
+    const childRow = () => elementOf('.activity-child-session .activity-toggle', 'TOOL · gmail.search');
+    expect(isVisible(childRow())).toBe(true);
+
+    store.setExpanded('sub', false, { manual: true });
+    await settle();
+
+    // The separately authorized child session belongs to the disclosure, unlike
+    // the same-session rows that must survive their parent collapsing.
+    expect(isVisible(childRow())).toBe(false);
+    expect(isVisible(elementOf('.kind-output pre.event-body', 'nested reply'))).toBe(true);
   });
 });

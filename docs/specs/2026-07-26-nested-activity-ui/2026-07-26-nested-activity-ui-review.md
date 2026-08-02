@@ -35,7 +35,7 @@
 
 | # | Status | Location | Finding | Notes |
 |---|--------|----------|---------|-------|
-| 1 | Fixed | `backend/templates/web/session_detail.html` (toggle `aria-controls` vs nested `store.childIds` list) | Expandable row `aria-controls` points at the curated-detail container, but same-session nested children render in a sibling `<ol>` also gated by `isExpanded`. Design requires the control to reference its detail/child container. | `detailId` now wraps curated details, subagent child tree, and same-session `childIds` `<ol>`; message kinds keep a separate always-visible children list. |
+| 1 | Fixed | `backend/templates/web/session_detail.html` (toggle `aria-controls` vs nested `store.childIds` list) | Expandable row `aria-controls` points at the curated-detail container, but same-session nested children render in a sibling `<ol>` also gated by `isExpanded`. Design requires the control to reference its detail/child container. | `detailId` now wraps curated details, subagent child tree, and same-session `childIds` `<ol>`; message kinds keep a separate always-visible children list. **Superseded** by `docs/fixes/2026-08-02-activity-tree-child-visibility.md`: gating the same-session list hid every assistant reply behind collapsed LLM rows, so that `<ol>` is a sibling of `detailId` again and the toggle controls only what it actually hides. |
 
 ### Minor
 
