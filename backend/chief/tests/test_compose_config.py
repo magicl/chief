@@ -12,10 +12,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import cast
 
 from ruamel.yaml import YAML
 
+from olib.py.cli.run.utils.envfiles import split_env_files
 from olib.py.django.test.cases import OTestCase
 
 _PYTHON_IMAGE = 'python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91'
@@ -348,6 +350,131 @@ class TestComposeRichContentAssets(OTestCase):
             rich_content_mounts,
             ['/mnt/infra-assets/chief/js/gen:/etc/storage/public/static/web/rich-content:ro'],
         )
+
+
+class TestComposeObsidianVaultService(OTestCase):
+    """Check that Compose wires the Obsidian vault service and its backend consumers."""
+
+    @staticmethod
+    def _generated_group_values(group: str, *, include_local_example: bool) -> dict[str, str]:
+        """Generate one env.split group exactly as `orun docker compose` would, from repo env files.
+
+        Uses `.env.local.example` in place of the real (gitignored) `.env.local`
+        to exercise the documented user-facing template's shape, matching the
+        `?.env.local` slot in `config.Config.envs['compose'].env_files`.
+        """
+        repository_root = Path(__file__).resolve().parents[3]
+        env_files = ['.env', '.env.development', '.env.development.compose']
+        if include_local_example:
+            env_files.append('.env.local.example')
+        absolute_env_files = [str(repository_root / env_file) for env_file in env_files]
+
+        with TemporaryDirectory() as output_dir:
+            output_prefix = str(Path(output_dir) / 'env.compose')
+            split_env_files(absolute_env_files, output_prefix)
+            generated_path = Path(f'{output_prefix}.{group}')
+            if not generated_path.is_file():
+                return {}
+            return dict(line.split('=', 1) for line in generated_path.read_text(encoding='utf-8').splitlines() if line)
+
+    def test_vault_service_builds_and_persists_data(self) -> None:
+        """chief-obsidian builds from its Dockerfile and persists /data on a named volume."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+
+        vault_service = compose['services'].get('chief-obsidian')
+        self.assertIsNotNone(vault_service)
+        self.assertEqual(vault_service['build']['dockerfile'], 'services/obsidian/Dockerfile')
+        self.assertIn('obsidian_vault_data:/data', vault_service['volumes'])
+        self.assertEqual(vault_service['environment']['OBSIDIAN_VAULT_DATA'], '/data')
+        self.assertEqual(vault_service['environment']['CHIEF_INTERNAL_URL'], 'http://chief-backend:8000')
+        self.assertEqual(vault_service['environment']['PORT'], '8100')
+        self.assertIn('obsidian_vault_data', compose['volumes'])
+
+    def test_backend_worker_beat_receive_vault_url_and_backend_token_env_file(self) -> None:
+        """Backend, worker, and Beat resolve the vault at its internal URL via their own backend env file."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+
+        for service_name in ('chief-backend', 'chief-worker', 'chief-beat'):
+            service = compose['services'][service_name]
+            self.assertEqual(
+                service['environment']['OBSIDIAN_VAULT_URL'],
+                'http://chief-obsidian:8100',
+            )
+            self.assertIn('../../.output/env.compose.backend', service['env_file'])
+
+    def test_vault_service_env_file_excludes_backend_secrets(self) -> None:
+        """chief-obsidian never shares backend's env_file (Postgres/CREDENTIALS_KEY/LLM keys)."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+        vault_service = compose['services']['chief-obsidian']
+        backend_service = compose['services']['chief-backend']
+
+        self.assertNotEqual(vault_service.get('env_file'), backend_service.get('env_file'))
+        self.assertNotIn('../../.output/env.compose.backend', vault_service.get('env_file', []))
+        self.assertNotIn('../../.env.local', vault_service.get('env_file', []))
+        for entry in vault_service.get('env_file', []):
+            path = entry if isinstance(entry, str) else entry.get('path', '')
+            self.assertIn('obsidian', path)
+
+    def test_vault_service_env_group_always_exists_and_carries_only_the_shared_token(self) -> None:
+        """The obsidian env.split group exists without `.env.local` and never carries backend secrets."""
+        # `#[*]` (e.g. EXECENV_PRODUCTION) applies to every group by design and isn't
+        # a secret; only OBSIDIAN_VAULT_TOKEN should come from the obsidian-specific group.
+        obsidian_without_local = self._generated_group_values('obsidian', include_local_example=False)
+        self.assertEqual(obsidian_without_local.get('OBSIDIAN_VAULT_TOKEN'), '')
+
+        obsidian_with_local = self._generated_group_values('obsidian', include_local_example=True)
+        self.assertIn('OBSIDIAN_VAULT_TOKEN', obsidian_with_local)
+
+        backend_with_local = self._generated_group_values('backend', include_local_example=True)
+        self.assertEqual(backend_with_local['OBSIDIAN_VAULT_TOKEN'], obsidian_with_local['OBSIDIAN_VAULT_TOKEN'])
+        for leaked_key in (
+            'POSTGRES_URL',
+            'POSTGRES_USERNAME',
+            'POSTGRES_PASSWORD',
+            'REDIS_URL',
+            'CREDENTIALS_KEY',
+            'OPENAI_API_KEY',
+            'ANTHROPIC_API_KEY',
+            'GOOGLE_OAUTH_CLIENT_SECRET',
+            'DROPBOX_OAUTH_APP_SECRET',
+        ):
+            self.assertNotIn(leaked_key, obsidian_with_local)
+            self.assertIn(leaked_key, backend_with_local)
+
+    def test_vault_service_pins_python_and_node_dependency_versions(self) -> None:
+        """The vault service image installs from the workspace lock and pins headless."""
+        repository_root = Path(__file__).resolve().parents[3]
+        dockerfile = (repository_root / 'services/obsidian/Dockerfile').read_text()
+        requirements_txt = repository_root / 'services/obsidian/requirements.txt'
+
+        self.assertFalse(requirements_txt.exists(), 'requirements.txt must not duplicate uv.lock')
+        self.assertIn('uv export --frozen --package obsidian-vault', dockerfile)
+        self.assertRegex(dockerfile, r'OBSIDIAN_HEADLESS_VERSION=\d+\.\d+\.\d+')
+        self.assertIn('npm install -g "obsidian-headless@${OBSIDIAN_HEADLESS_VERSION}"', dockerfile)
+        self.assertNotIn('npm install -g obsidian-headless\n', dockerfile)
+
+    def test_env_example_documents_shared_vault_token(self) -> None:
+        """.env.local.example documents the token shared by backend and the vault service."""
+        repository_root = Path(__file__).resolve().parents[3]
+        env_example = (repository_root / '.env.local.example').read_text()
+
+        assignment = 'OBSIDIAN_VAULT_TOKEN='
+        self.assertEqual(env_example.count(assignment), 1)
+        self.assertIn('#[backend,obsidian]', env_example)
+        token_group_match = re.search(
+            r'^#\[backend,obsidian\]\s*$\n(?P<body>.*?)(?=^#\[|\Z)',
+            env_example,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(token_group_match)
+        token_group_body = token_group_match.group('body') if token_group_match else ''
+        self.assertRegex(token_group_body, rf'(?m)^{re.escape(assignment)}$')
 
 
 class TestCeleryEntrypointLogging(OTestCase):

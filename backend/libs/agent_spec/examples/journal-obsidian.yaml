@@ -1,0 +1,43 @@
+# title: Journal to Obsidian
+# description: Append journal emails as markdown notes into an Obsidian Sync vault.
+schema_version: 4
+description: Append journal emails into an Obsidian Sync vault
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+system_prompt: |
+  Draft a concise markdown journal entry from the email and append it under
+  Journal/ using the obsidian tool. Never overwrite an existing note.
+integrations:
+  - id: gmail-personal
+    type: gmail
+    credential_ref: gmail-personal
+    config:
+      subject: me@example.com
+tools:
+  - id: gmail-personal
+    integration: gmail-personal
+    allow: [list, read]
+  - id: vault
+    type: obsidian
+    credential_ref: obsidian-sync
+    config:
+      vault: personal
+      roots: [Journal]
+    allow: [append, read, list]
+queues:
+  - id: inbox
+    sources:
+      - id: gmail-main
+        integration: gmail-personal
+        config:
+          query: "in:inbox label:journal"
+          max_results: 25
+triggers:
+  - name: inbox-worker
+    kind: queue
+    queue: inbox
+    prompt: Append this email as a journal entry.
+    max_sessions: 1
+  - name: manual
+    kind: manual

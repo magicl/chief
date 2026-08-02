@@ -28,3 +28,8 @@ def delete_agent_for_user(user: AbstractBaseUser, agent_id: UUID) -> None:
     owner_id = agent.user_id
     agent.delete()
     publish_resource_update_after_commit(owner_id, 'agents')
+
+    from apps.agents.lifecycle import notify_agent_deleted
+
+    # `agent_id` is the function argument (already resolved), not the deleted row.
+    transaction.on_commit(lambda: notify_agent_deleted(agent_id))

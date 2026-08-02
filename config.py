@@ -122,6 +122,7 @@ class ClusterInfo(BuildArgoServiceClusterInfo, CdnClusterInfo, VersionClusterInf
             noValidate=['olib', 'olib/**'],
         ),
         PyRoot('./infra'),
+        PyRoot('./services/obsidian'),
         JSRoot(
             './backend/apps/web/static/web',
             noValidate=['node_modules/**', 'codemirror/**', 'rich-content/**'],

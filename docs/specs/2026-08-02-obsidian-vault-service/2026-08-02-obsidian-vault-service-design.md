@@ -1,7 +1,7 @@
 # Obsidian vault service — Design
 
 **Branch:** `feat/2026-08-02-obsidian-vault-service`
-Status: **plan**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Credentials:
 [`docs/specs/2026-07-03-key-management/`](../2026-07-03-key-management/2026-07-03-key-management-design.md) ·
@@ -61,9 +61,9 @@ reads Chief’s Postgres.
 
 | Piece | Owns |
 |-------|------|
-| **Vault service** (`services/obsidian/`) | Headless Sync lifecycle; **one working tree per vault**; agent→vault binding map; path-root enforcement; per-vault locks; file HTTP API; first-sync readiness |
-| **Chief backend** | `obsidian` tool + HTTP client; `apps.keys` for **Obsidian Sync** secrets; materialize/delete **ensure/release** notifications; path roots in agent config |
-| **Compose / deploy** | `chief-obsidian` container; volume for trees + headless config; inject **inter-service** URL + token into backend/worker and vault service |
+| **Vault service** (`services/obsidian/`) | Headless Sync lifecycle; **one working tree per vault**; agent→vault binding map; path-root enforcement (O_NOFOLLOW IO); per-vault locks; file HTTP API; first-sync readiness; **startup snapshot pull** from Chief |
+| **Chief backend** | `obsidian` tool + HTTP client; `apps.keys` for **Obsidian Sync** secrets; **`apps.obsidian`** lifecycle handlers + internal snapshot API; path roots in agent config |
+| **Compose / deploy** | `chief-obsidian` container; volume for trees + headless config; inject **inter-service** URL + token into backend/worker and vault service; `CHIEF_INTERNAL_URL` for vault→Chief snapshot |
 
 ```mermaid
 flowchart LR
@@ -104,10 +104,11 @@ chief/
   backend/
     libs/clients/obsidian/     # HTTP client to vault service
     libs/tools/tools/obsidian.py
-    apps/agents/               # ensure/release on materialize + delete
+    apps/agents/lifecycle.py   # generic materialize/delete registry
+    apps/obsidian/             # vault ensure/release + snapshot API
   services/
     obsidian/                  # Python HTTP service supervising `ob`
-      Dockerfile               # Python + Node 22+ (for obsidian-headless)
+      Dockerfile               # Python + Node 22+; deps via uv export --frozen
   infra/docker/                # chief-obsidian Compose service + volume
 ```
 
@@ -128,9 +129,15 @@ chief/
   `ob`.
 - **Image:** Python base **plus Node 22+** with `obsidian-headless` on `PATH`.
 - **Persistence:** Compose volume for vault working trees and headless local
-  config/login state.
-- **No Postgres / no Chief DB.** Bindings and readiness live in the vault
-  service’s own process state (and on-disk checkout metadata as needed).
+  config/login state. **Bindings and Sync credentials are not written to that
+  volume** — they live in process memory and are rebuilt by pulling Chief’s
+  authoritative snapshot on startup (`CHIEF_INTERNAL_URL` + inter-service token),
+  then kept current via ensure/release.
+- **No Postgres / no Chief DB.** The vault service talks to Chief only over the
+  internal HTTP snapshot endpoint (and receives incremental ensure/release).
+- **Path safety:** logical gate rejects `..` / absolute / outside roots; all
+  filesystem access uses descriptor-relative `openat` with `O_NOFOLLOW` so
+  symlinks cannot escape the vault root (including TOCTOU races).
 
 ### HTTP API (v1)
 

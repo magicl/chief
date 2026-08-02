@@ -24,6 +24,7 @@ INSTALLED_APPS += [  # noqa: F405
     'apps.web',
     'apps.keys',
     'apps.local_sync',
+    'apps.obsidian',
     'django_extensions',
     'django_celery_beat',
 ]
@@ -51,6 +52,11 @@ GOOGLE_OAUTH_CLIENT_SECRET = env.str('GOOGLE_OAUTH_CLIENT_SECRET', default='')  
 DROPBOX_OAUTH_APP_KEY = env.str('DROPBOX_OAUTH_APP_KEY', default='')  # noqa: F405
 DROPBOX_OAUTH_APP_SECRET = env.str('DROPBOX_OAUTH_APP_SECRET', default='')  # noqa: F405
 OAUTH_STATE_MAX_AGE_SECONDS = 600
+
+# Inter-service auth for the Obsidian vault service (Docker/Compose env injection,
+# never apps.keys — Obsidian Sync provider secrets live there separately).
+OBSIDIAN_VAULT_URL = env.str('OBSIDIAN_VAULT_URL', default='')  # noqa: F405
+OBSIDIAN_VAULT_TOKEN = env.str('OBSIDIAN_VAULT_TOKEN', default='')  # noqa: F405
 
 # Fernet master key for credential encryption at rest (see apps.keys.crypto).
 # Required when DEBUG is False; dev default when DEBUG is True.
