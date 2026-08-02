@@ -17,7 +17,7 @@ from apps.runner.hooks import HookSet
 
 # isort: split
 
-from libs.providers.llm.base import StreamResult
+from libs.providers.llm.base import StreamResult, provider_request_failed_message
 
 from olib.py.eval import EventLogWriter, RunPartition
 
@@ -54,7 +54,12 @@ def build_observability_hooks(
         preview = _shorten(_safe_text(result.content))
         emit(f'[generate] done content={preview!r} tool_calls={len(result.tool_calls)}')
         provider_failure = (
-            {'message': 'Provider request failed', 'code': result.error.code} if result.error is not None else None
+            {
+                'message': provider_request_failed_message(status_code=result.error.status_code),
+                'code': result.error.code,
+            }
+            if result.error is not None
+            else None
         )
         append(
             {
