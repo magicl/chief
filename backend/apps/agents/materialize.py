@@ -25,20 +25,13 @@ def _sync_triggers(agent: Agent, config: AgentConfig, triggers: list[TriggerSpec
         )
 
 
-def _sync_obsidian_vaults_on_commit(agent_id: UUID, spec: AgentConfigSpec) -> None:
-    """Reload the agent by id post-commit and ensure its obsidian vault bindings.
+def _notify_lifecycle_materialized(agent_id: UUID, user_id: int, spec: AgentConfigSpec) -> None:
+    """Dispatch registered materialize handlers after commit (agent must still exist)."""
+    from apps.agents.lifecycle import notify_agent_materialized
 
-    Reloading by id (rather than closing over the `agent` row materialize already
-    holds) avoids depending on that ORM instance staying fresh/unmutated until the
-    callback fires after commit — mirroring `sync_agent_schedule_triggers`, which
-    takes only `agent.id` for the same reason.
-    """
-    from apps.agents.vault_lifecycle import sync_obsidian_vaults
-
-    agent = Agent.objects.filter(pk=agent_id).first()
-    if agent is None:
+    if not Agent.objects.filter(pk=agent_id).exists():
         return
-    sync_obsidian_vaults(agent, spec)
+    notify_agent_materialized(agent_id, user_id, spec)
 
 
 def materialize_agent_config(agent: Agent, config: AgentConfig, spec: AgentConfigSpec) -> None:
@@ -51,5 +44,7 @@ def materialize_agent_config(agent: Agent, config: AgentConfig, spec: AgentConfi
     from apps.agents.services.schedule_beat import sync_agent_schedule_triggers
     from django.db import transaction
 
-    transaction.on_commit(lambda: sync_agent_schedule_triggers(agent.id))
-    transaction.on_commit(lambda: _sync_obsidian_vaults_on_commit(agent.id, spec))
+    agent_id = agent.id
+    user_id = agent.user_id
+    transaction.on_commit(lambda: sync_agent_schedule_triggers(agent_id))
+    transaction.on_commit(lambda: _notify_lifecycle_materialized(agent_id, user_id, spec))

@@ -36,6 +36,7 @@ services:
       - ../../.output/env.compose.obsidian
     environment:
       OBSIDIAN_VAULT_DATA: /data
+      CHIEF_INTERNAL_URL: http://chief-backend:8000
       PORT: "8100"
     volumes:
       - obsidian_vault_data:/data

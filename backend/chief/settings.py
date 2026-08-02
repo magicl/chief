@@ -24,6 +24,7 @@ INSTALLED_APPS += [  # noqa: F405
     'apps.web',
     'apps.keys',
     'apps.local_sync',
+    'apps.obsidian',
     'django_extensions',
     'django_celery_beat',
 ]

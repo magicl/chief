@@ -14,8 +14,8 @@ from uuid import UUID, uuid4
 from apps.agents.delete import delete_agent_for_user
 from apps.agents.materialize import materialize_agent_config
 from apps.agents.models import Agent, AgentConfig
-from apps.agents.vault_lifecycle import release_obsidian_vaults, sync_obsidian_vaults
 from apps.keys.services.commands import upsert_user_named
+from apps.obsidian.lifecycle import release_obsidian_vaults, sync_obsidian_vaults
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from libs.agent_spec import AgentConfigSpec, LLMSpec, ToolInstance
@@ -24,7 +24,7 @@ from libs.clients.obsidian.errors import ObsidianUnavailableError
 from olib.py.django.test.cases import OTestCase
 from olib.py.utils.logexpect import ExpectLogItem, expectLogItems
 
-_LOGGER = 'apps.agents.vault_lifecycle'
+_LOGGER = 'apps.obsidian.lifecycle'
 
 _VAULT_CONFIG = {'vault': 'Personal', 'roots': ['Journal']}
 
@@ -47,7 +47,7 @@ class TestSyncObsidianVaults(OTestCase):
             ToolInstance(id='vault', type='obsidian', credential_ref='obsidian-personal', config=_VAULT_CONFIG)
         )
 
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             sync_obsidian_vaults(self.agent, spec)
 
         client_cls.assert_not_called()
@@ -57,7 +57,7 @@ class TestSyncObsidianVaults(OTestCase):
         """Skip vault sync when the spec has no `obsidian` tool instances."""
         spec = _spec(ToolInstance(id='clock', type='clock', allow=['now']))
 
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             sync_obsidian_vaults(self.agent, spec)
 
         client_cls.assert_not_called()
@@ -76,7 +76,7 @@ class TestSyncObsidianVaults(OTestCase):
         )
 
         client = MagicMock()
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client) as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client) as client_cls:
             sync_obsidian_vaults(self.agent, spec)
 
         client_cls.assert_called_once_with(
@@ -103,7 +103,7 @@ class TestSyncObsidianVaults(OTestCase):
         )
 
         client = MagicMock()
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client):
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client):
             sync_obsidian_vaults(self.agent, spec)
 
         bindings = client.ensure_vaults.call_args.args[0]
@@ -117,7 +117,7 @@ class TestSyncObsidianVaults(OTestCase):
         """Skip a tool instance whose credential_ref does not resolve, without raising."""
         spec = _spec(ToolInstance(id='vault', type='obsidian', credential_ref='missing-cred', config=_VAULT_CONFIG))
 
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             sync_obsidian_vaults(self.agent, spec)
 
         client_cls.assert_not_called()
@@ -131,7 +131,7 @@ class TestSyncObsidianVaults(OTestCase):
             ToolInstance(id='vault', type='obsidian', credential_ref='obsidian-personal', config=_VAULT_CONFIG)
         )
 
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             sync_obsidian_vaults(self.agent, spec)
 
         client_cls.assert_not_called()
@@ -145,7 +145,7 @@ class TestSyncObsidianVaults(OTestCase):
             ToolInstance(id='vault', type='obsidian', credential_ref='obsidian-personal', config={'vault': 'Personal'}),
         )
 
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             sync_obsidian_vaults(self.agent, spec)
 
         client_cls.assert_not_called()
@@ -161,7 +161,7 @@ class TestSyncObsidianVaults(OTestCase):
 
         client = MagicMock()
         client.ensure_vaults.side_effect = ObsidianUnavailableError('boom')
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client):
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client):
             sync_obsidian_vaults(self.agent, spec)  # must not raise
 
     @override_settings(OBSIDIAN_VAULT_URL='http://vault.internal', OBSIDIAN_VAULT_TOKEN='service-token')
@@ -176,7 +176,7 @@ class TestSyncObsidianVaults(OTestCase):
         )
 
         client = MagicMock()
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client):
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client):
             sync_obsidian_vaults(self.agent, spec)
 
         bindings = client.ensure_vaults.call_args.args[0]
@@ -190,7 +190,7 @@ class TestReleaseObsidianVaults(OTestCase):
     @override_settings(OBSIDIAN_VAULT_URL='', OBSIDIAN_VAULT_TOKEN='')
     def test_noop_without_vault_url(self) -> None:
         """Skip release entirely when the vault service is not configured."""
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             release_obsidian_vaults(uuid4())
 
         client_cls.assert_not_called()
@@ -200,7 +200,7 @@ class TestReleaseObsidianVaults(OTestCase):
         """Build a client scoped to the given agent id and call release_vaults."""
         agent_id = uuid4()
         client = MagicMock()
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client) as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client) as client_cls:
             release_obsidian_vaults(agent_id)
 
         client_cls.assert_called_once_with(
@@ -216,7 +216,7 @@ class TestReleaseObsidianVaults(OTestCase):
         """Log and swallow a client failure instead of propagating it."""
         client = MagicMock()
         client.release_vaults.side_effect = ObsidianUnavailableError('boom')
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client):
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client):
             release_obsidian_vaults(uuid4())  # must not raise
 
 
@@ -238,7 +238,7 @@ class TestMaterializeSchedulesObsidianSync(OTestCase):
         )
 
         client = MagicMock()
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient', return_value=client):
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient', return_value=client):
             with self.captureOnCommitCallbacks(execute=True):
                 materialize_agent_config(agent, config, spec)
 
@@ -260,7 +260,7 @@ class TestMaterializeSchedulesObsidianSync(OTestCase):
             spec=spec.model_dump(mode='json'),
         )
 
-        with patch('apps.agents.vault_lifecycle.ObsidianVaultClient') as client_cls:
+        with patch('apps.obsidian.lifecycle.ObsidianVaultClient') as client_cls:
             with self.captureOnCommitCallbacks(execute=False):
                 materialize_agent_config(agent, config, spec)
             client_cls.assert_not_called()
@@ -274,7 +274,7 @@ class TestDeleteSchedulesObsidianRelease(OTestCase):
         agent = Agent.objects.create(user_id=user.pk, name='Del vault agent', identifier='del-vault-agent')
         agent_id = agent.id
 
-        with patch('apps.agents.vault_lifecycle.release_obsidian_vaults') as release:
+        with patch('apps.obsidian.lifecycle.release_obsidian_vaults') as release:
             with self.captureOnCommitCallbacks(execute=True):
                 delete_agent_for_user(user, agent_id)
 
@@ -292,7 +292,7 @@ class TestDeleteSchedulesObsidianRelease(OTestCase):
         def _fake_release(released_agent_id: UUID) -> None:
             seen_exists.append(Agent.objects.filter(pk=released_agent_id).exists())
 
-        with patch('apps.agents.vault_lifecycle.release_obsidian_vaults', side_effect=_fake_release):
+        with patch('apps.obsidian.lifecycle.release_obsidian_vaults', side_effect=_fake_release):
             with self.captureOnCommitCallbacks(execute=True):
                 delete_agent_for_user(user, agent_id)
 

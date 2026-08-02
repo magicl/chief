@@ -4,10 +4,11 @@
 # ~
 """Process entrypoint wiring real collaborators for the vault service.
 
-Reads `OBSIDIAN_VAULT_TOKEN` (inter-service bearer token) and
-`OBSIDIAN_VAULT_DATA` (working-tree/state data dir) from the environment,
-wires the real `ObsidianHeadlessSupervisor` + `VaultBindingStore` +
-`VaultFileService`, and exposes the resulting `app` for
+Reads `OBSIDIAN_VAULT_TOKEN` (inter-service bearer token),
+`OBSIDIAN_VAULT_DATA` (working-tree/state data dir), and
+`CHIEF_INTERNAL_URL` (Chief backend base URL for startup binding reconcile)
+from the environment, wires the real `ObsidianHeadlessSupervisor` +
+`VaultBindingStore` + `VaultFileService`, and exposes the resulting `app` for
 `uvicorn obsidian_vault.main:app`. Import-time env lookups are intentional:
 this module is only imported by the ASGI server process, never by tests
 (which call `create_app` directly with fakes). Fails fast (raises at import
@@ -17,13 +18,17 @@ blank, since an empty token would otherwise silently disable auth.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 from obsidian_vault.app import create_app
 from obsidian_vault.bindings import VaultBindingStore
 from obsidian_vault.files import VaultFileService
+from obsidian_vault.reconcile import reconcile_bindings_from_chief
 from obsidian_vault.supervisor import ObsidianHeadlessSupervisor
+
+logger = logging.getLogger(__name__)
 
 OBSIDIAN_VAULT_TOKEN = os.environ.get('OBSIDIAN_VAULT_TOKEN', '')
 if not OBSIDIAN_VAULT_TOKEN:
@@ -33,9 +38,33 @@ if not OBSIDIAN_VAULT_TOKEN:
     )
 
 OBSIDIAN_VAULT_DATA = Path(os.environ.get('OBSIDIAN_VAULT_DATA', '/data'))
+CHIEF_INTERNAL_URL = os.environ.get('CHIEF_INTERNAL_URL', '').rstrip('/')
 
 _store = VaultBindingStore()
 _supervisor = ObsidianHeadlessSupervisor(OBSIDIAN_VAULT_DATA)
 _files = VaultFileService(_store, vault_root_for=_supervisor.vault_dir)
 
-app = create_app(token=OBSIDIAN_VAULT_TOKEN, store=_store, files=_files, supervisor=_supervisor)
+
+def _startup_reconcile() -> None:
+    """Pull Chief's binding snapshot when CHIEF_INTERNAL_URL is configured."""
+    if not CHIEF_INTERNAL_URL:
+        logger.warning(
+            'CHIEF_INTERNAL_URL unset; skipping startup binding reconcile '
+            '(bindings will only appear via ensure/release)'
+        )
+        return
+    reconcile_bindings_from_chief(
+        store=_store,
+        supervisor=_supervisor,
+        chief_internal_url=CHIEF_INTERNAL_URL,
+        token=OBSIDIAN_VAULT_TOKEN,
+    )
+
+
+app = create_app(
+    token=OBSIDIAN_VAULT_TOKEN,
+    store=_store,
+    files=_files,
+    supervisor=_supervisor,
+    on_startup=_startup_reconcile,
+)

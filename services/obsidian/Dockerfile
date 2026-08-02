@@ -1,3 +1,7 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# Copyright 2024 Øivind Loe
+# See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
+# ~
 FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91
 
 ENV LANG=C.UTF-8
@@ -26,14 +30,22 @@ RUN groupadd --system app \
     && mkdir -p /data \
     && chown app:app /data /app
 
+# Install locked Python deps from the workspace lock (same pattern as backend/Dockerfile.dev).
+# Build context is the repository root.
+RUN python -m pip install --disable-pip-version-check --root-user-action=ignore uv
+WORKDIR /deps
+COPY ./pyproject.toml ./uv.lock ./
+COPY ./backend/pyproject.toml ./backend/pyproject.toml
+COPY ./infra/pyproject.toml ./infra/pyproject.toml
+COPY ./olib/pyproject.toml ./olib/pyproject.toml
+COPY ./services/obsidian/pyproject.toml ./services/obsidian/pyproject.toml
+RUN uv export --frozen --package obsidian-vault --no-hashes --output-file requirements.lock.txt \
+    && uv pip install -r requirements.lock.txt --system --no-cache
+
 WORKDIR /app
 
-# Vault HTTP service runtime (FastAPI + uvicorn).
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY --chown=app:app obsidian_vault/ obsidian_vault/
-COPY --chown=app:app entrypoint.sh .
+COPY --chown=app:app services/obsidian/obsidian_vault/ obsidian_vault/
+COPY --chown=app:app services/obsidian/entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
 USER app

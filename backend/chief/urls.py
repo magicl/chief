@@ -18,6 +18,7 @@ urlpatterns = [
     path('health/livez', livez, name='health_livez'),
     path('health/readyz', readyz, name='health_readyz'),
     path('client/check', check, name='client_check'),
+    path('', include('apps.obsidian.urls')),
     path('', include('apps.web.urls')),
 ]
 
