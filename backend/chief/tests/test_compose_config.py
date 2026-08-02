@@ -300,6 +300,27 @@ class TestComposeLocalProviderConfig(OTestCase):
             )
 
 
+class TestComposeCeleryBackendGate(OTestCase):
+    """Check that Celery services wait for a migrated, healthy backend."""
+
+    def test_celery_services_wait_for_healthy_backend(self) -> None:
+        """Worker and Beat start only after backend healthcheck passes."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+
+        for service_name in ('chief-worker', 'chief-beat'):
+            depends_on = compose['services'][service_name]['depends_on']
+            self.assertEqual(
+                depends_on['chief-backend'],
+                {'condition': 'service_healthy'},
+            )
+            self.assertEqual(
+                depends_on['chief-redis'],
+                {'condition': 'service_started'},
+            )
+
+
 class TestComposeRichContentAssets(OTestCase):
     """Check that static Nginx serves the external generated renderer lane."""
 

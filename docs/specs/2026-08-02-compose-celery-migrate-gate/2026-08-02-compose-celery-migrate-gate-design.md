@@ -1,7 +1,7 @@
 # Compose Celery waits for migrations
 
 **Branch:** `feat/2026-08-02-compose-celery-migrate-gate`
-Status: **plan**
+Status: **review**
 
 ## Goal
 

@@ -133,7 +133,7 @@ services:
       - ../../.local:/mnt/local
     depends_on:
       chief-backend:
-        condition: service_started
+        condition: service_healthy
       chief-redis:
         condition: service_started
   # Celery beat: schedules periodic dispatch + monitor sweeps.
@@ -167,6 +167,8 @@ services:
       - ../../olib:/app/olib
       - ../../.local:/mnt/local
     depends_on:
+      chief-backend:
+        condition: service_healthy
       chief-redis:
         condition: service_started
 volumes:
