@@ -388,6 +388,7 @@ class TestComposeObsidianVaultService(OTestCase):
         self.assertEqual(vault_service['build']['dockerfile'], 'services/obsidian/Dockerfile')
         self.assertIn('obsidian_vault_data:/data', vault_service['volumes'])
         self.assertEqual(vault_service['environment']['OBSIDIAN_VAULT_DATA'], '/data')
+        self.assertEqual(vault_service['environment']['CHIEF_INTERNAL_URL'], 'http://chief-backend:8000')
         self.assertEqual(vault_service['environment']['PORT'], '8100')
         self.assertIn('obsidian_vault_data', compose['volumes'])
 
@@ -447,17 +448,13 @@ class TestComposeObsidianVaultService(OTestCase):
             self.assertIn(leaked_key, backend_with_local)
 
     def test_vault_service_pins_python_and_node_dependency_versions(self) -> None:
-        """The vault service image installs exact, tested dependency versions."""
+        """The vault service image installs from the workspace lock and pins headless."""
         repository_root = Path(__file__).resolve().parents[3]
-        requirements = (repository_root / 'services/obsidian/requirements.txt').read_text()
         dockerfile = (repository_root / 'services/obsidian/Dockerfile').read_text()
+        requirements_txt = repository_root / 'services/obsidian/requirements.txt'
 
-        for line in requirements.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            self.assertIn('==', stripped, f'unpinned requirement: {stripped!r}')
-
+        self.assertFalse(requirements_txt.exists(), 'requirements.txt must not duplicate uv.lock')
+        self.assertIn('uv export --frozen --package obsidian-vault', dockerfile)
         self.assertRegex(dockerfile, r'OBSIDIAN_HEADLESS_VERSION=\d+\.\d+\.\d+')
         self.assertIn('npm install -g "obsidian-headless@${OBSIDIAN_HEADLESS_VERSION}"', dockerfile)
         self.assertNotIn('npm install -g obsidian-headless\n', dockerfile)

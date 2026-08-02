@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 from obsidian_vault.bindings import SyncPendingError, VaultBindingStore
 from obsidian_vault.files import VaultFileService
-from obsidian_vault.paths import PathGateError
+from obsidian_vault.paths import PathGateError, open_file_under_roots
 
 
 class TestVaultFileService(unittest.TestCase):
@@ -114,14 +114,28 @@ class TestVaultFileService(unittest.TestCase):
         self._mark_ready()
         lock = self.store.lock_for('Personal')
         observed_locked_state: dict[str, bool] = {}
-        original_write_text = Path.write_text
+        original_open = open_file_under_roots
 
-        def spy_write_text(path_self: Path, *args: object, **kwargs: object) -> int:
+        def spy_open(*args: object, **kwargs: object) -> int:
             observed_locked_state['locked'] = lock.locked()
-            return original_write_text(path_self, *args, **kwargs)  # type: ignore[arg-type]
+            return original_open(*args, **kwargs)  # type: ignore[arg-type]
 
-        with unittest.mock.patch.object(Path, 'write_text', spy_write_text):
+        with unittest.mock.patch('obsidian_vault.files.open_file_under_roots', spy_open):
             self.files.write_text('agent-1', 'Personal', 'Journal/note.md', 'hi')
 
         self.assertTrue(observed_locked_state['locked'])
         self.assertFalse(lock.locked())
+
+    def test_read_rejects_symlink_leaf(self) -> None:
+        """Symlink leaf under an allowed root must raise PathGateError, not leak content."""
+        self._mark_ready()
+        journal = self.vault_root / 'Journal'
+        journal.mkdir(parents=True)
+        secret = self.vault_root / 'Secrets'
+        secret.mkdir()
+        target = secret / 'x.md'
+        target.write_text('secret', encoding='utf-8')
+        (journal / 'note.md').symlink_to(target)
+
+        with self.assertRaises(PathGateError):
+            self.files.read_text('agent-1', 'Personal', 'Journal/note.md')

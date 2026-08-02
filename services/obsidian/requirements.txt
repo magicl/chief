@@ -1,6 +1,0 @@
-# Pinned to the versions resolved in uv.lock (services/obsidian is a uv workspace
-# member) so the Docker image installs exactly what's tested. Bump both together
-# via `orun py upgrade` (updates uv.lock) and this file.
-fastapi==0.141.1
-uvicorn[standard]==0.42.0
-httpx==0.28.1

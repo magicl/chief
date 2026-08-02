@@ -29,8 +29,7 @@ def delete_agent_for_user(user: AbstractBaseUser, agent_id: UUID) -> None:
     agent.delete()
     publish_resource_update_after_commit(owner_id, 'agents')
 
-    from apps.agents.vault_lifecycle import release_obsidian_vaults
+    from apps.agents.lifecycle import notify_agent_deleted
 
-    # `agent_id` is the function argument (an already-resolved UUID value), not the
-    # now-deleted `agent` row, so this is safe to close over after the row is gone.
-    transaction.on_commit(lambda: release_obsidian_vaults(agent_id))
+    # `agent_id` is the function argument (already resolved), not the deleted row.
+    transaction.on_commit(lambda: notify_agent_deleted(agent_id))

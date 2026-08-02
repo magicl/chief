@@ -14,6 +14,9 @@ lives here — `bindings`/`files`/`paths`/`supervisor` only raise.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI
@@ -81,6 +84,7 @@ def create_app(
     store: VaultBindingStore,
     files: VaultFileService,
     supervisor: HeadlessSupervisor,
+    on_startup: Callable[[], None] | None = None,
 ) -> FastAPI:
     """Build the vault service FastAPI app wired to the given collaborators.
 
@@ -88,8 +92,18 @@ def create_app(
     `FakeSupervisor` and an isolated `VaultBindingStore`/`VaultFileService`
     pair; `main.py` wires the real implementations from environment
     configuration. `files` is assumed to already be bound to `store`.
+    Optional `on_startup` runs once during ASGI lifespan (e.g. Chief snapshot
+    reconcile) before the server accepts traffic.
     """
-    app = FastAPI(title='Obsidian Vault Service')
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        """Run optional startup reconcile, then yield until shutdown."""
+        if on_startup is not None:
+            await asyncio.to_thread(on_startup)
+        yield
+
+    app = FastAPI(title='Obsidian Vault Service', lifespan=lifespan)
     auth = BearerTokenAuth(token)
     authenticated = Depends(auth)
 

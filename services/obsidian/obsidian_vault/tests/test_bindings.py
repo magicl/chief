@@ -80,3 +80,64 @@ class TestVaultBindingStore(unittest.TestCase):
         )
         with self.assertRaises(SyncPendingError):
             store.require_ready('agent-1', 'Personal')
+
+    def test_replace_all_agents_cold_start_returns_needs_start(self) -> None:
+        """Empty store + snapshot should need a supervisor start for each vault."""
+        store = VaultBindingStore()
+        needs_start, released = store.replace_all_agents(
+            [
+                {
+                    'agent_id': 'agent-1',
+                    'bindings': [
+                        {
+                            'vault_id': 'Personal',
+                            'roots': ['Journal'],
+                            'credential': {'auth_token': 'tok'},
+                        }
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(needs_start, ['Personal'])
+        self.assertEqual(released, [])
+        binding = store.get_binding('agent-1', 'Personal')
+        self.assertEqual(binding.roots, ['Journal'])
+        self.assertFalse(binding.ready)
+
+    def test_replace_all_agents_preserves_ready_for_still_referenced_vaults(self) -> None:
+        """Vaults that remain referenced keep readiness across a snapshot replace."""
+        store = VaultBindingStore()
+        store.ensure_agent(
+            'agent-1',
+            [{'vault_id': 'Personal', 'roots': ['Journal'], 'credential': {'auth_token': 'tok'}}],
+        )
+        store.mark_vault_ready('Personal')
+        needs_start, released = store.replace_all_agents(
+            [
+                {
+                    'agent_id': 'agent-1',
+                    'bindings': [
+                        {
+                            'vault_id': 'Personal',
+                            'roots': ['Journal'],
+                            'credential': {'auth_token': 'tok'},
+                        }
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(needs_start, [])
+        self.assertEqual(released, [])
+        self.assertTrue(store.require_ready('agent-1', 'Personal'))
+
+    def test_replace_all_agents_releases_removed_vaults(self) -> None:
+        """Vaults absent from the new snapshot are returned as released."""
+        store = VaultBindingStore()
+        store.ensure_agent(
+            'agent-1',
+            [{'vault_id': 'Personal', 'roots': ['Journal'], 'credential': {'auth_token': 'tok'}}],
+        )
+        needs_start, released = store.replace_all_agents([])
+        self.assertEqual(needs_start, [])
+        self.assertEqual(released, ['Personal'])
+        self.assertFalse(store.has_references('Personal'))

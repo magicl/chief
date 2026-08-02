@@ -25,6 +25,7 @@ backend/
 | `apps.runner` | Celery step loop, LLM + tool invocation |
 | `apps.bus` | Foundational Redis pub/sub, resource publishers, leases, and mailbox |
 | `apps.keys` | Encrypted credentials (system + user) |
+| `apps.obsidian` | Obsidian vault lifecycle + internal snapshot API for the vault service |
 | `apps.local_sync` | Finite cross-domain local-provider reconciliation |
 | `apps.web` | Dashboard, SSE, control endpoints |
 
@@ -38,13 +39,16 @@ backend/
 | `apps.bus` | Django/stdlib only; domain-free |
 | `apps.runner` | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
 | `apps.keys` | Django/stdlib, `cryptography`, foundational `bus` publishers |
+| `apps.obsidian` | `agents` (lifecycle registry + models), `keys`, `libs.clients.obsidian`, `libs.agent_spec` |
 | `apps.local_sync` | `agents`, `keys`, `bus`, `libs.file` |
 | `apps.web` | Domain apps and foundational `bus` (keys: metadata + commands only); not `local_sync` |
 
 Import edges point from the importer toward its dependencies. `bus` stays foundational
 and domain-free: it imports no domain app, while `agents` and `keys` may import its
 publisher helpers. `keys` imports only `bus` among apps. **`apps.agents`** imports
-**`apps.queues`** only for config materialization (`sync_from_spec`). `local_sync` is
+**`apps.queues`** only for config materialization (`sync_from_spec`). `apps.obsidian`
+registers against the generic agent lifecycle registry and must not be imported by
+`apps.agents`. `local_sync` is
 an outer, cross-domain reconciler that may import `agents`, `keys`, `bus`, and
 `libs.file`; no domain app imports `local_sync`. `web` remains the outer HTTP
 transport and must not import `resolve_*` from keys.
@@ -510,8 +514,12 @@ call per request. The `obsidian` tool (`libs/tools/tools/obsidian.py` +
 URL and token** (`OBSIDIAN_VAULT_URL` / `OBSIDIAN_VAULT_TOKEN`), which is deliberately
 kept out of `apps.keys` since it is deployment plumbing, not a per-user provider
 credential. Obsidian **Sync** secrets (headless auth token, optional E2E vault
-password) are a normal `apps.keys` credential referenced by `credential_ref` and are
-**pushed to the vault service only at agent config materialize** (`ensure_agent_vaults`,
-alongside the tool's configured `roots`) — the tool's invoke path never re-sends them.
-Until a vault's initial full Sync completes, the vault service returns a retryable
-`sync_pending` error that the tool stalls/retries on with backoff.
+password) are a normal `apps.keys` credential referenced by `credential_ref`.
+`apps.obsidian` owns vault ensure/release (registered on the generic
+`apps.agents.lifecycle` hooks) and an internal snapshot endpoint the vault service
+**pulls on startup** to rebuild its in-memory binding map after restart — credentials
+are never persisted on the vault volume. Incremental materialize/delete notifications
+continue after that. File IO walks paths with `O_NOFOLLOW` descriptor ops so symlinks
+cannot escape configured roots. Until a vault's initial full Sync completes, the vault
+service returns a retryable `sync_pending` error that the tool stalls/retries on with
+backoff.

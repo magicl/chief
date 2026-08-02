@@ -55,10 +55,11 @@ class VaultBinding:
 class VaultBindingStore:
     """In-memory registry of agent-to-vault bindings with refcounting and readiness.
 
-    Not persisted: callers are expected to reconstruct desired state (e.g.
-    from agent config) on process restart and re-call `ensure_agent`. All
-    public methods take a single internal guard lock for structural
-    updates; `lock_for` exposes a separate per-vault lock intended for
+    Not persisted to disk (Chief remains authoritative; credentials must not
+    sit on the vault volume). On process restart, `replace_all_agents` is fed
+    from Chief's snapshot API, and incremental `ensure_agent` / `release_agent`
+    keep the map current. All public methods take a single internal guard lock
+    for structural updates; `lock_for` exposes a separate per-vault lock for
     callers coordinating supervisor start/stop around readiness changes.
     """
 
@@ -192,6 +193,57 @@ class VaultBindingStore:
         with self._guard:
             record = self._vaults.get(vault_id)
             return record is not None and bool(record.agent_ids)
+
+    def replace_all_agents(self, agents: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+        """Atomically replace every agent binding from a Chief snapshot.
+
+        ``agents`` is a list of ``{"agent_id": str, "bindings": [binding dicts...]}``.
+        Returns ``(needs_start, released)``: vault ids that need supervisor start
+        (new or credential-changed) and vault ids whose last agent left so the
+        supervisor should stop. Readiness is preserved for vaults that remain
+        referenced and were already ready; vaults that drop to zero refs clear ready.
+        """
+        with self._guard:
+            previous_agents = set(self._agent_bindings)
+            previous_vault_agents = {vault_id: set(record.agent_ids) for vault_id, record in self._vaults.items()}
+            previous_ready = {vault_id: record.ready for vault_id, record in self._vaults.items()}
+            previous_credentials: dict[tuple[str, str], Any] = {}
+            for agent_id, bindings in self._agent_bindings.items():
+                for vault_id, binding in bindings.items():
+                    previous_credentials[(agent_id, vault_id)] = binding.get('credential')
+
+            self._agent_bindings = {}
+            self._vaults = {}
+
+            needs_start: list[str] = []
+            seen_start: set[str] = set()
+            for entry in agents:
+                agent_id = entry['agent_id']
+                new_bindings = {binding['vault_id']: binding for binding in entry.get('bindings', [])}
+                self._agent_bindings[agent_id] = new_bindings
+                for vault_id, binding in new_bindings.items():
+                    record = self._vaults.setdefault(vault_id, _VaultRecord())
+                    record.agent_ids.add(agent_id)
+                    was_referenced = agent_id in previous_vault_agents.get(vault_id, set())
+                    credential_changed = was_referenced and previous_credentials.get(
+                        (agent_id, vault_id)
+                    ) != binding.get('credential')
+                    if (not was_referenced or credential_changed) and vault_id not in seen_start:
+                        needs_start.append(vault_id)
+                        seen_start.add(vault_id)
+
+            for vault_id, record in self._vaults.items():
+                if previous_ready.get(vault_id) and record.agent_ids:
+                    record.ready = True
+
+            released = [
+                vault_id
+                for vault_id, old_agents in previous_vault_agents.items()
+                if old_agents and vault_id not in self._vaults
+            ]
+            # Agents removed entirely: covered by vaults that disappeared above.
+            del previous_agents
+        return needs_start, released
 
     def require_ready(self, agent_id: str, vault_id: str) -> bool:
         """Return True if vault_id is ready for agent_id, else raise SyncPendingError.

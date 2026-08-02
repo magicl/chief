@@ -2,14 +2,11 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Ensure/release Obsidian vault bindings for an agent's `obsidian` tool instances.
+"""Ensure/release Obsidian vault bindings for agent lifecycle events.
 
-Called from `materialize.py` (after a config save) and `delete.py` (after an agent
-delete), both from within `transaction.on_commit` — the vault service is a separate
-process over HTTP and may be briefly unreachable, so neither ensure nor release ever
-raises. A failure here just means the vault service stays out of sync with the agent's
-config until the next materialize (e.g. an operator re-saving the config) or a manual
-retry; it must never roll back the DB transaction that already committed.
+Registered from ``apps.obsidian.apps.ObsidianConfig.ready`` so ``apps.agents``
+never imports vault code. Failures are logged only — never raised into the
+lifecycle notifier (same contract as the former ``apps.agents.vault_lifecycle``).
 """
 
 from __future__ import annotations
@@ -35,11 +32,7 @@ _CREDENTIAL_TYPE = 'obsidian'
 
 
 def _parse_credential_json(raw: str, *, agent_id: UUID, tool_id: str) -> dict[str, Any] | None:
-    """Parse the resolved secret as the `{"auth_token", "encryption_password"?}` JSON shape.
-
-    Returns None (logging why) instead of raising — one tool instance's bad credential
-    must not prevent ensuring the other instances' vaults.
-    """
+    """Parse Sync credential JSON; return None (and log) on malformed input."""
     try:
         parsed = json.loads(raw)
     except ValueError:
@@ -62,13 +55,8 @@ def _parse_credential_json(raw: str, *, agent_id: UUID, tool_id: str) -> dict[st
     return credential
 
 
-def _build_binding(agent: Agent, tool: ToolInstance) -> dict[str, Any] | None:
-    """Resolve one `obsidian` tool instance into an `ensure_vaults` binding, or None to skip it.
-
-    Skips (logging why) rather than raising on bad config, a missing/unresolvable
-    credential_ref, or malformed credential JSON, so one misconfigured tool instance
-    does not block ensuring the others.
-    """
+def build_binding_for_tool(agent: Agent, tool: ToolInstance) -> dict[str, Any] | None:
+    """Resolve one ``obsidian`` tool instance into an ensure/snapshot binding, or None."""
     try:
         config = parse_obsidian_tool_config(tool.config)
     except ObsidianConfigError as exc:
@@ -91,22 +79,24 @@ def _build_binding(agent: Agent, tool: ToolInstance) -> dict[str, Any] | None:
     return {'vault_id': config.vault, 'roots': list(config.roots), 'credential': credential}
 
 
-def sync_obsidian_vaults(agent: Agent, spec: AgentConfigSpec) -> None:
-    """Ensure the vault service holds bindings for every `obsidian` tool instance in *spec*.
+def bindings_for_spec(agent: Agent, spec: AgentConfigSpec) -> list[dict[str, Any]]:
+    """Build vault-service bindings for every valid ``obsidian`` tool on *spec*."""
+    return [
+        binding
+        for binding in (build_binding_for_tool(agent, tool) for tool in spec.tools if tool.type == _TOOL_TYPE)
+        if binding is not None
+    ]
 
-    No-ops (logging at info) when there are no `obsidian` tools, or when
-    `settings.OBSIDIAN_VAULT_URL` is unset — the latter keeps tests/dev environments
-    without the vault service materializing agent configs cleanly. See module docstring
-    for why failures are only logged, never raised.
-    """
-    obsidian_tools = [tool for tool in spec.tools if tool.type == _TOOL_TYPE]
-    if not obsidian_tools:
+
+def sync_obsidian_vaults(agent: Agent, spec: AgentConfigSpec) -> None:
+    """Ensure the vault service holds bindings for this agent's ``obsidian`` tools."""
+    if not any(tool.type == _TOOL_TYPE for tool in spec.tools):
         return
     if not settings.OBSIDIAN_VAULT_URL:
         logger.info('agent %s has obsidian tools but OBSIDIAN_VAULT_URL is unset; skipping vault ensure', agent.id)
         return
 
-    bindings = [binding for binding in (_build_binding(agent, tool) for tool in obsidian_tools) if binding is not None]
+    bindings = bindings_for_spec(agent, spec)
     if not bindings:
         return
 
@@ -122,12 +112,7 @@ def sync_obsidian_vaults(agent: Agent, spec: AgentConfigSpec) -> None:
 
 
 def release_obsidian_vaults(agent_id: UUID) -> None:
-    """Release all vault bindings for a deleted agent; no-op if the vault service isn't configured.
-
-    `agent_id` must be captured before the agent row is deleted — by the time this
-    runs (post-commit) the row is already gone. See module docstring for why failures
-    are only logged, never raised.
-    """
+    """Release all vault bindings for a deleted agent."""
     if not settings.OBSIDIAN_VAULT_URL:
         return
     try:
@@ -139,3 +124,17 @@ def release_obsidian_vaults(agent_id: UUID) -> None:
         client.release_vaults()
     except ObsidianVaultError as exc:
         logger.warning('agent %s obsidian vault release failed: %s', agent_id, exc)
+
+
+def on_agent_materialized(agent_id: UUID, user_id: int, spec: AgentConfigSpec) -> None:
+    """Lifecycle hook: ensure vault bindings after materialize (user_id unused; agent owns owner)."""
+    del user_id  # agent.user_id is authoritative; kept for registry signature
+    agent = Agent.objects.filter(pk=agent_id).first()
+    if agent is None:
+        return
+    sync_obsidian_vaults(agent, spec)
+
+
+def on_agent_deleted(agent_id: UUID) -> None:
+    """Lifecycle hook: release vault bindings after agent delete."""
+    release_obsidian_vaults(agent_id)
