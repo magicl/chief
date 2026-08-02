@@ -79,6 +79,29 @@ const textsOf = (selector) => Array.from(
   (element) => element.textContent.trim(),
 );
 
+/**
+ * Report whether `x-show` leaves an element on screen.
+ * Rows stay in the DOM when hidden, so text assertions alone cannot tell a
+ * rendered row from one buried in a collapsed ancestor's disclosure.
+ */
+const isVisible = (element) => {
+  for (let node = element; node; node = node.parentElement) {
+    if (node.style?.display === 'none') {
+      return false;
+    }
+  }
+  return true;
+};
+
+/** Return the first element matching a selector, failing loudly when absent. */
+const elementOf = (selector) => {
+  const found = runtimeWindow.document.querySelector(selector);
+  if (!found) {
+    throw new Error(`no element matched ${selector}`);
+  }
+  return found;
+};
+
 /** Let Alpine flush its effect queue and the async row init work. */
 const settle = async () => {
   await new Promise((resolve) => { Alpine.nextTick(resolve); });
@@ -126,8 +149,14 @@ describe('recursive activity row rendering', () => {
           id: 'nested', parent_id: 'tool', seq: 3, kind: 'llm', name: 'gpt-5',
           status: 'succeeded', latency_ms: 1200, model: 'gpt-5', details: { usage: { input: 10 } },
         }),
-        act({ id: 'out', seq: 4, kind: 'output', summary: 'assistant', details: { content: 'hi back' } }),
-        act({ id: 'sub', seq: 5, kind: 'subagent', name: 'research', child_session_id: 'kid' }),
+        // The runtime parents generated messages to the LLM turn that produced
+        // them, so this is the shape a real assistant reply arrives in.
+        act({
+          id: 'nested-out', parent_id: 'nested', seq: 4, kind: 'output',
+          summary: 'assistant', details: { content: 'nested reply' },
+        }),
+        act({ id: 'out', seq: 5, kind: 'output', summary: 'assistant', details: { content: 'hi back' } }),
+        act({ id: 'sub', seq: 6, kind: 'subagent', name: 'research', child_session_id: 'kid' }),
       ],
     });
 
@@ -166,14 +195,32 @@ describe('recursive activity row rendering', () => {
   });
 
   test('renders one initialized row per activity, including nested children', () => {
-    expect(runtimeWindow.document.querySelectorAll('.activity-row')).toHaveLength(6);
+    expect(runtimeWindow.document.querySelectorAll('.activity-row')).toHaveLength(7);
     // An uninitialized clone keeps x-show markers visible and leaves x-if unexpanded.
     expect(runtimeWindow.document.querySelector('.activity-depth-marker').style.display).toBe('none');
   });
 
   test('renders input and output message bodies as plain text', () => {
     expect(textsOf('.kind-input .event-body')).toEqual(['hello there']);
-    expect(textsOf('.kind-output pre.event-body')).toEqual(['hi back']);
+    expect(textsOf('.kind-output pre.event-body')).toEqual(['nested reply', 'hi back']);
+  });
+
+  test('shows a message nested under a collapsed execution row', () => {
+    const nestedBody = Array.from(
+      runtimeWindow.document.querySelectorAll('.kind-output pre.event-body'),
+    ).find((element) => element.textContent.trim() === 'nested reply');
+    expect(isVisible(nestedBody)).toBe(true);
+  });
+
+  test('shows nested execution rows while their parent stays collapsed', () => {
+    const nestedLine = Array.from(
+      runtimeWindow.document.querySelectorAll('.activity-toggle'),
+    ).find((element) => element.textContent.trim().startsWith('LLM · gpt-5'));
+    expect(isVisible(nestedLine)).toBe(true);
+  });
+
+  test('hides curated details of a collapsed execution row', () => {
+    expect(isVisible(elementOf('.activity-detail'))).toBe(false);
   });
 
   test('renders collapsed execution lines for non-message activities', () => {
