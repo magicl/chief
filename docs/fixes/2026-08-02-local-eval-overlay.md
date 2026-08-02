@@ -3,7 +3,11 @@
 **Date:** 2026-08-02
 **Branch:** `feat/2026-08-02-local-eval-overlay`
 
-## Problem
+## Links
+
+- PR (chief): https://github.com/magicl/chief/pull/47
+- PR (chief-private): https://github.com/magicl/chief-private/pull/1
+
 
 Inbox eval scenarios live only under the public `evals/inbox/scenarios/` tree.
 Real-email fixtures for personal agents cannot be committed to the public repo,
