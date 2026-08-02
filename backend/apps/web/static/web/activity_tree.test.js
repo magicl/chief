@@ -30,48 +30,7 @@ const act = (over = {}) => ({
 });
 
 describe('activity row formatting', () => {
-  test('builds collapsed tool line without dumping arguments', () => {
-    const { formatCollapsedLine } = runtimeWindow.chiefActivityTree;
-    expect(formatCollapsedLine(act({
-      kind: 'tool', name: 'clickup.get_task', summary: 'Task CU-184',
-      status: 'succeeded', latency_ms: 420,
-    }))).toBe('TOOL · clickup.get_task · Task CU-184 · Succeeded · 420ms');
-  });
-
-  test('omits empty summary segments', () => {
-    const { formatCollapsedLine } = runtimeWindow.chiefActivityTree;
-    expect(formatCollapsedLine(act({
-      kind: 'llm', name: 'claude-sonnet', summary: '', status: 'succeeded', latency_ms: 1200,
-    }))).toBe('LLM · claude-sonnet · Succeeded · 1.2s');
-  });
-
-  test('derives duration from started_at and ended_at when latency_ms is absent', () => {
-    const { formatCollapsedLine } = runtimeWindow.chiefActivityTree;
-    expect(formatCollapsedLine(act({
-      kind: 'tool',
-      name: 'clickup.get_task',
-      summary: 'Task CU-184',
-      status: 'succeeded',
-      latency_ms: null,
-      started_at: '2026-07-26T12:00:00.000Z',
-      ended_at: '2026-07-26T12:00:00.420Z',
-    }))).toBe('TOOL · clickup.get_task · Task CU-184 · Succeeded · 420ms');
-  });
-
-  test('prefers latency_ms over started_at/ended_at duration', () => {
-    const { formatCollapsedLine } = runtimeWindow.chiefActivityTree;
-    expect(formatCollapsedLine(act({
-      kind: 'tool',
-      name: 'clickup.get_task',
-      summary: 'Task CU-184',
-      status: 'succeeded',
-      latency_ms: 10,
-      started_at: '2026-07-26T12:00:00.000Z',
-      ended_at: '2026-07-26T12:00:00.420Z',
-    }))).toBe('TOOL · clickup.get_task · Task CU-184 · Succeeded · 10ms');
-  });
-
-  test('splits the collapsed line into a kind pill label and the rest', () => {
+  test('builds collapsed tool detail without dumping arguments', () => {
     const { formatCollapsedDetail, formatKindLabel } = runtimeWindow.chiefActivityTree;
     const activity = act({
       kind: 'tool', name: 'clickup.get_task', summary: 'Task CU-184',
@@ -81,11 +40,57 @@ describe('activity row formatting', () => {
     expect(formatCollapsedDetail(activity)).toBe('clickup.get_task · Task CU-184 · Succeeded · 420ms');
   });
 
-  test('formats a kindless activity without a leading separator', () => {
-    const { formatCollapsedLine, formatKindLabel } = runtimeWindow.chiefActivityTree;
+  test('omits empty summary segments', () => {
+    const { formatCollapsedDetail, formatKindLabel } = runtimeWindow.chiefActivityTree;
+    const activity = act({
+      kind: 'llm', name: 'claude-sonnet', summary: '', status: 'succeeded', latency_ms: 1200,
+    });
+    expect(formatKindLabel(activity)).toBe('LLM');
+    expect(formatCollapsedDetail(activity)).toBe('claude-sonnet · Succeeded · 1.2s');
+  });
+
+  test('leaves the kind pill blank for a kindless activity', () => {
+    const { formatCollapsedDetail, formatKindLabel } = runtimeWindow.chiefActivityTree;
     const activity = act({ kind: null, name: 'orphan', summary: '', status: 'running', latency_ms: null });
     expect(formatKindLabel(activity)).toBe('');
-    expect(formatCollapsedLine(activity)).toBe('orphan · Running');
+    expect(formatCollapsedDetail(activity)).toBe('orphan · Running');
+  });
+
+  test('derives duration from started_at and ended_at when latency_ms is absent', () => {
+    const { formatCollapsedDetail } = runtimeWindow.chiefActivityTree;
+    expect(formatCollapsedDetail(act({
+      kind: 'tool',
+      name: 'clickup.get_task',
+      summary: 'Task CU-184',
+      status: 'succeeded',
+      latency_ms: null,
+      started_at: '2026-07-26T12:00:00.000Z',
+      ended_at: '2026-07-26T12:00:00.420Z',
+    }))).toBe('clickup.get_task · Task CU-184 · Succeeded · 420ms');
+  });
+
+  test('prefers latency_ms over started_at/ended_at duration', () => {
+    const { formatCollapsedDetail } = runtimeWindow.chiefActivityTree;
+    expect(formatCollapsedDetail(act({
+      kind: 'tool',
+      name: 'clickup.get_task',
+      summary: 'Task CU-184',
+      status: 'succeeded',
+      latency_ms: 10,
+      started_at: '2026-07-26T12:00:00.000Z',
+      ended_at: '2026-07-26T12:00:00.420Z',
+    }))).toBe('clickup.get_task · Task CU-184 · Succeeded · 10ms');
+  });
+
+  test('treats only messages with non-blank content as having a body', () => {
+    const { hasMessageBody } = runtimeWindow.chiefActivityTree;
+    expect(hasMessageBody(act({ kind: 'output', details: { content: 'hi' } }))).toBe(true);
+    expect(hasMessageBody(act({ kind: 'input', details: { content: 'hi' } }))).toBe(true);
+    // Sessions predating the runner fix still store these.
+    expect(hasMessageBody(act({ kind: 'output', details: { content: '' } }))).toBe(false);
+    expect(hasMessageBody(act({ kind: 'output', details: { content: '  \n' } }))).toBe(false);
+    expect(hasMessageBody(act({ kind: 'output', details: {} }))).toBe(false);
+    expect(hasMessageBody(act({ kind: 'tool', details: { content: 'hi' } }))).toBe(false);
   });
 
   test('formats raw details as JSON text and falls back to escaped string', () => {

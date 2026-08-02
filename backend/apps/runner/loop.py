@@ -459,8 +459,13 @@ class SessionRunner:
         page, and provider reconstruction does not need it: rebuild synthesizes
         the assistant tool-call carrier message from the tool activity itself
         (see ``apps.sessions.rebuild._tool_messages``).
+
+        A text-free turn with **no** tool calls still records its empty output.
+        Nothing downstream would replace it, so dropping it would leave two
+        consecutive user messages in the rebuilt history, which the Anthropic
+        provider forwards to the API as-is.
         """
-        if not result.content.strip():
+        if result.tool_calls and not result.content.strip():
             return
         with self.recorder.push_parent(llm_id):
             self._create_terminal_activity(

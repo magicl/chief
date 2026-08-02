@@ -97,7 +97,10 @@ class TestSessionActivityView(OTransactionTestCase):
         response = self.client.get(
             reverse('session_detail', kwargs={'session_id': self.session.id}),
         )
-        self.assertContains(response, '<template x-if="activity.kind === \'output\'">')
+        self.assertContains(
+            response,
+            '<template x-if="activity.kind === \'output\' && hasMessageBody(activity)">',
+        )
         self.assertContains(response, 'class="event-body rich-output"')
         self.assertContains(response, 'x-show="beautify && richContentReady"')
         self.assertContains(
@@ -105,7 +108,10 @@ class TestSessionActivityView(OTransactionTestCase):
             'x-effect="beautify && richContentReady && renderOutput($el, activity)"',
         )
         self.assertContains(response, 'x-show="!beautify || !richContentReady"')
-        self.assertContains(response, '<template x-if="activity.kind === \'input\'">')
+        self.assertContains(
+            response,
+            '<template x-if="activity.kind === \'input\' && hasMessageBody(activity)">',
+        )
         self.assertContains(response, 'x-text="formatPayload(activity)"', count=2)
 
     def test_session_page_keeps_beautify_state_local(self) -> None:

@@ -121,6 +121,24 @@ const settle = async () => {
 };
 
 /**
+ * Flush repeatedly until `predicate` holds, then return.
+ * One flush is not a reliable barrier for a store mutation that reaches the DOM
+ * through an Alpine effect: this suite failed intermittently (~2 runs in 10)
+ * when the vitest projects ran side by side. Returns once satisfied or after
+ * the attempt budget, leaving the caller's assertion to report the failure.
+ */
+const settleUntil = async (predicate) => {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    // Sequential by design: each flush must complete before re-checking.
+
+    await settle();
+    if (predicate()) {
+      return;
+    }
+  }
+};
+
+/**
  * Serve the child session snapshot a running subagent row loads on expansion.
  * The child session is terminal, so the store never opens an EventSource
  * (jsdom has none) and the row settles straight into its loaded state.
@@ -172,6 +190,8 @@ describe('recursive activity row rendering', () => {
         }),
         act({ id: 'out', seq: 5, kind: 'output', summary: 'assistant', details: { content: 'hi back' } }),
         act({ id: 'sub', seq: 6, kind: 'subagent', name: 'research', child_session_id: 'kid' }),
+        // Sessions predating the runner fix still store text-free output rows.
+        act({ id: 'blank-out', seq: 7, kind: 'output', summary: '', details: { content: '' } }),
       ],
     });
 
@@ -210,7 +230,7 @@ describe('recursive activity row rendering', () => {
   });
 
   test('renders one initialized row per activity, including nested children', () => {
-    expect(runtimeWindow.document.querySelectorAll('.activity-row')).toHaveLength(7);
+    expect(runtimeWindow.document.querySelectorAll('.activity-row')).toHaveLength(8);
     // An uninitialized clone keeps x-show markers visible and leaves x-if unexpanded.
     expect(runtimeWindow.document.querySelector('.activity-depth-marker').style.display).toBe('none');
   });
@@ -218,6 +238,12 @@ describe('recursive activity row rendering', () => {
   test('renders input and output message bodies as plain text', () => {
     expect(textsOf('.kind-input .event-body')).toEqual(['hello there']);
     expect(textsOf('.kind-output pre.event-body')).toEqual(['nested reply', 'hi back']);
+  });
+
+  test('draws no message card for a stored output with no content', () => {
+    // Its row still exists so any children stay reachable; only the card is gone.
+    expect(textsOf('.kind-output .event-meta .muted')).toEqual(['assistant', 'assistant']);
+    expect(runtimeWindow.document.querySelectorAll('.activity-row-message')).toHaveLength(3);
   });
 
   test('shows a message nested under a collapsed execution row', () => {
@@ -267,7 +293,7 @@ describe('recursive activity row rendering', () => {
     expect(isVisible(childRow())).toBe(true);
 
     store.setExpanded('sub', false, { manual: true });
-    await settle();
+    await settleUntil(() => !isVisible(childRow()));
 
     // The separately authorized child session belongs to the disclosure, unlike
     // the same-session rows that must survive their parent collapsing.
