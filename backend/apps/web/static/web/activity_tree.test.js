@@ -79,6 +79,35 @@ describe('activity row formatting', () => {
     expect(formatRawDetails(cyclic)).toEqual(expect.any(String));
   });
 
+  test('pretty-prints JSON string tool results without escaped wrapper quotes', () => {
+    const { formatRawDetails } = runtimeWindow.chiefActivityTree;
+    const rendered = formatRawDetails('{"id": "CU-184", "name": "Ship"}');
+    expect(rendered).toContain('"id": "CU-184"');
+    expect(rendered).toContain('"name": "Ship"');
+    expect(rendered.startsWith('{')).toBe(true);
+    expect(rendered.includes('\\"')).toBe(false);
+  });
+
+  test('pretty-prints JSON array string tool results', () => {
+    const { formatRawDetails } = runtimeWindow.chiefActivityTree;
+    const rendered = formatRawDetails('[{"id": 1}, {"id": 2}]');
+    expect(rendered.startsWith('[')).toBe(true);
+    expect(rendered).toContain('"id": 1');
+    expect(rendered.includes('\\"')).toBe(false);
+  });
+
+  test('shows plain string tool results without surrounding quotes', () => {
+    const { formatRawDetails } = runtimeWindow.chiefActivityTree;
+    expect(formatRawDetails('Task not found')).toBe('Task not found');
+    expect(formatRawDetails('just text')).toBe('just text');
+  });
+
+  test('falls back to plain text when string is not valid JSON', () => {
+    const { formatRawDetails } = runtimeWindow.chiefActivityTree;
+    expect(formatRawDetails('{not json')).toBe('{not json');
+    expect(formatRawDetails('{"id":')).toBe('{"id":');
+  });
+
   test('caps visual depth and exposes depth markers', () => {
     const { visualDepth } = runtimeWindow.chiefActivityTree;
     expect(visualDepth(3)).toEqual({ indentLevel: 3, showMarker: false, marker: null });
