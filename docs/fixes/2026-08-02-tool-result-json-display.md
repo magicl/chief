@@ -38,6 +38,8 @@ pretty-print path.
 | # | Severity | Status | Location | Finding | Notes |
 |---|----------|--------|----------|---------|-------|
 
+No Critical / Important / Minor findings from code review.
+
 ## Links
 
-- PR: (pending)
+- PR: https://github.com/magicl/chief/pull/41
