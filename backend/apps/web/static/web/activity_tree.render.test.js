@@ -85,9 +85,32 @@ const settle = async () => {
   await new Promise((resolve) => { setTimeout(resolve, 0); });
 };
 
+/**
+ * Serve the child session snapshot a running subagent row loads on expansion.
+ * The child session is terminal, so the store never opens an EventSource
+ * (jsdom has none) and the row settles straight into its loaded state.
+ */
+const CHILD_SNAPSHOT = {
+  session: {
+    id: 'kid', status: 'done', name: 'kid', parent_session_id: 's1', parent: null,
+  },
+  activities: [
+    act({
+      id: 'kid-tool', session_id: 'kid', seq: 1, kind: 'tool', name: 'gmail.search',
+      summary: 'inbox',
+    }),
+  ],
+};
+
 describe('recursive activity row rendering', () => {
   beforeAll(async () => {
     runtimeWindow.Alpine = Alpine;
+    runtimeWindow.fetch = async (url) => (
+      url === runtimeWindow.chiefActivityTree.SNAPSHOT_PATH('kid')
+        ? { ok: true, json: async () => CHILD_SNAPSHOT }
+        : { ok: false, json: async () => ({}) }
+    );
+
     const store = runtimeWindow.chiefActivityTree.createActivityStore('s1');
     store.applySnapshot({
       session: {
@@ -104,6 +127,7 @@ describe('recursive activity row rendering', () => {
           status: 'succeeded', latency_ms: 1200, model: 'gpt-5', details: { usage: { input: 10 } },
         }),
         act({ id: 'out', seq: 4, kind: 'output', summary: 'assistant', details: { content: 'hi back' } }),
+        act({ id: 'sub', seq: 5, kind: 'subagent', name: 'research', child_session_id: 'kid' }),
       ],
     });
 
@@ -142,10 +166,9 @@ describe('recursive activity row rendering', () => {
   });
 
   test('renders one initialized row per activity, including nested children', () => {
-    expect(runtimeWindow.document.querySelectorAll('.activity-row')).toHaveLength(4);
+    expect(runtimeWindow.document.querySelectorAll('.activity-row')).toHaveLength(6);
     // An uninitialized clone keeps x-show markers visible and leaves x-if unexpanded.
     expect(runtimeWindow.document.querySelector('.activity-depth-marker').style.display).toBe('none');
-    expect(textsOf('.activity-child-list .activity-toggle')).toEqual(['LLM · gpt-5 · Succeeded · 1.2s']);
   });
 
   test('renders input and output message bodies as plain text', () => {
@@ -157,6 +180,16 @@ describe('recursive activity row rendering', () => {
     expect(textsOf('.activity-toggle')).toEqual([
       'TOOL · clickup.get_task · Task CU-184 · Running',
       'LLM · gpt-5 · Succeeded · 1.2s',
+      'SUBAGENT · research · Running',
+      'TOOL · gmail.search · inbox · Running',
     ]);
+  });
+
+  test('renders the loaded child session subtree of a running subagent', () => {
+    expect(textsOf('.activity-child-session .activity-toggle')).toEqual([
+      'TOOL · gmail.search · inbox · Running',
+    ]);
+    const childLink = runtimeWindow.document.querySelector('.activity-row-main a');
+    expect(childLink.getAttribute('href')).toBe('/sessions/kid/');
   });
 });

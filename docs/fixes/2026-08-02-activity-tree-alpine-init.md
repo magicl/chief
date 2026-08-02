@@ -33,18 +33,19 @@ the whole `<li>` subtree, so effects are still cleaned up.
   `Alpine.initTree()` on the appended row elements.
 - `backend/apps/web/static/web/activity_tree.render.test.js`: new jsdom test that
   mounts the real recursive template with a real Alpine instance and asserts that
-  message bodies, collapsed execution lines, and nested child rows render.
+  message bodies, collapsed execution lines, same-session child rows, and a
+  loaded subagent child-session subtree all render.
 - `backend/apps/web/static/web/vitest.config.js`: include the new render test.
 - `package.json` / `pnpm-lock.yaml` (static/web): add `alpinejs` as a
   devDependency so tests can render with the framework the page actually uses.
 
 ## Verification
 
-- Command: `pnpm run test:unit` with the fix reverted (red check)
-- Result: 3 failures in `activity_tree.render.test.js` — no row bodies, no
-  collapsed lines, nested child row missing.
+- Command: `pnpm run test:unit` against the pre-fix `activity_tree.js` (red check)
+- Result: all 4 tests in `activity_tree.render.test.js` fail — no row bodies, no
+  collapsed lines, nested and child-session rows missing.
 - Command: `./olib/scripts/orunr js test-unit`
-- Result: passed — olib 12, web unit 61, web browser (chromium) 6.
+- Result: passed — olib 12, web unit 62, web browser (chromium) 6.
 - Command: `./olib/scripts/orunr js lint`
 - Result: passed.
 - Command: `./olib/scripts/orunr js tsc`
@@ -54,8 +55,15 @@ the whole `<li>` subtree, so effects are still cleaned up.
 
 ## Review
 
+Reviewer verdict: ready to merge; no Critical or Important findings.
+
 | # | Severity | Status | Location | Finding | Notes |
 |---|----------|--------|----------|---------|-------|
+| 1 | Minor | Rejected | `backend/templates/web/base.html:8` | Production loads `alpinejs@3.x.x` from unpkg while tests pin `^3.15.12`, so a future 3.x release could diverge from what CI proved | The `^3.15.12` range deliberately mirrors the floating `3.x.x` tag: the lockfile keeps CI deterministic and `orunr js upgrade` re-syncs it to whatever unpkg serves. Pinning the CDN tag is a separate asset-policy decision, not part of this fix |
+| 2 | Minor | Fixed | `backend/apps/web/static/web/activity_tree.render.test.js` | Render suite covered same-session nesting only, not `childLoadState` / `childStore` subagent rows | Added a running-subagent fixture with a stubbed child snapshot; the child subtree and its `Open session` link are now asserted |
+| 3 | Minor | Fixed | `backend/apps/web/static/web/activity_tree.js:1017` | `init()` docstring still described only the clone, so the required `initTree` call reads as optional | Docstring now points at the reason comment |
+| 4 | Minor | Rejected | `backend/templates/web/session_detail.html:129` | Row expressions dereference `activity` without a null guard, which `applySnapshot` could expose while it refills the activity map | Pre-existing, not touched by this fix: `applySnapshot` refills synchronously before Alpine flushes effects, and `x-for` teardown runs `destroyTree`, which dequeues effects for removed rows. Optional hardening, out of scope |
+| 5 | Minor | Rejected | `backend/apps/web/static/web/activity_tree.js:1019` | Missing `#activity-node-template` is skipped silently instead of warning | The project has no `console.*` calls anywhere in its JS, and the new render suite fails loudly if the template stops resolving |
 
 Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 

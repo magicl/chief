@@ -1014,7 +1014,11 @@
       activityId,
       depth,
 
-      /** Clone the shared row template and start an expanded child-session load. */
+      /**
+       * Clone the shared row template, initialize it, and start any child load.
+       * The explicit Alpine.initTree call is required, not decorative — see the
+       * comment below before simplifying this to a bare append.
+       */
       init() {
         const template = runtimeWindow.document.getElementById('activity-node-template');
         if (template && this.$el.childElementCount === 0) {
