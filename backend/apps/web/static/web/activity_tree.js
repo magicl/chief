@@ -1018,7 +1018,15 @@
       init() {
         const template = runtimeWindow.document.getElementById('activity-node-template');
         if (template && this.$el.childElementCount === 0) {
-          this.$el.append(template.content.cloneNode(true));
+          const clone = template.content.cloneNode(true);
+          const rows = Array.from(clone.children);
+          this.$el.append(clone);
+          // Alpine defers directive handlers until its tree walk finishes, so the
+          // walk that runs this x-data has already passed the still-empty host
+          // element, and x-for inserts rows inside mutateDom() with the mutation
+          // observer disconnected. Both fallbacks are gone: initialize the cloned
+          // rows here or every directive inside them stays inert.
+          rows.forEach((row) => runtimeWindow.Alpine.initTree(row));
         }
         void this.syncSubagent();
       },
