@@ -133,4 +133,4 @@ Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 
 ## Links
 
-- PR: <url when opened>
+- PR: https://github.com/magicl/chief/pull/42
