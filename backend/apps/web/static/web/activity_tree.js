@@ -106,11 +106,24 @@
   };
 
   /**
-   * Pretty-print activity details as JSON text for the Raw disclosure.
-   * Falls back to String(value) when JSON.stringify fails (cycles, etc.).
+   * Pretty-print activity details for curated Result/Arguments and Raw JSON.
+   * String values that parse as JSON objects/arrays are pretty-printed;
+   * other strings are shown as-is (no surrounding JSON quotes). Falls back
+   * to String(value) when JSON.stringify fails (cycles, etc.).
    * Plain text only — Alpine x-text consumes the result.
    */
   const formatRawDetails = (value) => {
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed !== null && typeof parsed === 'object') {
+          return JSON.stringify(parsed, null, 2);
+        }
+      } catch {
+        // Not JSON — fall through to raw string content.
+      }
+      return value;
+    }
     try {
       return JSON.stringify(value, null, 2);
     } catch {
