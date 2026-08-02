@@ -71,6 +71,23 @@ describe('activity row formatting', () => {
     }))).toBe('TOOL · clickup.get_task · Task CU-184 · Succeeded · 10ms');
   });
 
+  test('splits the collapsed line into a kind pill label and the rest', () => {
+    const { formatCollapsedDetail, formatKindLabel } = runtimeWindow.chiefActivityTree;
+    const activity = act({
+      kind: 'tool', name: 'clickup.get_task', summary: 'Task CU-184',
+      status: 'succeeded', latency_ms: 420,
+    });
+    expect(formatKindLabel(activity)).toBe('TOOL');
+    expect(formatCollapsedDetail(activity)).toBe('clickup.get_task · Task CU-184 · Succeeded · 420ms');
+  });
+
+  test('formats a kindless activity without a leading separator', () => {
+    const { formatCollapsedLine, formatKindLabel } = runtimeWindow.chiefActivityTree;
+    const activity = act({ kind: null, name: 'orphan', summary: '', status: 'running', latency_ms: null });
+    expect(formatKindLabel(activity)).toBe('');
+    expect(formatCollapsedLine(activity)).toBe('orphan · Running');
+  });
+
   test('formats raw details as JSON text and falls back to escaped string', () => {
     const { formatRawDetails } = runtimeWindow.chiefActivityTree;
     expect(formatRawDetails({ a: 1 })).toContain('"a": 1');

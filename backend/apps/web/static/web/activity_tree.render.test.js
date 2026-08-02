@@ -225,26 +225,37 @@ describe('recursive activity row rendering', () => {
   });
 
   test('shows nested execution rows while their parent stays collapsed', () => {
-    expect(isVisible(elementOf('.activity-toggle', 'LLM · gpt-5'))).toBe(true);
+    expect(isVisible(elementOf('.activity-toggle-text', 'gpt-5'))).toBe(true);
   });
 
   test('hides curated details of a collapsed execution row', () => {
-    const toolRow = elementOf('.activity-toggle', 'TOOL · clickup.get_task').closest('.activity-row');
+    const toolRow = elementOf('.activity-toggle-text', 'clickup.get_task').closest('.activity-row');
     expect(isVisible(toolRow.querySelector('.activity-detail'))).toBe(false);
   });
 
   test('renders collapsed execution lines for non-message activities', () => {
-    expect(textsOf('.activity-toggle')).toEqual([
-      'TOOL · clickup.get_task · Task CU-184 · Running',
-      'LLM · gpt-5 · Succeeded · 1.2s',
-      'SUBAGENT · research · Running',
-      'TOOL · gmail.search · inbox · Running',
+    // The kind renders as its own pill so execution rows read like the
+    // input/output cards; the rest of the line stays one ellipsized string.
+    expect(textsOf('.activity-toggle .activity-kind-pill')).toEqual(['TOOL', 'LLM', 'SUBAGENT', 'TOOL']);
+    expect(textsOf('.activity-toggle-text')).toEqual([
+      'clickup.get_task · Task CU-184 · Running',
+      'gpt-5 · Succeeded · 1.2s',
+      'research · Running',
+      'gmail.search · inbox · Running',
     ]);
   });
 
+  test('colors the kind pill from the execution wrapper class', () => {
+    const kinds = Array.from(
+      runtimeWindow.document.querySelectorAll('.activity-execution'),
+      (element) => Array.from(element.classList).find((name) => name.startsWith('kind-')),
+    );
+    expect(kinds).toEqual(['kind-tool', 'kind-llm', 'kind-subagent', 'kind-tool']);
+  });
+
   test('renders the loaded child session subtree of a running subagent', () => {
-    expect(textsOf('.activity-child-session .activity-toggle')).toEqual([
-      'TOOL · gmail.search · inbox · Running',
+    expect(textsOf('.activity-child-session .activity-toggle-text')).toEqual([
+      'gmail.search · inbox · Running',
     ]);
     const childLink = runtimeWindow.document.querySelector('.activity-row-main a');
     expect(childLink.getAttribute('href')).toBe('/sessions/kid/');
@@ -252,7 +263,7 @@ describe('recursive activity row rendering', () => {
 
   // Runs last: it drives disclosure state on the shared mounted tree.
   test('hides only the child-session subtree when a subagent row collapses', async () => {
-    const childRow = () => elementOf('.activity-child-session .activity-toggle', 'TOOL · gmail.search');
+    const childRow = () => elementOf('.activity-child-session .activity-toggle-text', 'gmail.search');
     expect(isVisible(childRow())).toBe(true);
 
     store.setExpanded('sub', false, { manual: true });

@@ -97,7 +97,7 @@ class TestSessionRunnerHooks(OTestCase):
             [
                 ('create', (AgentSessionActivityKind.INPUT, 'succeeded', 1)),
                 ('create', (AgentSessionActivityKind.LLM, 'running', 1)),
-                ('create', (AgentSessionActivityKind.OUTPUT, 'succeeded', 1)),
+                # The tool-call turn has no assistant text, so it records no output row.
                 ('create', (AgentSessionActivityKind.TOOL, 'running', 1)),
                 ('update', (AgentSessionActivityKind.TOOL, 'succeeded', 2)),
                 ('update', (AgentSessionActivityKind.LLM, 'succeeded', 2)),

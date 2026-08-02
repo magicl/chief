@@ -233,6 +233,28 @@ class TestSessionRunner(OTestCase):
             self.assertIsNone(output.cost_usd)
             self.assertIsNone(output.latency_ms)
 
+    def test_text_free_turn_records_no_output_activity(self) -> None:
+        """A turn that only requests tools stores no empty output row to render."""
+        backend = self._backend()
+        backend.push_mailbox({'action': 'chat', 'content': 'time?'})
+        responses = [
+            StreamResult(
+                content='   \n',
+                tool_calls=[{'name': 'clock__now', 'arguments': {}, 'id': 'call-1'}],
+            ),
+            StreamResult(content='done'),
+        ]
+
+        with patch('apps.runner.loop.make_provider', return_value=FakeProvider.for_responses(responses)):
+            SessionRunner(backend).run()
+
+        outputs = [activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.OUTPUT]
+        self.assertEqual([output.details['content'] for output in outputs], ['done'])
+        # The tool row must stay parented to the turn that requested it.
+        llms = [activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.LLM]
+        tool = next(activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.TOOL)
+        self.assertEqual(tool.parent_id, llms[0].id)
+
     def test_denied_unknown_and_raised_tools_finish_failed(self) -> None:
         """Every uniform tool failure updates its running activity to failed."""
         cases = [
