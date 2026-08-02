@@ -102,6 +102,28 @@ class TestSessionRunner(OTestCase):
         self.assertNotIn(secret, json.dumps([activity.to_stream_dict() for activity in activities], default=str))
         self.assertNotIn(secret, json.dumps(backend.published_activities))
 
+    def test_provider_failure_message_includes_http_status(self) -> None:
+        """Surface the HTTP status on the curated provider-failure message when known."""
+        backend = self._backend()
+        backend.push_mailbox({'action': 'chat', 'content': 'ping'})
+        runner = SessionRunner(backend)
+        secret = 'Authorization: Bearer provider-secret-value'
+        failure_result = StreamResult(
+            error=ProviderError(message=secret, code='provider_failure', status_code=401),
+        )
+        with patch('apps.runner.loop.make_provider', return_value=FakeProvider.for_responses([failure_result])):
+            runner.run()
+        failure = next(
+            activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.FAILURE
+        )
+        llm = next(activity for activity in backend.activities() if activity.kind == AgentSessionActivityKind.LLM)
+        expected = {'message': 'Provider request failed (401)', 'code': 'provider_failure'}
+        self.assertEqual(failure.details, expected)
+        self.assertEqual(llm.details, expected)
+        self.assertNotIn(
+            secret, json.dumps([activity.to_stream_dict() for activity in backend.activities()], default=str)
+        )
+
     def test_credential_storage_misconfigured_records_distinct_failure(self) -> None:
         backend = self._backend()
         backend.push_mailbox({'action': 'chat', 'content': 'ping'})

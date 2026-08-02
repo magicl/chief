@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from libs.providers.llm.base import ProviderError
+from libs.providers.llm.base import ProviderError, provider_request_failed_message
 from libs.providers.llm.errors import ProviderConfigurationError
 
 
@@ -97,4 +97,7 @@ def session_failure_from_provider_runtime_error(error: ProviderError) -> Session
         return MissingAnthropicCredentials()
     if error.code == 'credential_storage_misconfigured':
         return CredentialStorageMisconfigured()
-    return SessionFailure('Provider request failed', code=error.code)
+    return SessionFailure(
+        provider_request_failed_message(status_code=error.status_code),
+        code=error.code,
+    )

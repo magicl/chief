@@ -27,6 +27,9 @@ from libs.providers.llm.base import (
     StreamResult,
 )
 from libs.providers.llm.base import Usage as ChiefUsage
+from libs.providers.llm.base import (
+    status_code_from_exception,
+)
 from libs.providers.llm.errors import (
     MissingAnthropicCredentials,
     ProviderConfigurationError,
@@ -223,7 +226,11 @@ class AnthropicProvider(LLMProvider):
             )
         except Exception as exc:  # pylint: disable=broad-except
             return StreamResult(
-                error=ProviderError(message=str(exc), code='provider_failure'),
+                error=ProviderError(
+                    message=str(exc),
+                    code='provider_failure',
+                    status_code=status_code_from_exception(exc),
+                ),
                 latency_ms=int((time.monotonic() - started) * 1000),
             )
 

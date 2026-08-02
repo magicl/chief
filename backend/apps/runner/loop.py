@@ -41,7 +41,12 @@ from django.utils import timezone
 # isort: split
 
 from libs.agent_spec import AgentConfigSpec, ToolInstance, TriggerSpec
-from libs.providers.llm.base import LLMProvider, ProviderError, StreamResult
+from libs.providers.llm.base import (
+    LLMProvider,
+    ProviderError,
+    StreamResult,
+    provider_request_failed_message,
+)
 from libs.providers.llm.errors import ProviderConfigurationError
 from libs.providers.llm.registry import make_provider
 from libs.tools.activity import ActivityRef
@@ -323,7 +328,9 @@ class SessionRunner:
                         llm_ref.id,
                         summary='generate failed',
                         details={
-                            'message': 'Provider request failed',
+                            'message': provider_request_failed_message(
+                                status_code=metadata.provider_error.status_code,
+                            ),
                             'code': metadata.provider_error.code,
                         },
                         model=metadata.model,

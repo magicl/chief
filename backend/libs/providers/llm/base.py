@@ -42,6 +42,23 @@ class Usage(BaseModel):
 class ProviderError:
     message: str
     code: str
+    status_code: int | None = None
+
+
+def provider_request_failed_message(*, status_code: int | None = None) -> str:
+    """Curated user-visible message for a provider runtime failure."""
+    if status_code is None:
+        return 'Provider request failed'
+    return f'Provider request failed ({status_code})'
+
+
+def status_code_from_exception(exc: BaseException) -> int | None:
+    """Read an HTTP status from an SDK exception when present."""
+    status = getattr(exc, 'status_code', None)
+    # bool is a subclass of int; reject it so True/False never become "(True)".
+    if isinstance(status, bool) or not isinstance(status, int):
+        return None
+    return status
 
 
 @dataclass

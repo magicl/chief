@@ -614,6 +614,28 @@ class TestActivityObservability(OTestCase):
             {'message': 'Provider request failed', 'code': 'provider_unavailable'},
         )
 
+    def test_provider_failure_observability_includes_http_status(self) -> None:
+        """Observability keeps the curated message and appends HTTP status when known."""
+        secret = 'Authorization: Bearer observability-secret-value'
+        with TemporaryDirectory() as temp_dir:
+            partition = self._partition()
+            writer = EventLogWriter(Path(temp_dir))
+            hooks = build_observability_hooks(partition=partition, log_writer=writer)
+            assert hooks.on_generate_end is not None
+            hooks.on_generate_end(
+                StreamResult(
+                    error=ProviderError(message=secret, code='provider_unavailable', status_code=429),
+                )
+            )
+            text = writer.path_for(partition).read_text(encoding='utf-8')
+            record = json.loads(text)
+
+        self.assertNotIn(secret, text)
+        self.assertEqual(
+            record['error'],
+            {'message': 'Provider request failed (429)', 'code': 'provider_unavailable'},
+        )
+
     def _write_activity(self, *, details: dict[str, Any]) -> dict[str, Any]:
         """Write one activity record and parse its strict JSONL representation."""
         activity = RecordedActivity(
