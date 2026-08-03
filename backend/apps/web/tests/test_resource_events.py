@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import patch
@@ -246,6 +247,89 @@ class TestResourceEventsSse(OTransactionTestCase):
             'event: resource_update\ndata: {"channel": "resource_update", "resource": "keys"}\n\n',
         )
 
+    def test_stream_forwards_valid_scoped_ids_for_queues(self) -> None:
+        """Pass through well-formed UUID-string agent_id/queue_id for the queues resource."""
+        agent_id = '11111111-1111-4111-8111-111111111111'
+        queue_id = '22222222-2222-4222-8222-222222222222'
+        redis = FakeRedis(
+            [
+                {
+                    'type': 'message',
+                    'data': json.dumps(
+                        {
+                            'channel': 'resource_update',
+                            'resource': 'queues',
+                            'agent_id': agent_id,
+                            'queue_id': queue_id,
+                        }
+                    ),
+                }
+            ]
+        )
+
+        async def collect() -> str:
+            """Consume and close the one scoped queues event."""
+            client = AsyncClient()
+            await sync_to_async(client.force_login)(self.user)
+            with patch('apps.web.resource_events.async_client', return_value=redis):
+                response = await client.get('/events/')
+                assert isinstance(response, StreamingHttpResponse)
+                stream = cast(AsyncIterator[bytes], response.streaming_content)
+                chunk = await anext(stream)
+                await stream.aclose()
+            return chunk.decode()
+
+        chunk = asyncio.run(collect())
+        self.assertEqual(
+            chunk,
+            'event: resource_update\ndata: '
+            + json.dumps(
+                {
+                    'channel': 'resource_update',
+                    'resource': 'queues',
+                    'agent_id': agent_id,
+                    'queue_id': queue_id,
+                }
+            )
+            + '\n\n',
+        )
+
+    def test_stream_drops_invalid_scoped_ids(self) -> None:
+        """Emit the envelope without agent_id/queue_id when either is not a valid UUID string."""
+        redis = FakeRedis(
+            [
+                {
+                    'type': 'message',
+                    'data': json.dumps(
+                        {
+                            'channel': 'resource_update',
+                            'resource': 'queues',
+                            'agent_id': 'not-a-uuid',
+                            'queue_id': 12345,
+                        }
+                    ),
+                }
+            ]
+        )
+
+        async def collect() -> str:
+            """Consume and close the one sanitized queues event."""
+            client = AsyncClient()
+            await sync_to_async(client.force_login)(self.user)
+            with patch('apps.web.resource_events.async_client', return_value=redis):
+                response = await client.get('/events/')
+                assert isinstance(response, StreamingHttpResponse)
+                stream = cast(AsyncIterator[bytes], response.streaming_content)
+                chunk = await anext(stream)
+                await stream.aclose()
+            return chunk.decode()
+
+        chunk = asyncio.run(collect())
+        self.assertEqual(
+            chunk,
+            'event: resource_update\ndata: {"channel": "resource_update", "resource": "queues"}\n\n',
+        )
+
     def test_subscribe_failure_ends_stream_and_closes_resources(self) -> None:
         """Contain Redis subscribe outages and close both lazy resources."""
         redis = FakeRedis([], subscribe_failure=RedisConnectionError('redis unavailable'))
@@ -360,7 +444,7 @@ class TestResourceEventsTemplate(OTransactionTestCase):
         self.assertIn("agents: 'chief:agents-changed'", body)
         self.assertIn("keys: 'chief:keys-changed'", body)
         self.assertIn("message.channel === 'resource_update' && eventName", body)
-        self.assertIn('htmx.trigger(document.body, eventName)', body)
+        self.assertIn('htmx.trigger(document.body, eventName, {', body)
         self.assertIn("window.addEventListener('pagehide'", body)
         self.assertIn('resourceEvents.close()', body)
         self.assertIn('try {', body)
@@ -386,3 +470,14 @@ class TestResourceEventsTemplate(OTransactionTestCase):
         """Avoid opening a resource stream from anonymous pages."""
         response = self.client.get(reverse('dashboard'))
         self.assertNotContains(response, 'new EventSource(')
+
+    def test_authenticated_page_maps_queues_resource_with_scoped_detail(self) -> None:
+        """Wire the queues resource to its event name and forward scoped ids as event detail."""
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('dashboard'))
+        body = response.content.decode()
+
+        self.assertIn("queues: 'chief:queues-changed'", body)
+        self.assertIn('htmx.trigger(document.body, eventName, {', body)
+        self.assertIn('agentId: message.agent_id', body)
+        self.assertIn('queueId: message.queue_id', body)

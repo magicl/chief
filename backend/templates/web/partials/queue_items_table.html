@@ -1,0 +1,70 @@
+{% from "web/macros/table.html" import sort_link, pagination %}
+{% set base_url = url('queue_items', kwargs={'agent_id': agent.id, 'queue_id': queue.queue_id}) %}
+<table>
+  <thead>
+    <tr>
+      <th>{{ sort_link(base_url, list_page, 'status', 'Status') }}</th>
+      <th>{{ sort_link(base_url, list_page, 'created_at', 'Created') }}</th>
+      <th>Payload</th>
+      <th>{{ sort_link(base_url, list_page, 'external_id', 'External ID') }}</th>
+      <th>{{ sort_link(base_url, list_page, 'source', 'Source') }}</th>
+      <th>{{ sort_link(base_url, list_page, 'attempt_count', 'Attempts') }}</th>
+      <th>{{ sort_link(base_url, list_page, 'taken_by', 'Taken by') }}</th>
+      <th>{{ sort_link(base_url, list_page, 'taken_at', 'Taken at') }}</th>
+      <th>{{ sort_link(base_url, list_page, 'completed_at', 'Completed at') }}</th>
+      <th>Failure reason</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in list_page.rows %}
+    <tr class="queue-item-row" data-item-id="{{ item.id }}">
+      <td><span class="pill {{ item.status }}">{{ item.status }}</span></td>
+      <td class="muted">{{ item.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>
+        <button type="button" class="frame-btn muted-btn" data-expand-toggle>Expand</button>
+        <div class="payload-preview">{{ item.payload|tojson|truncate(120, True) }}</div>
+        <pre class="payload-detail">{{ item.payload|tojson(indent=2) }}</pre>
+      </td>
+      <td>{{ item.external_id or '—' }}</td>
+      <td>{{ item.source.source_id if item.source else '—' }}</td>
+      <td>{{ item.attempt_count }}</td>
+      <td>
+        {% if item.taken_by_session_id %}
+        <a href="{{ url('session_detail', kwargs={'session_id': item.taken_by_session_id}) }}">{{ item.taken_by_session_id }}</a>
+        {% else %}—{% endif %}
+      </td>
+      <td class="muted">{{ item.taken_at.strftime('%Y-%m-%d %H:%M:%S') if item.taken_at else '—' }}</td>
+      <td class="muted">{{ item.completed_at.strftime('%Y-%m-%d %H:%M:%S') if item.completed_at else '—' }}</td>
+      <td class="muted" title="{{ item.failure_reason or '' }}">{{ (item.failure_reason or '—')|truncate(60, True) }}</td>
+    </tr>
+    {% endfor %}
+    {% if not list_page.rows %}
+    <tr><td colspan="10" class="empty">No items match the current filters.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{{ pagination(base_url, list_page) }}
+<script>
+(function () {
+  var container = document.getElementById('queue-items-table');
+  if (!container) { return; }
+  // Persist across htmx innerHTML swaps of this fragment so Expand does not
+  // register a second listener (which would cancel the toggle).
+  if (!container.dataset.wired) {
+    container.dataset.wired = '1';
+    container.addEventListener('click', function (event) {
+      var toggle = event.target.closest('[data-expand-toggle]');
+      if (!toggle) { return; }
+      var row = toggle.closest('.queue-item-row');
+      if (!row) { return; }
+      var expanded = row.classList.toggle('expanded');
+      container.dataset.expandedId = expanded ? row.dataset.itemId : '';
+    });
+  }
+  var expandedId = container.dataset.expandedId;
+  if (expandedId) {
+    var restoredRow = container.querySelector('.queue-item-row[data-item-id="' + expandedId + '"]');
+    if (restoredRow) { restoredRow.classList.add('expanded'); }
+  }
+})();
+</script>

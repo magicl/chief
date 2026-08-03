@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from datetime import timedelta
+from unittest.mock import MagicMock, patch
 
 from apps.queues.exceptions import (
     QueueItemNotFoundError,
@@ -29,6 +30,7 @@ from apps.queues.tests.base import (
     make_test_source,
 )
 from django.db import IntegrityError
+from django.utils import timezone
 
 from olib.py.django.test.cases import OTransactionTestCase
 
@@ -265,3 +267,76 @@ class TestFailItem(OTransactionTestCase):
         put_result = commands.put_item(queue=queue, payload={'x': 1})
         with self.assertRaises(QueueItemStateError):
             commands.fail_item(item_id=put_result.item_id, session_id=session.id)
+
+
+class TestQueueResourceHints(OTransactionTestCase):
+    @patch('apps.queues.services.commands.publish_resource_update_after_commit')
+    def test_put_item_publishes_scoped_hint_for_new_item(self, publish: MagicMock) -> None:
+        queue, _session = make_test_queue(identifier='hint-put-agent')
+        publish.reset_mock()
+
+        commands.put_item(queue=queue, payload={'x': 1})
+
+        publish.assert_called_once_with(queue.agent.user_id, 'queues', agent_id=queue.agent_id, queue_id=queue.id)
+
+    @patch('apps.queues.services.commands.publish_resource_update_after_commit')
+    def test_take_item_publishes_scoped_hint(self, publish: MagicMock) -> None:
+        queue, session = make_test_queue(identifier='hint-take-agent')
+        commands.put_item(queue=queue, payload={'x': 1})
+        publish.reset_mock()
+
+        commands.take_item(queue=queue, session_id=session.id)
+
+        publish.assert_called_once_with(queue.agent.user_id, 'queues', agent_id=queue.agent_id, queue_id=queue.id)
+
+    @patch('apps.queues.services.commands.publish_resource_update_after_commit')
+    def test_complete_item_publishes_scoped_hint(self, publish: MagicMock) -> None:
+        queue, session = make_test_queue(identifier='hint-complete-agent')
+        commands.put_item(queue=queue, payload={'x': 1})
+        take_result = commands.take_item(queue=queue, session_id=session.id)
+        assert take_result is not None
+        publish.reset_mock()
+
+        commands.complete_item(item_id=take_result.item_id, session_id=session.id)
+
+        publish.assert_called_once_with(queue.agent.user_id, 'queues', agent_id=queue.agent_id, queue_id=queue.id)
+
+    @patch('apps.queues.services.commands.publish_resource_update_after_commit')
+    def test_fail_item_publishes_scoped_hint(self, publish: MagicMock) -> None:
+        queue, session = make_test_queue(identifier='hint-fail-agent')
+        commands.put_item(queue=queue, payload={'x': 1})
+        take_result = commands.take_item(queue=queue, session_id=session.id)
+        assert take_result is not None
+        publish.reset_mock()
+
+        commands.fail_item(item_id=take_result.item_id, session_id=session.id, reason='bad')
+
+        publish.assert_called_once_with(queue.agent.user_id, 'queues', agent_id=queue.agent_id, queue_id=queue.id)
+
+    @patch('apps.queues.services.commands.publish_resource_update_after_commit')
+    def test_release_stale_items_publishes_hint_for_released_item(self, publish: MagicMock) -> None:
+        queue, session = make_test_queue(identifier='hint-release-agent')
+        put_result = commands.put_item(queue=queue, payload={'x': 1})
+        commands.take_item(queue=queue, session_id=session.id)
+        item = QueueItem.objects.get(pk=put_result.item_id)
+        item.taken_at = timezone.now() - timedelta(seconds=queue.long_hold_seconds + 1)
+        item.save(update_fields=['taken_at'])
+        publish.reset_mock()
+
+        commands.release_stale_items()
+
+        publish.assert_called_once_with(queue.agent.user_id, 'queues', agent_id=queue.agent_id, queue_id=queue.id)
+
+    @patch('apps.queues.services.commands.publish_resource_update_after_commit')
+    def test_sync_from_spec_publishes_agent_scoped_hint(self, publish: MagicMock) -> None:
+        # A queue-unscoped hint is expected even when reconciliation only removes
+        # orphan queues, since the Queues section still needs a refetch.
+        queue, _session = make_test_queue(identifier='hint-sync-agent')
+        agent = queue.agent
+        config = queue.agent_config
+        assert config is not None
+        publish.reset_mock()
+
+        commands.sync_from_spec(agent, config, [])
+
+        publish.assert_called_once_with(agent.user_id, 'queues', agent_id=agent.id)
