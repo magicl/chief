@@ -11,6 +11,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, cast
+from uuid import UUID
 
 from apps.bus.client import async_client
 from apps.bus.resources import RESOURCE_NAMES, user_resource_channel
@@ -39,6 +40,17 @@ def _require_authenticated_user_id(request: HttpRequest) -> int:
     return int(cast(AbstractBaseUser, request.user).pk)
 
 
+def _valid_uuid_string(value: Any) -> str | None:
+    """Return *value* unchanged when it is a syntactically valid UUID string, else None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        UUID(value)
+    except ValueError:
+        return None
+    return value
+
+
 def _validated_resource_message(data: Any) -> dict[str, str] | None:
     """Validate and canonicalize the public envelope without retaining extra data."""
     try:
@@ -53,7 +65,14 @@ def _validated_resource_message(data: Any) -> dict[str, str] | None:
     if not isinstance(resource, str) or resource not in RESOURCE_NAMES:
         logger.debug('Skipping unknown resource refresh message')
         return None
-    return {'channel': 'resource_update', 'resource': resource}
+    message: dict[str, str] = {'channel': 'resource_update', 'resource': resource}
+    agent_id = _valid_uuid_string(raw.get('agent_id'))
+    if agent_id is not None:
+        message['agent_id'] = agent_id
+    queue_id = _valid_uuid_string(raw.get('queue_id'))
+    if queue_id is not None:
+        message['queue_id'] = queue_id
+    return message
 
 
 @require_GET

@@ -89,7 +89,11 @@ class AgentConfigWebTests(OTestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        publish.assert_called_once_with(self.user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the saved
+        # config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(self.user.pk, 'queues', agent_id=self.agent.id)
+        publish.assert_any_call(self.user.pk, 'agents')
 
     @expectLogItems(
         [

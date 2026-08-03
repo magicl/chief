@@ -1,0 +1,37 @@
+{#
+  Generic filterable-table primitive: filter-form shell, sortable column links, and
+  pagination controls. Shared across list screens that render a
+  libs.web_tables.list_page.ListPage. This file renders no domain-specific columns
+  or row cells — callers supply those in their own template.
+#}
+
+{% macro sort_link(base_url, list_page, key, label) %}
+{% set is_current = list_page.sort == key %}
+{% set next_dir = 'asc' if (is_current and list_page.dir == 'desc') else 'desc' %}
+<a class="table-sort-link{% if is_current %} active{% endif %}"
+   href="{{ base_url }}?{{ list_page.query_string(sort=key, dir=next_dir, page=1) }}">{{ label }}{% if is_current %} {{ '▲' if list_page.dir == 'asc' else '▼' }}{% endif %}</a>
+{% endmacro %}
+
+{% macro pagination(base_url, list_page) %}
+<nav class="table-pagination">
+  <span class="muted">
+    {% if list_page.total %}Showing {{ list_page.start_index }}–{{ list_page.end_index }} of {{ list_page.total }}{% else %}No items{% endif %}
+  </span>
+  <div class="table-pagination-links">
+    {% if list_page.has_previous %}<a href="{{ base_url }}?{{ list_page.query_string(page=list_page.page - 1) }}">Previous</a>{% endif %}
+    <span class="muted">Page {{ list_page.page }} of {{ list_page.total_pages }}</span>
+    {% if list_page.has_next %}<a href="{{ base_url }}?{{ list_page.query_string(page=list_page.page + 1) }}">Next</a>{% endif %}
+  </div>
+</nav>
+{% endmacro %}
+
+{% macro filter_form_open(action_url, list_page) %}
+<form method="get" action="{{ action_url }}" class="table-filter-form">
+  <input type="hidden" name="sort" value="{{ list_page.sort }}">
+  <input type="hidden" name="dir" value="{{ list_page.dir }}">
+{% endmacro %}
+
+{% macro filter_form_close() %}
+  <button type="submit" class="frame-btn">Apply</button>
+</form>
+{% endmacro %}

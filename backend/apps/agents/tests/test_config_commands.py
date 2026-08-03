@@ -50,9 +50,13 @@ class AgentIdentityTests(OTestCase):
         spec_yaml = dump_agent_config_spec(load_example('minimal'))
 
         with self.captureOnCommitCallbacks(execute=True):
-            create_from_yaml(self.user, spec_yaml, name='Published YAML agent')
+            agent = create_from_yaml(self.user, spec_yaml, name='Published YAML agent')
 
-        publish.assert_called_once_with(self.user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the new
+        # config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(self.user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(self.user.pk, 'agents')
 
     @patch('apps.bus.resources.publish_resource_update')
     def test_profile_change_reports_mutation_and_publishes(self, publish: MagicMock) -> None:
@@ -114,7 +118,11 @@ class AgentIdentityTests(OTestCase):
         self.assertEqual(agent.name, 'After')
         self.assertEqual(agent.identifier, 'after')
         self.assertEqual(agent.current_config_id, config.pk)
-        publish.assert_called_once_with(self.user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the saved
+        # config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(self.user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(self.user.pk, 'agents')
 
     @patch('apps.bus.resources.publish_resource_update')
     @patch('apps.agents.ingest.materialize_agent_config')
