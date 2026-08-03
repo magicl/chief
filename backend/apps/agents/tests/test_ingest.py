@@ -68,14 +68,18 @@ class CreateAgentFromSpecTests(OTestCase):
         user = get_user_model().objects.create_user(username='ingest-publish')
 
         with self.captureOnCommitCallbacks(execute=True):
-            create_agent_from_spec(
+            agent = create_agent_from_spec(
                 user,
                 CLOCK_SPEC.model_copy(),
                 name='Published agent',
                 identifier='published-agent',
             )
 
-        publish.assert_called_once_with(user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the new
+        # config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(user.pk, 'agents')
 
     def test_create_defaults_to_active_with_blank_source_path(self) -> None:
         user = get_user_model().objects.create_user(username='ingest-defaults', password='x')
@@ -161,7 +165,11 @@ class CreateAgentFromSpecTests(OTestCase):
         with self.captureOnCommitCallbacks(execute=True):
             persist_agent_config(agent, CLOCK_SPEC.model_copy(), source_rev='ui:next')
 
-        publish.assert_called_once_with(user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the saved
+        # config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(user.pk, 'agents')
 
 
 class AgentIngestCommitTimingTests(OTransactionTestCase):
@@ -192,4 +200,8 @@ class AgentIngestCommitTimingTests(OTransactionTestCase):
         config = persist_agent_config(agent, CLOCK_SPEC.model_copy(), source_rev='ui:robust')
 
         self.assertTrue(AgentConfig.objects.filter(pk=config.pk).exists())
-        publish.assert_called_once_with(user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint alongside the
+        # `agents` hint; both are best-effort and swallow the transport failure.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(user.pk, 'agents')

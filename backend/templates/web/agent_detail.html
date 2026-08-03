@@ -50,6 +50,17 @@
   </div>
 </section>
 
+<section
+  class="card"
+  id="agent-queues"
+  style="margin-bottom: 1rem"
+  hx-get="{{ url('agent_queues_partial', kwargs={'agent_id': agent.id}) }}"
+  hx-trigger="chief:queues-changed[!event.detail.agentId || event.detail.agentId === '{{ agent.id }}'] from:body delay:600ms"
+  hx-swap="innerHTML"
+>
+  {% include "web/partials/agent_queues.html" %}
+</section>
+
 <section class="card">
   <h2>Sessions</h2>
   {% if sessions %}

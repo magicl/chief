@@ -3,6 +3,7 @@
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
 import json
+import uuid
 from unittest.mock import MagicMock, patch
 
 from apps.bus.resources import (
@@ -26,7 +27,7 @@ class TestResourceEvents(OTestCase):
 
     def test_resource_message_accepts_each_resource(self) -> None:
         """Return the exact generic envelope for every supported resource."""
-        for resource in ('agents', 'keys'):
+        for resource in ('agents', 'keys', 'queues'):
             with self.subTest(resource=resource):
                 self.assertEqual(resource_message(resource), {'channel': 'resource_update', 'resource': resource})
 
@@ -66,3 +67,43 @@ class TestResourceEvents(OTestCase):
                 publish_resource_update_after_commit(42, 'keys')
 
         self.assertNotIn('secret payload', '\n'.join(captured.output))
+
+    def test_resource_message_includes_scoped_ids_when_provided(self) -> None:
+        """Include agent_id/queue_id as strings only when the caller supplies them."""
+        agent_id = uuid.uuid4()
+        queue_id = uuid.uuid4()
+        self.assertEqual(
+            resource_message('queues', agent_id=agent_id, queue_id=queue_id),
+            {
+                'channel': 'resource_update',
+                'resource': 'queues',
+                'agent_id': str(agent_id),
+                'queue_id': str(queue_id),
+            },
+        )
+
+    def test_resource_message_omits_scoped_ids_when_not_provided(self) -> None:
+        """Keep the envelope minimal for calls that pass no scoping."""
+        self.assertEqual(resource_message('agents'), {'channel': 'resource_update', 'resource': 'agents'})
+
+    @patch('apps.bus.resources.sync_client')
+    def test_publish_resource_update_forwards_scoped_ids(self, mock_sync: MagicMock) -> None:
+        """Serialize scoped ids into the published JSON envelope."""
+        client = mock_sync.return_value
+        agent_id = uuid.uuid4()
+
+        publish_resource_update(42, 'queues', agent_id=agent_id)
+
+        client.publish.assert_called_once_with(
+            'test:user:42:resources',
+            json.dumps({'channel': 'resource_update', 'resource': 'queues', 'agent_id': str(agent_id)}),
+        )
+
+    @patch('apps.bus.resources.publish_resource_update')
+    def test_after_commit_forwards_scoped_ids(self, publish: MagicMock) -> None:
+        """Defer scoped-id publishing to commit, same as the unscoped case."""
+        agent_id = uuid.uuid4()
+        queue_id = uuid.uuid4()
+        with self.captureOnCommitCallbacks(execute=True):
+            publish_resource_update_after_commit(42, 'queues', agent_id=agent_id, queue_id=queue_id)
+        publish.assert_called_once_with(42, 'queues', agent_id=agent_id, queue_id=queue_id)

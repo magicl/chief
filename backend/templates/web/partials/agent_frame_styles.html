@@ -466,4 +466,42 @@
       --activity-indent: calc(var(--activity-depth, 0) * 0.5rem);
     }
   }
+
+  /* Filterable table primitive — filter form, sortable headers, pagination */
+  .table-filter-form {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .table-filter-form label {
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    font-size: .8rem;
+    color: #8b93a7;
+  }
+  .table-filter-form select,
+  .table-filter-form input[type="text"] {
+    background: #0f1115;
+    border: 1px solid #262a33;
+    color: inherit;
+    border-radius: 6px;
+    padding: .35rem .5rem;
+    font-size: .85rem;
+  }
+  .table-sort-link { color: inherit; text-decoration: none; }
+  .table-sort-link:hover { color: #9ec5ff; }
+  .table-sort-link.active { color: #9ec5ff; font-weight: 600; }
+  .table-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: .75rem;
+    font-size: .85rem;
+  }
+  .table-pagination-links { display: flex; align-items: center; gap: .75rem; }
+  .table-pagination-links a { color: #9ec5ff; text-decoration: none; }
+  .table-pagination-links a:hover { text-decoration: underline; }
 </style>

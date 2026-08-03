@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from apps.agents.models import Agent, AgentConfig
+from apps.bus.resources import publish_resource_update_after_commit
 from apps.queues.exceptions import (
     QueueItemNotFoundError,
     QueueItemStateError,
@@ -54,6 +55,40 @@ def _notify_queue_item_available(queue_id: UUID) -> None:
 def _schedule_queue_dispatch_on_commit(queue_id: UUID) -> None:
     """Fire queue trigger dispatch after the enclosing transaction commits."""
     transaction.on_commit(lambda: _notify_queue_item_available(queue_id))
+
+
+def _resolve_agent_user_id(agent_id: UUID) -> int | None:
+    """Look up the owning user id for *agent_id* without loading unrelated Agent fields."""
+    return Agent.objects.filter(pk=agent_id).values_list('user_id', flat=True).first()
+
+
+def _publish_queue_item_hint(
+    *,
+    queue_id: UUID,
+    agent_id: UUID,
+    user_id: int | None = None,
+) -> None:
+    """Publish a best-effort ``queues`` hint scoped to one agent+queue, after commit.
+
+    Pass *user_id* when the caller already has it to avoid an extra Agent lookup.
+    """
+    resolved = user_id if user_id is not None else _resolve_agent_user_id(agent_id)
+    if resolved is None:
+        return
+    publish_resource_update_after_commit(resolved, 'queues', agent_id=agent_id, queue_id=queue_id)
+
+
+def _publish_agent_queues_hint(*, agent_id: UUID, user_id: int | None = None) -> None:
+    """Publish a best-effort agent-scoped (queue-unscoped) ``queues`` hint, after commit.
+
+    Used when a whole agent's queue set may have changed shape (e.g. spec sync),
+    rather than one specific queue's items. Pass *user_id* when already known
+    (``sync_from_spec``) so hot materialize paths skip a redundant SELECT.
+    """
+    resolved = user_id if user_id is not None else _resolve_agent_user_id(agent_id)
+    if resolved is None:
+        return
+    publish_resource_update_after_commit(resolved, 'queues', agent_id=agent_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +140,7 @@ def put_item(
         if existing is not None:
             if existing.status == QueueItemStatus.AVAILABLE:
                 _schedule_queue_dispatch_on_commit(queue.id)
+            _publish_queue_item_hint(queue_id=queue.id, agent_id=queue.agent_id)
             return PutResult(item_id=existing.id, created=False)
         try:
             item = QueueItem.objects.create(
@@ -118,8 +154,10 @@ def put_item(
             existing = QueueItem.objects.get(source=source, external_id=dedup_key)
             if existing.status == QueueItemStatus.AVAILABLE:
                 _schedule_queue_dispatch_on_commit(queue.id)
+            _publish_queue_item_hint(queue_id=queue.id, agent_id=queue.agent_id)
             return PutResult(item_id=existing.id, created=False)
         _schedule_queue_dispatch_on_commit(queue.id)
+        _publish_queue_item_hint(queue_id=queue.id, agent_id=queue.agent_id)
         return PutResult(item_id=item.id, created=True)
 
     item = QueueItem.objects.create(
@@ -130,6 +168,7 @@ def put_item(
         status=QueueItemStatus.AVAILABLE,
     )
     _schedule_queue_dispatch_on_commit(queue.id)
+    _publish_queue_item_hint(queue_id=queue.id, agent_id=queue.agent_id)
     return PutResult(item_id=item.id, created=True)
 
 
@@ -182,6 +221,7 @@ def take_item(*, queue: Queue, session_id: UUID) -> TakeResult | None:
             outcome=QueueItemAttemptOutcome.IN_PROGRESS,
             started_at=now,
         )
+        _publish_queue_item_hint(queue_id=queue.id, agent_id=queue.agent_id)
         return TakeResult(
             item_id=item.id,
             payload=item.payload,
@@ -190,9 +230,9 @@ def take_item(*, queue: Queue, session_id: UUID) -> TakeResult | None:
 
 
 def _get_taken_item(*, item_id: UUID, session_id: UUID) -> QueueItem:
-    """Load a taken item and verify *session_id* is the current taker."""
+    """Load a taken item (with its queue) and verify *session_id* is the current taker."""
     try:
-        item = QueueItem.objects.get(pk=item_id)
+        item = QueueItem.objects.select_related('queue').get(pk=item_id)
     except QueueItem.DoesNotExist as exc:
         raise QueueItemNotFoundError(f'queue item not found: {item_id}') from exc
 
@@ -243,6 +283,7 @@ def complete_item(*, item_id: UUID, session_id: UUID) -> None:
         session_id=session_id,
         outcome=QueueItemAttemptOutcome.COMPLETED,
     )
+    _publish_queue_item_hint(queue_id=item.queue_id, agent_id=item.queue.agent_id)
 
 
 @transaction.atomic
@@ -270,6 +311,7 @@ def fail_item(*, item_id: UUID, session_id: UUID, reason: str = '') -> None:
         outcome=QueueItemAttemptOutcome.FAILED,
         detail=reason or None,
     )
+    _publish_queue_item_hint(queue_id=item.queue_id, agent_id=item.queue.agent_id)
 
 
 def _should_release_stale_item(*, item: QueueItem, now: datetime) -> tuple[bool, str | None]:
@@ -321,6 +363,7 @@ def _release_taken_item(*, item: QueueItem, now: datetime, detail: str | None) -
         outcome=outcome,
         detail=detail,
     )
+    _publish_queue_item_hint(queue_id=queue.id, agent_id=queue.agent_id)
     return result
 
 
@@ -466,3 +509,4 @@ def sync_from_spec(
         _remove_orphan_sources(queue, kept_source_ids)
 
     _remove_orphan_queues(agent, kept_queue_ids)
+    _publish_agent_queues_hint(agent_id=agent.id, user_id=agent.user_id)

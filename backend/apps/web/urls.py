@@ -30,6 +30,13 @@ urlpatterns = [
     ),
     path('agents/<uuid:agent_id>/delete/', views.delete_agent, name='delete_agent'),
     path('agents/<uuid:agent_id>/start/', views.start_agent_session, name='start_agent_session'),
+    path('agents/<uuid:agent_id>/partials/queues/', views.agent_queues_partial, name='agent_queues_partial'),
+    path('agents/<uuid:agent_id>/queues/<slug:queue_id>/', views.queue_items, name='queue_items'),
+    path(
+        'agents/<uuid:agent_id>/queues/<slug:queue_id>/partials/items/',
+        views.queue_items_partial,
+        name='queue_items_partial',
+    ),
     path('debug/sse-spike/', views.sse_spike, name='sse_spike'),
     path('sessions/<uuid:session_id>/', views.session_detail, name='session_detail'),
     path(

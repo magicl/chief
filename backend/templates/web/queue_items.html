@@ -1,0 +1,83 @@
+{% extends "web/layout/agent_frame_page.html" %}
+{% from "web/macros/table.html" import filter_form_open, filter_form_close %}
+
+{% block title %}{{ agent.name }} — {{ queue.queue_id }} queue — Chief{% endblock %}
+
+{% block frame_x_data %}x-data="chatboxHelpers()" x-init="focusChatInput()"{% endblock %}
+
+{% block frame_header %}
+<div>
+  <h2>{{ queue.queue_id }}</h2>
+  <p class="agent-meta muted">
+    <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}">{{ agent.name }}</a> queue
+  </p>
+</div>
+<div class="frame-header-actions">
+  <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" class="frame-btn muted-btn" style="text-decoration:none;">Back to agent</a>
+</div>
+{% endblock %}
+
+{% block frame_extra_styles %}
+<style>
+  .payload-preview {
+    font-family: ui-monospace, monospace;
+    font-size: .8rem;
+    max-width: 28rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .payload-detail {
+    display: none;
+    margin-top: .35rem;
+    max-width: 32rem;
+    max-height: 16rem;
+    overflow: auto;
+    background: #0d1015;
+    border: 1px solid #303746;
+    border-radius: 6px;
+    padding: .5rem;
+    font-size: .78rem;
+    white-space: pre-wrap;
+  }
+  .queue-item-row.expanded .payload-preview { display: none; }
+  .queue-item-row.expanded .payload-detail { display: block; }
+</style>
+{% endblock %}
+
+{% block frame_main %}
+<section class="card" style="margin-bottom: 1rem;">
+  {{ filter_form_open(url('queue_items', kwargs={'agent_id': agent.id, 'queue_id': queue.queue_id}), list_page) }}
+  <label>Status
+    <select name="status">
+      <option value="">All</option>
+      {% for value, display in status_choices %}
+      <option value="{{ value }}" {% if list_page.filters.get('status') == value %}selected{% endif %}>{{ display }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Source
+    <select name="source">
+      <option value="">All</option>
+      {% for source_id in source_ids %}
+      <option value="{{ source_id }}" {% if list_page.filters.get('source') == source_id %}selected{% endif %}>{{ source_id }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Search
+    <input type="text" name="q" value="{{ list_page.filters.get('q', '') }}" placeholder="external id, failure reason, payload">
+  </label>
+  {{ filter_form_close() }}
+</section>
+
+<section class="card">
+  <div
+    id="queue-items-table"
+    hx-get="{{ url('queue_items_partial', kwargs={'agent_id': agent.id, 'queue_id': queue.queue_id}) }}?{{ list_page.query_string() }}"
+    hx-trigger="chief:queues-changed[(!event.detail.agentId || event.detail.agentId === '{{ agent.id }}') && (!event.detail.queueId || event.detail.queueId === '{{ queue.id }}')] from:body delay:600ms"
+    hx-swap="innerHTML"
+  >
+    {% include "web/partials/queue_items_table.html" %}
+  </div>
+</section>
+{% endblock %}

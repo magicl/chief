@@ -2,7 +2,7 @@
 
 **Branch:** `feat/2026-08-02-queue-items-ui`
 
-Status: **plan**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Queues:
 [`2026-07-04-sources-and-queues`](../2026-07-04-sources-and-queues/2026-07-04-sources-and-queues-design.md)
