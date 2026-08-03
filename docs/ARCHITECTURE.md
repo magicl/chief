@@ -34,7 +34,7 @@ backend/
 | App | May import from |
 |-----|-----------------|
 | `apps.agents` | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), foundational `bus` publishers, **`queues`** (materialize only) |
-| `apps.queues` | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only) |
+| `apps.queues` | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only), foundational `bus` publishers |
 | `apps.sessions` | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
 | `apps.bus` | Django/stdlib only; domain-free |
 | `apps.runner` | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
@@ -44,14 +44,15 @@ backend/
 | `apps.web` | Domain apps and foundational `bus` (keys: metadata + commands only); not `local_sync` |
 
 Import edges point from the importer toward its dependencies. `bus` stays foundational
-and domain-free: it imports no domain app, while `agents` and `keys` may import its
-publisher helpers. `keys` imports only `bus` among apps. **`apps.agents`** imports
-**`apps.queues`** only for config materialization (`sync_from_spec`). `apps.obsidian`
-registers against the generic agent lifecycle registry and must not be imported by
-`apps.agents`. `local_sync` is
-an outer, cross-domain reconciler that may import `agents`, `keys`, `bus`, and
-`libs.file`; no domain app imports `local_sync`. `web` remains the outer HTTP
-transport and must not import `resolve_*` from keys.
+and domain-free: it imports no domain app, while `agents`, `keys`, and `queues` may
+import its publisher helpers. `keys` and `queues` each import only `bus` among apps
+(besides `queues`'s existing `sessions` releasable-predicate import).
+**`apps.agents`** imports **`apps.queues`** only for config materialization
+(`sync_from_spec`). `apps.obsidian` registers against the generic agent lifecycle
+registry and must not be imported by `apps.agents`. `local_sync` is an outer,
+cross-domain reconciler that may import `agents`, `keys`, `bus`, and `libs.file`; no
+domain app imports `local_sync`. `web` remains the outer HTTP transport and must not
+import `resolve_*` from keys.
 
 ---
 
@@ -124,21 +125,33 @@ Commands call `publish_session_update` after DB writes. The session detail page
 listens on the existing SSE connection and patches Alpine state.
 
 List resources use a separate user-scoped Redis channel:
-**`{CACHE_PREFIX}user:{user_id}:resources`**. Agent and key commands publish the
-canonical, secret-free envelope
-`{"channel": "resource_update", "resource": "agents"|"keys"}` with
-`transaction.on_commit`. These messages are best-effort refetch hints only: Postgres
-is authoritative, and no model data or credential material belongs in the envelope.
+**`{CACHE_PREFIX}user:{user_id}:resources`**. Agent, key, and queue commands publish
+the canonical, secret-free envelope
+`{"channel": "resource_update", "resource": "agents"|"keys"|"queues"}` with
+`transaction.on_commit`. The `queues` resource additionally carries optional
+`agent_id` / `queue_id` UUID-string scoping fields so a specific agent's Queues
+section or one queue's items table can refetch without an unscoped page-wide
+signal; both fields are omitted entirely (never sent as null) when the caller has
+no scope to supply, and an unscoped `queues` hint is treated as "refetch if any
+queue UI is visible". These messages are best-effort refetch hints only: Postgres
+is authoritative, and no model data, filter state, or credential material belongs
+in the envelope.
 
 Authenticated pages connect to **`/events/`**, whose SSE stream derives the user id
 from the session and subscribes only to that user's channel. The shared page script
 keeps at most one `EventSource`, closes it on `pagehide`, and reopens it on a
 BFCache-restored `pageshow`. A validated `resource_update` triggers
-`chief:agents-changed` or `chief:keys-changed`; htmx then refetches
-`/partials/agents/` or `/partials/keys/` and swaps the relevant list contents.
-Redis pub/sub is not replayed, so clients must tolerate lost or coalesced hints:
-each partial refetch reads current Postgres state, and a later hint or navigation
-converges the page.
+`chief:agents-changed`, `chief:keys-changed`, or `chief:queues-changed` (forwarding
+`agent_id`/`queue_id` as the custom event's `detail.agentId`/`detail.queueId`); htmx
+then refetches `/partials/agents/`, `/partials/keys/`, or the relevant agent/queue
+partial and swaps the matching content. The queue items page and the agent detail
+Queues section use an `hx-trigger` event-filter expression
+(`chief:queues-changed[!event.detail.agentId || event.detail.agentId === '<id>']`)
+combined with a `delay` trigger modifier, so only a matching scoped hint (or an
+unscoped one) triggers their htmx refetch, and bursts of hints coalesce into one
+request. Redis pub/sub is not replayed, so clients must tolerate lost or coalesced
+hints: each partial refetch reads current Postgres state, and a later hint or
+navigation converges the page.
 
 **Rules:**
 
@@ -162,6 +175,7 @@ converges the page.
 | `libs/tools` | Tool definitions + registry |
 | `libs/sources` | Source adapter protocol + registry |
 | `libs/algorithms` | Reusable algorithms (may call providers) |
+| `libs/web_tables` | Generic table query parsing + paginated list-page DTO (Django-free); shared by `apps.web` views and domain `services/queries.py` modules so neither imports the other |
 
 Libs stay Django-free. When a lib needs credentials, the **app boundary injects**
 callables (`token_supplier`, `secret_supplier`) — libs do not import `apps.keys`.
@@ -293,6 +307,11 @@ Platform ingest: sources discover external items → deduped **queue items** →
 `fail`, worker pool), **`QueueItemAttempt`** records **every** session that took it —
 not only the current taker on `QueueItem`. Operators and debug tooling can list all
 sessions that tried an item before it reached `done`, `failed`, or `exhausted`.
+
+**Queue items UI:** operators browse all items (including terminal statuses) per
+queue from agent detail, with server-side filter/sort/pagination and live scoped
+refresh hints — see
+[`docs/specs/2026-08-02-queue-items-ui/`](specs/2026-08-02-queue-items-ui/2026-08-02-queue-items-ui-design.md).
 
 ---
 

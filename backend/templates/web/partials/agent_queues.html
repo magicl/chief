@@ -1,0 +1,33 @@
+<h2>Queues</h2>
+{% if queue_summaries %}
+<table>
+  <thead>
+    <tr>
+      <th>Queue</th>
+      <th>Available</th>
+      <th>Taken</th>
+      <th>Done</th>
+      <th>Failed</th>
+      <th>Exhausted</th>
+      <th>Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for summary in queue_summaries %}
+    <tr>
+      <td>
+        <a href="{{ url('queue_items', kwargs={'agent_id': agent.id, 'queue_id': summary.queue.queue_id}) }}">{{ summary.queue.queue_id }}</a>
+      </td>
+      <td>{{ summary.counts['available'] }}</td>
+      <td>{{ summary.counts['taken'] }}</td>
+      <td>{{ summary.counts['done'] }}</td>
+      <td>{{ summary.counts['failed'] }}</td>
+      <td>{{ summary.counts['exhausted'] }}</td>
+      <td>{{ summary.total }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No queues configured for this agent.</p>
+{% endif %}

@@ -180,8 +180,12 @@ queues: []
         self.assertEqual(report.changed_user_ids, {self.user.pk})
         self.assertEqual(report.items[0].user_id, self.user.pk)
         self.assertTrue(report.items[0].changed)
-        publish.assert_called_once_with(self.user.pk, 'agents')
         agent = Agent.objects.get(user=self.user, identifier='daily-helper')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the
+        # materialized config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(self.user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(self.user.pk, 'agents')
         self.assertEqual(agent.config_source, 'disk')
         self.assertEqual(agent.source_path, 'agents/daily-helper.yaml')
         self.assertEqual(agent.status, AgentStatus.ACTIVE)
@@ -213,7 +217,11 @@ queues: []
         self.assertEqual(report.changed_user_ids, {self.user.pk})
         self.assertEqual(report.items[0].user_id, self.user.pk)
         self.assertTrue(report.items[0].changed)
-        publish.assert_called_once_with(self.user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the
+        # rematerialized config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(self.user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(self.user.pk, 'agents')
         agent.refresh_from_db()
         self.assertNotEqual(agent.current_config_id, old_config_id)
         self.assertEqual(AgentConfig.objects.filter(agent=agent).count(), 2)
@@ -282,7 +290,11 @@ queues: []
         self.assertEqual(AgentConfig.objects.filter(agent=agent).count(), 1)
         assert agent.current_config is not None
         self.assertEqual(agent.current_config.get_spec().system_prompt, 'First prompt.')
-        publish.assert_called_once_with(self.user.pk, 'agents')
+        # sync_from_spec also emits an agent-scoped `queues` hint since the
+        # materialized config's queues[] are reconciled as part of the same commit.
+        self.assertEqual(publish.call_count, 2)
+        publish.assert_any_call(self.user.pk, 'queues', agent_id=agent.id)
+        publish.assert_any_call(self.user.pk, 'agents')
         publish.reset_mock()
 
         with self.assertLogs('apps.agents.services.disk_sync', level='ERROR'):

@@ -37,6 +37,14 @@ from apps.keys.services.queries import (
     list_user_credentials,
 )
 from apps.keys.types import SERVICE_TYPES
+from apps.queues.models import Queue, QueueItem, QueueItemStatus
+from apps.queues.services.queries import (
+    QUEUE_ITEMS_TABLE_SCHEMA,
+    get_queue,
+    list_queue_items_page,
+    list_queue_summaries,
+    list_source_ids,
+)
 from apps.runner.dispatch import (
     maybe_dispatch_session,
     push_chat_and_dispatch,
@@ -82,6 +90,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 from libs.providers.key.health_codes import HEALTH_CODE_LABELS
+from libs.web_tables import ListPage, parse_table_query
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -258,6 +267,7 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     context: dict[str, Any] = {
         'agent': data.agent,
         'sessions': data.sessions,
+        'queue_summaries': list_queue_summaries(agent=data.agent),
         'source_label': data.source_label,
         'config_dirty': data.config_dirty,
         'agent_daily_spend': agent_daily_spend(data.agent.pk),
@@ -267,6 +277,67 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     }
     context.update(_chatbox_context(agent=data.agent, session=None))
     return render(request, 'web/agent_detail.html', context)
+
+
+def _owned_queue(agent: Agent, queue_id: str) -> Queue:
+    """Return *agent*'s queue with slug *queue_id*, or raise Http404 when missing."""
+    queue = get_queue(agent=agent, queue_id=queue_id)
+    if queue is None:
+        raise Http404('Queue not found')
+    return queue
+
+
+def _queue_items_page_for_request(
+    request: HttpRequest,
+    agent_id: UUID,
+    queue_id: str,
+) -> tuple[Agent, Queue, ListPage[QueueItem]]:
+    """Load the owned agent/queue and one filtered/sorted/paginated items page from the request."""
+    agent = get_owned_agent(_require_authenticated_user_id(request), agent_id)
+    queue = _owned_queue(agent, queue_id)
+    query = parse_table_query(request.GET, QUEUE_ITEMS_TABLE_SCHEMA)
+    list_page = list_queue_items_page(queue=queue, query=query)
+    return agent, queue, list_page
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def agent_queues_partial(request: HttpRequest, agent_id: UUID) -> HttpResponse:
+    """Render the owned agent's Queues section fragment (per-status counts + links)."""
+    agent = get_owned_agent(_require_authenticated_user_id(request), agent_id)
+    return render(
+        request,
+        'web/partials/agent_queues.html',
+        {'agent': agent, 'queue_summaries': list_queue_summaries(agent=agent)},
+    )
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def queue_items(request: HttpRequest, agent_id: UUID, queue_id: str) -> HttpResponse:
+    """Full queue items page: agent frame chrome plus the filter/sort/pagination table."""
+    agent, queue, list_page = _queue_items_page_for_request(request, agent_id, queue_id)
+    context: dict[str, Any] = {
+        'agent': agent,
+        'queue': queue,
+        'list_page': list_page,
+        'status_choices': QueueItemStatus.choices,
+        'source_ids': list_source_ids(queue=queue),
+    }
+    context.update(_chatbox_context(agent=agent, session=None))
+    return render(request, 'web/queue_items.html', context)
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def queue_items_partial(request: HttpRequest, agent_id: UUID, queue_id: str) -> HttpResponse:
+    """Render only the queue items table region, for the initial embed and htmx refetch."""
+    agent, queue, list_page = _queue_items_page_for_request(request, agent_id, queue_id)
+    return render(
+        request,
+        'web/partials/queue_items_table.html',
+        {'agent': agent, 'queue': queue, 'list_page': list_page},
+    )
 
 
 @login_required(login_url='/admin/login/')

@@ -46,6 +46,9 @@
     .pill.queued, .pill.waiting { background: #2a3040; color: #b8c0d4; }
     .pill.paused { background: #3d3a1f; color: #f0e29b; }
     .pill.done { background: #1f4023; color: #9be7a8; }
+    .pill.available { background: #1d3a5f; color: #9ec5ff; }
+    .pill.taken { background: #3d3a1f; color: #f0e29b; }
+    .pill.exhausted { background: #4a2326; color: #ffb4b8; }
     .flash-messages { margin-bottom: 1rem; display: grid; gap: .5rem; }
     .flash { padding: .6rem .9rem; border-radius: 8px; font-size: .9rem; }
     .flash.success { background: #1f4023; color: #9be7a8; }
@@ -94,9 +97,13 @@
           const eventName = {
             agents: 'chief:agents-changed',
             keys: 'chief:keys-changed',
+            queues: 'chief:queues-changed',
           }[message.resource];
           if (message.channel === 'resource_update' && eventName) {
-            htmx.trigger(document.body, eventName);
+            htmx.trigger(document.body, eventName, {
+              agentId: message.agent_id || null,
+              queueId: message.queue_id || null,
+            });
           }
         } catch {
           // Invalid hints are non-authoritative and contain nothing safe to log.
