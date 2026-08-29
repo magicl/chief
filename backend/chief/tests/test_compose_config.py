@@ -189,15 +189,6 @@ class TestGoogleOAuthApplicationConfig(OTestCase):
         self.assertIn('The current development nginx keeps `access_log off`.', normalized)
         self.assertRegex(nginx, r'(?m)^\s*access_log off;\s*$')
 
-    def test_architecture_documents_obsidian_vault_token_sources(self) -> None:
-        """Architecture distinguishes compose hardcode from Knox-hosted token."""
-        repository_root = Path(__file__).resolve().parents[3]
-        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
-        self.assertIn('compose-obsidian-vault-token', architecture)
-        self.assertIn('`$KNOX/chief/{cluster}/obsidian-vault.txt`', architecture)
-        self.assertIn('- `token` → `OBSIDIAN_VAULT_TOKEN`', architecture)
-        self.assertIn('OBSIDIAN_VAULT_TOKEN_FILE', architecture)
-
 
 class TestDropboxOAuthApplicationConfig(OTestCase):
     """Check optional Dropbox OAuth app settings and their deployment contract."""
@@ -361,11 +352,10 @@ class TestComposeRichContentAssets(OTestCase):
         )
 
 
-COMPOSE_OBSIDIAN_VAULT_TOKEN = 'compose-obsidian-vault-token'
-
-
 class TestComposeObsidianVaultService(OTestCase):
     """Check that Compose wires the Obsidian vault service and its backend consumers."""
+
+    compose_obsidian_vault_token = 'compose-obsidian-vault-token'
 
     @staticmethod
     def _generated_group_values(group: str, *, include_local_example: bool) -> dict[str, str]:
@@ -438,13 +428,13 @@ class TestComposeObsidianVaultService(OTestCase):
         # `#[*]` (e.g. EXECENV_PRODUCTION) applies to every group by design and isn't
         # a secret; only OBSIDIAN_VAULT_TOKEN should come from the obsidian-specific group.
         obsidian_without_local = self._generated_group_values('obsidian', include_local_example=False)
-        self.assertEqual(obsidian_without_local.get('OBSIDIAN_VAULT_TOKEN'), COMPOSE_OBSIDIAN_VAULT_TOKEN)
+        self.assertEqual(obsidian_without_local.get('OBSIDIAN_VAULT_TOKEN'), self.compose_obsidian_vault_token)
 
         backend_without_local = self._generated_group_values('backend', include_local_example=False)
-        self.assertEqual(backend_without_local.get('OBSIDIAN_VAULT_TOKEN'), COMPOSE_OBSIDIAN_VAULT_TOKEN)
+        self.assertEqual(backend_without_local.get('OBSIDIAN_VAULT_TOKEN'), self.compose_obsidian_vault_token)
 
         obsidian_with_local = self._generated_group_values('obsidian', include_local_example=True)
-        self.assertEqual(obsidian_with_local.get('OBSIDIAN_VAULT_TOKEN'), COMPOSE_OBSIDIAN_VAULT_TOKEN)
+        self.assertEqual(obsidian_with_local.get('OBSIDIAN_VAULT_TOKEN'), self.compose_obsidian_vault_token)
 
         backend_with_local = self._generated_group_values('backend', include_local_example=True)
         self.assertEqual(backend_with_local['OBSIDIAN_VAULT_TOKEN'], obsidian_with_local['OBSIDIAN_VAULT_TOKEN'])
@@ -481,6 +471,15 @@ class TestComposeObsidianVaultService(OTestCase):
         self.assertNotRegex(env_example, r'(?m)^OBSIDIAN_VAULT_TOKEN=')
         self.assertIn('OBSIDIAN_VAULT_TOKEN', env_example)
         self.assertIn('#[backend,obsidian]', env_example)
+
+    def test_architecture_documents_obsidian_vault_token_sources(self) -> None:
+        """Architecture distinguishes compose hardcode from Knox-hosted token."""
+        repository_root = Path(__file__).resolve().parents[3]
+        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
+        self.assertIn('compose-obsidian-vault-token', architecture)
+        self.assertIn('`$KNOX/chief/{cluster}/obsidian-vault.txt`', architecture)
+        self.assertIn('- `token` → `OBSIDIAN_VAULT_TOKEN`', architecture)
+        self.assertIn('OBSIDIAN_VAULT_TOKEN_FILE', architecture)
 
 
 class TestCeleryEntrypointLogging(OTestCase):

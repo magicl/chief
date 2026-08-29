@@ -3,7 +3,7 @@
 **Branch:** `feat/2026-08-29-obsidian-vault-token`
 **Infrabase branch:** `feat/2026-08-29-obsidian-vault-token`
 
-Status: **implementing**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Vault
 service: [`docs/specs/2026-08-02-obsidian-vault-service/`](../2026-08-02-obsidian-vault-service/2026-08-02-obsidian-vault-service-design.md) · Hosting:
