@@ -189,6 +189,15 @@ class TestGoogleOAuthApplicationConfig(OTestCase):
         self.assertIn('The current development nginx keeps `access_log off`.', normalized)
         self.assertRegex(nginx, r'(?m)^\s*access_log off;\s*$')
 
+    def test_architecture_documents_obsidian_vault_token_sources(self) -> None:
+        """Architecture distinguishes compose hardcode from Knox-hosted token."""
+        repository_root = Path(__file__).resolve().parents[3]
+        architecture = (repository_root / 'docs/ARCHITECTURE.md').read_text()
+        self.assertIn('compose-obsidian-vault-token', architecture)
+        self.assertIn('`$KNOX/chief/{cluster}/obsidian-vault.txt`', architecture)
+        self.assertIn('- `token` → `OBSIDIAN_VAULT_TOKEN`', architecture)
+        self.assertIn('OBSIDIAN_VAULT_TOKEN_FILE', architecture)
+
 
 class TestDropboxOAuthApplicationConfig(OTestCase):
     """Check optional Dropbox OAuth app settings and their deployment contract."""
@@ -352,6 +361,9 @@ class TestComposeRichContentAssets(OTestCase):
         )
 
 
+COMPOSE_OBSIDIAN_VAULT_TOKEN = 'compose-obsidian-vault-token'
+
+
 class TestComposeObsidianVaultService(OTestCase):
     """Check that Compose wires the Obsidian vault service and its backend consumers."""
 
@@ -422,14 +434,17 @@ class TestComposeObsidianVaultService(OTestCase):
             self.assertIn('obsidian', path)
 
     def test_vault_service_env_group_always_exists_and_carries_only_the_shared_token(self) -> None:
-        """The obsidian env.split group exists without `.env.local` and never carries backend secrets."""
+        """Compose bakes the well-known token into both groups without `.env.local`."""
         # `#[*]` (e.g. EXECENV_PRODUCTION) applies to every group by design and isn't
         # a secret; only OBSIDIAN_VAULT_TOKEN should come from the obsidian-specific group.
         obsidian_without_local = self._generated_group_values('obsidian', include_local_example=False)
-        self.assertEqual(obsidian_without_local.get('OBSIDIAN_VAULT_TOKEN'), '')
+        self.assertEqual(obsidian_without_local.get('OBSIDIAN_VAULT_TOKEN'), COMPOSE_OBSIDIAN_VAULT_TOKEN)
+
+        backend_without_local = self._generated_group_values('backend', include_local_example=False)
+        self.assertEqual(backend_without_local.get('OBSIDIAN_VAULT_TOKEN'), COMPOSE_OBSIDIAN_VAULT_TOKEN)
 
         obsidian_with_local = self._generated_group_values('obsidian', include_local_example=True)
-        self.assertIn('OBSIDIAN_VAULT_TOKEN', obsidian_with_local)
+        self.assertEqual(obsidian_with_local.get('OBSIDIAN_VAULT_TOKEN'), COMPOSE_OBSIDIAN_VAULT_TOKEN)
 
         backend_with_local = self._generated_group_values('backend', include_local_example=True)
         self.assertEqual(backend_with_local['OBSIDIAN_VAULT_TOKEN'], obsidian_with_local['OBSIDIAN_VAULT_TOKEN'])
@@ -459,22 +474,13 @@ class TestComposeObsidianVaultService(OTestCase):
         self.assertIn('npm install -g "obsidian-headless@${OBSIDIAN_HEADLESS_VERSION}"', dockerfile)
         self.assertNotIn('npm install -g obsidian-headless\n', dockerfile)
 
-    def test_env_example_documents_shared_vault_token(self) -> None:
-        """.env.local.example documents the token shared by backend and the vault service."""
+    def test_env_example_does_not_assign_blank_vault_token(self) -> None:
+        """`.env.local.example` must not wipe the compose default with a blank assignment."""
         repository_root = Path(__file__).resolve().parents[3]
         env_example = (repository_root / '.env.local.example').read_text()
-
-        assignment = 'OBSIDIAN_VAULT_TOKEN='
-        self.assertEqual(env_example.count(assignment), 1)
+        self.assertNotRegex(env_example, r'(?m)^OBSIDIAN_VAULT_TOKEN=')
+        self.assertIn('OBSIDIAN_VAULT_TOKEN', env_example)
         self.assertIn('#[backend,obsidian]', env_example)
-        token_group_match = re.search(
-            r'^#\[backend,obsidian\]\s*$\n(?P<body>.*?)(?=^#\[|\Z)',
-            env_example,
-            flags=re.MULTILINE | re.DOTALL,
-        )
-        self.assertIsNotNone(token_group_match)
-        token_group_body = token_group_match.group('body') if token_group_match else ''
-        self.assertRegex(token_group_body, rf'(?m)^{re.escape(assignment)}$')
 
 
 class TestCeleryEntrypointLogging(OTestCase):
