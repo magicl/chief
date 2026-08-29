@@ -43,4 +43,4 @@ Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 
 ## Links
 
-- PR:
+- PR: https://github.com/magicl/chief/pull/51
