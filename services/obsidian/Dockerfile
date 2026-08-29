@@ -25,10 +25,13 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
+# --create-home makes /app (the app user's home and WORKDIR) exist and be owned
+# by app; /data is the mount point for the vault volume, whose initial ownership
+# Docker copies from the image when the named volume is first created.
 RUN groupadd --system app \
-    && useradd --system --gid app --home-dir /app app \
+    && useradd --system --gid app --home-dir /app --create-home app \
     && mkdir -p /data \
-    && chown app:app /data /app
+    && chown app:app /data
 
 # Install locked Python deps from the workspace lock (same pattern as backend/Dockerfile.dev).
 # Build context is the repository root.
