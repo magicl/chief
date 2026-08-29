@@ -394,6 +394,29 @@ class TestComposeObsidianVaultService(OTestCase):
         self.assertEqual(vault_service['environment']['PORT'], '8100')
         self.assertIn('obsidian_vault_data', compose['volumes'])
 
+    def test_vault_service_waits_for_healthy_backend_without_cycle(self) -> None:
+        """Obsidian starts after backend livez; backend must not wait on Obsidian."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+        vault_service = compose['services']['chief-obsidian']
+        backend_service = compose['services']['chief-backend']
+        vault_depends = vault_service['depends_on']
+        backend_depends = backend_service['depends_on']
+
+        self.assertEqual(
+            vault_depends['chief-backend'],
+            {'condition': 'service_healthy'},
+        )
+        self.assertIn('/health/livez', ' '.join(backend_service['healthcheck']['test']))
+        self.assertNotIn('healthcheck', vault_service)
+        self.assertNotIn('chief-obsidian', backend_depends)
+        for service_name in ('chief-worker', 'chief-beat'):
+            self.assertNotIn(
+                'chief-obsidian',
+                compose['services'][service_name]['depends_on'],
+            )
+
     def test_backend_worker_beat_receive_vault_url_and_backend_token_env_file(self) -> None:
         """Backend, worker, and Beat resolve the vault at its internal URL via their own backend env file."""
         repository_root = Path(__file__).resolve().parents[3]

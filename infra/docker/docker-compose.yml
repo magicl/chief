@@ -40,6 +40,11 @@ services:
       PORT: "8100"
     volumes:
       - obsidian_vault_data:/data
+    # Wait for Django livez so startup reconcile hits a listening backend.
+    # Backend must not depend on this service (would deadlock with service_healthy).
+    depends_on:
+      chief-backend:
+        condition: service_healthy
   # Reverse proxy: routes /static to static nginx, everything else to backend.
   chief-nginx:
     image: nginx:alpine
@@ -107,8 +112,6 @@ services:
       chief-postgres:
         condition: service_healthy
       chief-redis:
-        condition: service_started
-      chief-obsidian:
         condition: service_started
     tty: true
     stdin_open: true
