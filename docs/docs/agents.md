@@ -527,8 +527,9 @@ typed `{ok: false, error: {kind, message}}` shape, where `kind` includes
 `unavailable`, and `config`.
 
 The Chief backend never sends the vault service's inter-service URL or auth
-token through `apps.keys` — those come from Docker Compose environment
-injection (`OBSIDIAN_VAULT_URL` / `OBSIDIAN_VAULT_TOKEN`). Only the Obsidian
+token through `apps.keys`. Compose injects `OBSIDIAN_VAULT_URL` and a
+well-known local `OBSIDIAN_VAULT_TOKEN`; hosted deployments materialize the
+token from Vault as `OBSIDIAN_VAULT_TOKEN_FILE`. Only the Obsidian
 Sync credential itself (`credential_ref`) lives in `apps.keys`. Vault
 ensure/release and the restart-recovery snapshot API live in `apps.obsidian`
 (registered on the generic agent lifecycle hooks), not in `apps.agents`.

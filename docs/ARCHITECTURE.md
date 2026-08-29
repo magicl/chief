@@ -531,10 +531,21 @@ a live Headless Sync process per vault. `services/obsidian` is therefore a **sep
 process with no Chief DB access**, maintaining **one working-tree checkout per vault**
 (shared across every agent bound to that vault, refcounted) rather than one client
 call per request. The `obsidian` tool (`libs/tools/tools/obsidian.py` +
-`libs/clients/obsidian/`) calls it over HTTP using a **Docker-injected inter-service
-URL and token** (`OBSIDIAN_VAULT_URL` / `OBSIDIAN_VAULT_TOKEN`), which is deliberately
+`libs/clients/obsidian/`) calls it over HTTP using an **inter-service URL and
+token** (`OBSIDIAN_VAULT_URL` / `OBSIDIAN_VAULT_TOKEN`), which is deliberately
 kept out of `apps.keys` since it is deployment plumbing, not a per-user provider
-credential. Obsidian **Sync** secrets (headless auth token, optional E2E vault
+credential. Compose uses the well-known local value
+`compose-obsidian-vault-token` from `.env.development.compose`
+(`#[backend,obsidian]`). Production has one structured secret:
+`$KNOX/chief/{cluster}/obsidian-vault.txt`. Its exact key maps as:
+
+- `token` → `OBSIDIAN_VAULT_TOKEN`
+
+Chief never reads Knox directly. Deployment tooling materializes the token as
+`OBSIDIAN_VAULT_TOKEN_FILE=/etc/secrets/obsidian/token` on backend, worker, and
+Beat. Do not put the compose hardcode in hosted clusters. `OBSIDIAN_VAULT_URL`
+remains unset in production until a vault service workload exists; empty URL
+still skips vault ensure. Obsidian **Sync** secrets (headless auth token, optional E2E vault
 password) are a normal `apps.keys` credential referenced by `credential_ref`.
 `apps.obsidian` owns vault ensure/release (registered on the generic
 `apps.agents.lifecycle` hooks) and an internal snapshot endpoint the vault service
