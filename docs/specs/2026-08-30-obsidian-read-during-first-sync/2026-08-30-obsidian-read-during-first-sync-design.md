@@ -1,7 +1,7 @@
 # Obsidian list/read during first sync — Design
 
 **Branch:** `feat/2026-08-30-obsidian-read-during-first-sync`
-Status: **design**
+Status: **plan**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Vault service:
 [`docs/specs/2026-08-02-obsidian-vault-service/`](../2026-08-02-obsidian-vault-service/2026-08-02-obsidian-vault-service-design.md) ·
