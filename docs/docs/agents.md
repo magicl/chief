@@ -269,6 +269,12 @@ session. Most tools are always ready; the `obsidian` tool is ready only once its
 service reports that the initial sync finished, which keeps a journal or notes agent
 from working against an empty vault.
 
+The config editor's **Add trigger** helper automatically inserts one `tool_ready`
+condition per readiness-reporting tool already present in the document when it adds
+a `queue` or `schedule` trigger. The helper preserves `tools[]` order. Manual, button,
+and agent triggers remain ungated, tools added later do not backfill existing triggers,
+and editing or removing conditions remains YAML-only.
+
 The reference is strict: `tool` must match a `tools[].id` on the same agent, unknown
 `kind` values are rejected, and unknown fields inside a condition are rejected. All
 three are config validation failures at save or disk-sync time rather than conditions
