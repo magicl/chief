@@ -5,9 +5,11 @@
 from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession, AgentSessionStatus, TriggerType
 from django.contrib.auth import get_user_model
+from libs.algorithms import CHAT_NAME_ID
 
 
 def make_test_session(identifier: str = 'test-agent') -> AgentSession:
+    """Create a representative agent-owned session."""
     user = get_user_model().objects.create_user(username=f'user-{identifier}', password='test')
     agent = create_from_example(user, 'clock-assistant', identifier=identifier)
     config = agent.current_config
@@ -19,4 +21,19 @@ def make_test_session(identifier: str = 'test-agent') -> AgentSession:
         status=AgentSessionStatus.QUEUED,
         trigger_type=TriggerType.TRIGGER,
         trigger_ref=trigger.id if trigger else None,
+    )
+
+
+def make_algorithm_session(
+    identifier: str = 'test-algorithm',
+    *,
+    algorithm_id: str = CHAT_NAME_ID,
+) -> AgentSession:
+    """Create a representative algorithm-owned session."""
+    user = get_user_model().objects.create_user(username=f'user-{identifier}', password='test')
+    return AgentSession.objects.create(
+        user=user,
+        algorithm_id=algorithm_id,
+        status=AgentSessionStatus.QUEUED,
+        trigger_type=TriggerType.ALGORITHM,
     )

@@ -64,6 +64,7 @@ from apps.web.services.queries import (
     get_active_button_trigger,
     get_activity_snapshot,
     get_agent_detail_data,
+    get_algorithm_detail_data,
     get_credential_for_write_check,
     get_dashboard_data,
     get_manual_trigger_gate,
@@ -72,6 +73,7 @@ from apps.web.services.queries import (
     get_owned_session,
     get_session_llm_label,
     list_active_button_triggers,
+    list_background_algorithms,
 )
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -91,6 +93,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
+from libs.algorithms import get_algorithm
 from libs.providers.key.health_codes import HEALTH_CODE_LABELS
 from libs.web_tables import ListPage, parse_table_query
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -237,6 +240,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     usage_context: dict[str, Any] = {}
     if user_id is not None:
+        usage_context['background_algorithms'] = list_background_algorithms(user_id)
         usage_context['user_daily_spend'] = user_daily_spend(user_id)
         usage_context['user_monthly_spend'] = user_monthly_spend(user_id)
         try:
@@ -274,6 +278,7 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     context: dict[str, Any] = {
         'agent': data.agent,
         'sessions': data.sessions,
+        'show_composer': True,
         'queue_summaries': list_queue_summaries(agent=data.agent),
         'source_label': data.source_label,
         'config_dirty': data.config_dirty,
@@ -284,6 +289,24 @@ def agent_detail(request: HttpRequest, agent_id: UUID) -> HttpResponse:
     }
     context.update(_chatbox_context(agent=data.agent, session=None))
     return render(request, 'web/agent_detail.html', context)
+
+
+@login_required(login_url='/admin/login/')
+@require_GET
+def algorithm_detail(request: HttpRequest, algorithm_id: str) -> HttpResponse:
+    """Background algorithm overview: this user's spend for it plus its sessions."""
+    data = get_algorithm_detail_data(_require_authenticated_user_id(request), algorithm_id)
+    return render(
+        request,
+        'web/algorithm_detail.html',
+        {
+            'algorithm_id': data.algorithm_id,
+            'algorithm_display_name': data.display_name,
+            'algorithm_sessions': data.sessions,
+            'algorithm_daily_spend': data.daily_spend,
+            'algorithm_monthly_spend': data.monthly_spend,
+        },
+    )
 
 
 def _owned_queue(agent: Agent, queue_id: str) -> Queue:
@@ -327,6 +350,7 @@ def queue_items(request: HttpRequest, agent_id: UUID, queue_id: str) -> HttpResp
     context: dict[str, Any] = {
         'agent': agent,
         'queue': queue,
+        'show_composer': True,
         'list_page': list_page,
         'status_choices': QueueItemStatus.choices,
         'source_ids': list_source_ids(queue=queue),
@@ -408,20 +432,26 @@ def session_detail(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Session activity log and chat continuation."""
     user_id = _require_authenticated_user_id(request)
     session = get_owned_session(user_id, session_id)
-    direct_parent = get_owned_direct_parent(session, user_id=user_id)
+    is_algorithm = session.algorithm_id is not None
+    direct_parent = None if is_algorithm else get_owned_direct_parent(session, user_id=user_id)
     parent_session = None
     if direct_parent is not None:
         parent_session = {
             'id': direct_parent.id,
             'name': direct_parent.name,
         }
+    algorithm = get_algorithm(session.algorithm_id) if session.algorithm_id else None
     context: dict[str, Any] = {
         'session': session,
         'agent': session.agent,
         'llm_label': get_session_llm_label(session),
         'parent_session': parent_session,
+        'show_composer': not is_algorithm,
+        'algorithm_id': session.algorithm_id,
+        'algorithm_display_name': algorithm.display_name if algorithm else session.algorithm_id,
     }
-    context.update(_chatbox_context(agent=session.agent, session=session))
+    if not is_algorithm:
+        context.update(_chatbox_context(agent=session.agent, session=session))
     return render(request, 'web/session_detail.html', context)
 
 
@@ -622,7 +652,9 @@ async def sse_spike(request: HttpRequest) -> StreamingHttpResponse:
 @login_required(login_url='/admin/login/')
 def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Post a follow-up chat message to an existing session."""
-    get_owned_session(_require_authenticated_user_id(request), session_id)
+    session = get_owned_session(_require_authenticated_user_id(request), session_id)
+    if session.algorithm_id is not None:
+        raise Http404
     content = request.POST.get('content', '').strip()
     if not content:
         return HttpResponseBadRequest('content required')
@@ -636,6 +668,8 @@ def session_chat(request: HttpRequest, session_id: UUID) -> HttpResponse:
 def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Pause a running session."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
+    if session.algorithm_id is not None:
+        raise Http404
     push_control_and_maybe_dispatch(session_id, 'pause')
     session.refresh_from_db()
     return render(request, 'web/partials/session_status.html', {'session': session})
@@ -647,6 +681,8 @@ def session_pause(request: HttpRequest, session_id: UUID) -> HttpResponse:
 def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Resume a paused session."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
+    if session.algorithm_id is not None:
+        raise Http404
     maybe_dispatch_session(session_id)
     session.refresh_from_db()
     return render(request, 'web/partials/session_status.html', {'session': session})
@@ -658,6 +694,8 @@ def session_resume(request: HttpRequest, session_id: UUID) -> HttpResponse:
 def session_abort(request: HttpRequest, session_id: UUID) -> HttpResponse:
     """Abort a session."""
     session = get_owned_session(_require_authenticated_user_id(request), session_id)
+    if session.algorithm_id is not None:
+        raise Http404
     push_control_and_maybe_dispatch(session_id, 'abort')
     maybe_dispatch_session(session_id)
     session.refresh_from_db()

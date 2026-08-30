@@ -4,7 +4,11 @@
 # ~
 """Admin regressions for immutable session activity history."""
 
-from apps.sessions.admin import AgentSessionActivityAdmin, AgentSessionActivityInline
+from apps.sessions.admin import (
+    AgentSessionActivityAdmin,
+    AgentSessionActivityInline,
+    AgentSessionAdmin,
+)
 from apps.sessions.models import AgentSession, AgentSessionActivity
 from django.contrib import admin
 from django.contrib.auth import get_user_model
@@ -14,6 +18,12 @@ from olib.py.django.test.cases import OTransactionTestCase
 
 
 class TestAgentSessionActivityAdmin(OTransactionTestCase):
+    def test_session_list_can_filter_by_user(self) -> None:
+        """Session admin exposes the required owner user as a list filter."""
+        session_admin = AgentSessionAdmin(AgentSession, admin.site)
+
+        self.assertIn('user', session_admin.list_filter)
+
     def test_superuser_cannot_add_or_delete_activity_history(self) -> None:
         """Both direct and inline activity admin surfaces reject creation and deletion."""
         request = RequestFactory().get('/admin/agent_sessions/agentsessionactivity/')

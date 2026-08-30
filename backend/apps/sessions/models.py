@@ -4,12 +4,14 @@
 # ~
 """Agent session and hierarchical activity models."""
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from apps.agents.models import Agent, AgentConfig
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from libs.algorithms import get_algorithm
 
 from olib.py.utils.uuid7 import uuid7
 
@@ -25,12 +27,39 @@ class AgentSessionStatus(models.TextChoices):
 class TriggerType(models.TextChoices):
     TRIGGER = 'trigger', 'Trigger'
     TOOL_CALL = 'tool_call', 'Tool call'
+    ALGORITHM = 'algorithm', 'Algorithm'
 
 
 class AgentSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
-    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='sessions')
-    agent_config = models.ForeignKey(AgentConfig, on_delete=models.CASCADE, related_name='sessions')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='agent_sessions',
+    )
+    # Agent-only call sites branch by owner mode before dereferencing. Keep the
+    # established relation type while the database permits algorithm-owned nulls.
+    agent: Agent = cast(
+        Any,
+        models.ForeignKey(
+            Agent,
+            null=True,
+            blank=True,
+            on_delete=models.CASCADE,
+            related_name='sessions',
+        ),
+    )
+    agent_config: AgentConfig = cast(
+        Any,
+        models.ForeignKey(
+            AgentConfig,
+            null=True,
+            blank=True,
+            on_delete=models.CASCADE,
+            related_name='sessions',
+        ),
+    )
+    algorithm_id = models.CharField(max_length=64, null=True, blank=True)
     parent_session = models.ForeignKey(
         'self',
         null=True,
@@ -51,9 +80,25 @@ class AgentSession(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(agent__isnull=False, agent_config__isnull=False, algorithm_id__isnull=True)
+                    | models.Q(
+                        agent__isnull=True,
+                        agent_config__isnull=True,
+                        algorithm_id__isnull=False,
+                        parent_session__isnull=True,
+                    )
+                ),
+                name='sessions_agentsession_owner_xor',
+            ),
+        ]
         indexes = [
             models.Index(fields=['-created_at']),
             models.Index(fields=['agent', '-created_at']),
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'algorithm_id', '-created_at']),
             models.Index(fields=['parent_session']),
         ]
 
@@ -67,7 +112,7 @@ class AgentSession(models.Model):
         if self.parent_session_id == self.id:
             raise ValidationError({'parent_session': 'a session cannot parent itself'})
 
-        child_user_id = self.agent.user_id
+        child_user_id = self.user_id
         seen = {self.id}
         current_id: UUID | None = self.parent_session_id
         while current_id is not None:
@@ -77,26 +122,54 @@ class AgentSession(models.Model):
             try:
                 current = (
                     AgentSession.objects.select_for_update()
-                    .select_related('agent')
-                    .only('id', 'parent_session_id', 'agent__user_id')
+                    .only('id', 'parent_session_id', 'user_id')
                     .get(pk=current_id)
                 )
             except AgentSession.DoesNotExist as exc:
                 raise ValidationError({'parent_session': 'parent session does not exist'}) from exc
-            if current.agent.user_id != child_user_id:
+            if current.user_id != child_user_id:
                 raise ValidationError({'parent_session': 'parent and child sessions must have the same owner'})
             current_id = current.parent_session_id
+
+    def _validate_owner(self) -> None:
+        """Validate the exact agent-owned or registered algorithm-owned mode."""
+        if self.user_id is None:
+            raise ValidationError({'user': 'session user is required'})
+        if self.agent_id is not None and self.algorithm_id is None:
+            if self.agent_config_id is None:
+                raise ValidationError({'agent_config': 'agent-owned sessions require an agent config'})
+            if self.agent.user_id != self.user_id:
+                raise ValidationError({'user': 'session user must match the agent owner'})
+            self._validate_locked_ancestry()
+            return
+        if self.algorithm_id is not None and self.agent_id is None and self.agent_config_id is None:
+            failures: dict[str, str] = {}
+            if self.parent_session_id is not None:
+                failures['parent_session'] = 'algorithm sessions cannot have parent sessions'
+            if self.trigger_type != TriggerType.ALGORITHM:
+                failures['trigger_type'] = 'algorithm sessions require the algorithm trigger type'
+            if get_algorithm(self.algorithm_id) is None:
+                failures['algorithm_id'] = 'algorithm must be registered'
+            if failures:
+                raise ValidationError(failures)
+            return
+        raise ValidationError({'agent': 'session must have exactly one agent or algorithm owner'})
 
     @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Persist while freezing owner/config/ancestry and skipping pure state saves."""
+        if self._state.adding and self.user_id is None and self.agent_id is not None:
+            self.user = self.agent.user  # pylint: disable=no-member
         update_fields = kwargs.get('update_fields')
         immutable_fields = frozenset(
             {
+                'user',
+                'user_id',
                 'agent',
                 'agent_id',
                 'agent_config',
                 'agent_config_id',
+                'algorithm_id',
                 'parent_session',
                 'parent_session_id',
             }
@@ -108,26 +181,31 @@ class AgentSession(models.Model):
             try:
                 persisted = (
                     AgentSession.objects.select_for_update()
-                    .only('agent_id', 'agent_config_id', 'parent_session_id')
+                    .only('user_id', 'agent_id', 'agent_config_id', 'algorithm_id', 'parent_session_id')
                     .get(pk=self.pk)
                 )
             except AgentSession.DoesNotExist:
                 persisted = None
             if persisted is not None:
                 failures: dict[str, str] = {}
+                if persisted.user_id != self.user_id:
+                    failures['user'] = 'session user is immutable after creation'
                 if persisted.agent_id != self.agent_id:
                     failures['agent'] = 'session owner is immutable after creation'
                 if persisted.agent_config_id != self.agent_config_id:
                     failures['agent_config'] = 'session config is immutable after creation'
+                if persisted.algorithm_id != self.algorithm_id:
+                    failures['algorithm_id'] = 'session algorithm is immutable after creation'
                 if persisted.parent_session_id != self.parent_session_id:
                     failures['parent_session'] = 'session ancestry is immutable after creation'
                 if failures:
                     raise ValidationError(failures)
-        self._validate_locked_ancestry()
+        self._validate_owner()
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f'{self.agent.identifier} session {self.id}'
+        owner = self.agent.identifier if self.agent_id is not None else self.algorithm_id  # pylint: disable=no-member
+        return f'{owner} session {self.id}'
 
 
 class AgentSessionActivityKind(models.TextChoices):
@@ -225,14 +303,26 @@ class AgentSessionActivity(models.Model):
 
 
 class HourlyUsage(models.Model):
-    """Pre-aggregated token and spend totals per agent per model per hour.
+    """Pre-aggregated token and spend totals per owner per model per hour.
 
     Populated by a periodic celery task that rolls up AgentSessionActivity rows.
     Consumed by budget-check queries (daily/monthly spend sums).
     """
 
     id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
-    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='hourly_usage')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='hourly_usage',
+    )
+    agent = models.ForeignKey(
+        Agent,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='hourly_usage',
+    )
+    algorithm_id = models.CharField(max_length=64, null=True, blank=True)
     hour = models.DateTimeField()
     model = models.CharField(max_length=255)
     input_tokens = models.PositiveBigIntegerField(default=0)
@@ -245,14 +335,46 @@ class HourlyUsage(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(agent__isnull=False, algorithm_id__isnull=True)
+                    | models.Q(agent__isnull=True, algorithm_id__isnull=False)
+                ),
+                name='sessions_hourlyusage_owner_xor',
+            ),
             models.UniqueConstraint(
                 fields=['agent', 'hour', 'model'],
+                condition=models.Q(agent__isnull=False),
                 name='sessions_hourlyusage_agent_hour_model_uniq',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'algorithm_id', 'hour', 'model'],
+                condition=models.Q(algorithm_id__isnull=False),
+                name='sessions_hourlyusage_algorithm_hour_model_uniq',
             ),
         ]
         indexes = [
             models.Index(fields=['agent', 'hour']),
+            models.Index(fields=['user', 'algorithm_id', 'hour']),
         ]
 
+    def _validate_owner(self) -> None:
+        """Validate one agent or registered algorithm owner before persistence."""
+        if self.user_id is None:
+            raise ValidationError({'user': 'usage user is required'})
+        if self.agent_id is not None and self.algorithm_id is None:
+            return
+        if self.agent_id is None and self.algorithm_id is not None:
+            if get_algorithm(self.algorithm_id) is None:
+                raise ValidationError({'algorithm_id': 'algorithm must be registered'})
+            return
+        raise ValidationError({'agent': 'usage must have exactly one agent or algorithm owner'})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Persist only usage rows with a valid owner mode."""
+        self._validate_owner()
+        super().save(*args, **kwargs)
+
     def __str__(self) -> str:
-        return f'HourlyUsage({self.agent_id}, {self.hour}, {self.model})'
+        owner = self.algorithm_id if self.agent_id is None else str(self.agent_id)
+        return f'HourlyUsage({owner}, {self.hour}, {self.model})'

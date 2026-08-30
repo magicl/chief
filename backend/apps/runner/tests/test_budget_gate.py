@@ -43,6 +43,7 @@ class TestBudgetAllowsDispatch(OTestCase):
         agent = self._create_agent(daily_limit=Decimal('1.00'))
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -54,6 +55,7 @@ class TestBudgetAllowsDispatch(OTestCase):
         agent = self._create_agent(monthly_limit=Decimal('10.00'))
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -69,6 +71,7 @@ class TestBudgetAllowsDispatch(OTestCase):
         )
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -84,6 +87,7 @@ class TestBudgetAllowsDispatch(OTestCase):
         )
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -95,6 +99,7 @@ class TestBudgetAllowsDispatch(OTestCase):
         agent = self._create_agent(daily_limit=Decimal('5.00'), monthly_limit=Decimal('50.00'))
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -107,6 +112,7 @@ class TestBudgetAllowsDispatch(OTestCase):
         agent = self._create_agent(daily_limit=Decimal('5.00'))
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',

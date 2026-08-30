@@ -80,6 +80,7 @@ class TestScheduleGateIntegration(OTestCase):
         )
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -104,6 +105,7 @@ class TestScheduleGateIntegration(OTestCase):
         )
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -127,6 +129,7 @@ class TestScheduleGateIntegration(OTestCase):
         )
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -186,6 +189,7 @@ class TestQueueGateIntegration(OTestCase):
         )
         now = timezone.now()
         HourlyUsage.objects.create(
+            user=agent.user,
             agent=agent,
             hour=now.replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',

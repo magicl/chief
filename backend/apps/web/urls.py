@@ -37,6 +37,7 @@ urlpatterns = [
         views.queue_items_partial,
         name='queue_items_partial',
     ),
+    path('algorithms/<slug:algorithm_id>/', views.algorithm_detail, name='algorithm_detail'),
     path('debug/sse-spike/', views.sse_spike, name='sse_spike'),
     path('sessions/<uuid:session_id>/', views.session_detail, name='session_detail'),
     path(

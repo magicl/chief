@@ -38,6 +38,7 @@ class TestHourlyUsageModel(OTestCase):
         user = User.objects.create_user(username='limittest', password='x')
         agent = Agent.objects.create(user=user, name='Test', identifier='test-agent')
         row = HourlyUsage.objects.create(
+            user=user,
             agent=agent,
             hour=timezone.now().replace(minute=0, second=0, microsecond=0),
             model='gpt-5.4-mini',
@@ -396,6 +397,7 @@ class TestAggregateHourlyUsage(OTestCase):
         hour = first.created_at.replace(minute=0, second=0, microsecond=0)
         for model in ('gpt-5.4-mini', 'claude-sonnet-4-6'):
             HourlyUsage.objects.create(
+                user=agent.user,
                 agent=agent,
                 hour=hour,
                 model=model,
@@ -440,6 +442,43 @@ class TestAggregateHourlyUsage(OTestCase):
             aggregate_hourly_usage()
 
         select_for_update.assert_called_once_with()
+
+    def test_algorithm_llm_rolls_into_algorithm_bucket_not_chat_agent(self) -> None:
+        agent = self._setup_agent('agg-chat', 'agg-chat-agent')
+        user = agent.user
+        chat = AgentSession.objects.create(
+            agent=agent,
+            agent_config=agent.current_config,
+            status=AgentSessionStatus.DONE,
+            trigger_type='trigger',
+        )
+        algo = AgentSession.objects.create(
+            user=user,
+            algorithm_id='chat_name',
+            agent=None,
+            agent_config=None,
+            status=AgentSessionStatus.DONE,
+            trigger_type='algorithm',
+        )
+        AgentSessionActivity.objects.create(
+            session=algo,
+            seq=1,
+            revision=1,
+            kind=AgentSessionActivityKind.LLM,
+            status=AgentSessionActivityStatus.SUCCEEDED,
+            name='chat_name',
+            summary='title',
+            details={'target_session_id': str(chat.id)},
+            model='gpt-5.4-nano',
+            input_tokens=10,
+            output_tokens=4,
+            cost_usd=Decimal('0.002000'),
+        )
+        aggregate_hourly_usage()
+        self.assertFalse(HourlyUsage.objects.filter(agent_id=agent.id).exists())
+        row = HourlyUsage.objects.get(user_id=user.id, algorithm_id='chat_name')
+        self.assertEqual(row.cost_usd, Decimal('0.002000'))
+        self.assertIsNone(row.agent_id)
 
     def test_hour_buckets_remain_distinct_across_local_dst_fold(self) -> None:
         """UTC truncation keeps repeated local-clock hours in separate buckets."""

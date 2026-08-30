@@ -20,6 +20,30 @@ def get_session_name(session_id: UUID) -> str | None:
     return AgentSession.objects.filter(pk=session_id).values_list('name', flat=True).first()
 
 
+def get_algorithm_session_for_target(
+    user_id: int,
+    algorithm_id: str,
+    target_session_id: UUID,
+) -> AgentSession | None:
+    """Return this user's algorithm session that already targets one session.
+
+    Algorithm sessions have no target column: the session they act on is
+    recorded as ``target_session_id`` on their root activity, so a retried
+    one-off job can find and reuse the session it created earlier instead of
+    opening a second one. Returns the oldest match when a retry raced.
+    """
+    return (
+        AgentSession.objects.filter(
+            user_id=user_id,
+            algorithm_id=algorithm_id,
+            activities__parent_id=None,
+            activities__details__target_session_id=str(target_session_id),
+        )
+        .order_by('created_at')
+        .first()
+    )
+
+
 def activities_for(session: AgentSession | UUID) -> list[AgentSessionActivity]:
     """Return session activities in immutable creation order."""
     session_id = session if isinstance(session, UUID) else session.id
