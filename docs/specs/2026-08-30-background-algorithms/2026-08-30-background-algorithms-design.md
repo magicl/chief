@@ -1,7 +1,7 @@
 # Background algorithms — Design
 
 **Branch:** `feat/2026-08-30-background-algorithms`
-Status: **design**
+Status: **plan**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Chat names:
 [`docs/specs/2026-07-01-chat-names/`](../2026-07-01-chat-names/2026-07-01-chat-names-design.md) ·
