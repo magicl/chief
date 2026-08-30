@@ -24,7 +24,7 @@ tools:
     config:
       vault: personal
       roots: [Journal]
-    allow: [append, read, list]
+    allow: [append, read, list, status]
 queues:
   - id: inbox
     sources:

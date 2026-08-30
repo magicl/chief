@@ -89,6 +89,86 @@ class TestObsidianVaultClientLifecycle(OTestCase):
         self.assertEqual(captured['path'], '/v1/agents/agent-42/vaults')
 
 
+class TestObsidianVaultClientStatus(OTestCase):
+    def test_get_status_gets_vault_path_and_returns_bool_fields(self) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured['method'] = request.method
+            captured['path'] = request.url.path
+            captured['params'] = dict(request.url.params)
+            captured['auth'] = request.headers.get('Authorization')
+            return httpx.Response(
+                200,
+                json={
+                    'vault_id': 'Personal',
+                    'ready': True,
+                    'initial_sync_complete': True,
+                    'sync_process_alive': False,
+                },
+            )
+
+        body = _client(handler).get_status(vault_id='Personal')
+
+        self.assertEqual(captured['method'], 'GET')
+        self.assertEqual(captured['path'], '/v1/vaults/Personal/status')
+        self.assertEqual(captured['params'], {})
+        self.assertEqual(captured['auth'], 'Bearer service-token')
+        self.assertEqual(
+            body,
+            {
+                'vault_id': 'Personal',
+                'ready': True,
+                'initial_sync_complete': True,
+                'sync_process_alive': False,
+            },
+        )
+
+    def test_get_status_rejects_non_bool_flags(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    'vault_id': 'Personal',
+                    'ready': 1,
+                    'initial_sync_complete': True,
+                    'sync_process_alive': True,
+                },
+            )
+
+        with self.assertRaises(ObsidianUnavailableError):
+            _client(handler).get_status(vault_id='Personal')
+
+    def test_get_status_rejects_blank_vault_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    'vault_id': '',
+                    'ready': True,
+                    'initial_sync_complete': True,
+                    'sync_process_alive': True,
+                },
+            )
+
+        with self.assertRaises(ObsidianUnavailableError):
+            _client(handler).get_status(vault_id='Personal')
+
+    def test_get_status_rejects_missing_flags(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={'vault_id': 'Personal', 'ready': True})
+
+        with self.assertRaises(ObsidianUnavailableError):
+            _client(handler).get_status(vault_id='Personal')
+
+    def test_get_status_maps_bare_401_to_auth_failure(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, json={'detail': 'Unauthorized'})
+
+        with self.assertRaises(ObsidianAuthError):
+            _client(handler).get_status(vault_id='Personal')
+
+
 class TestObsidianVaultClientFileOps(OTestCase):
     def test_list_dir_sends_query_params_and_returns_entries(self) -> None:
         captured: dict[str, object] = {}

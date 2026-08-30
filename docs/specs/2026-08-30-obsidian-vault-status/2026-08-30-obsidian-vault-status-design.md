@@ -1,7 +1,7 @@
 # Obsidian vault `status` tool function — Design
 
 **Branch:** `feat/2026-08-30-obsidian-vault-status`
-Status: **plan**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Vault service:
 [`docs/specs/2026-08-02-obsidian-vault-service/`](../2026-08-02-obsidian-vault-service/2026-08-02-obsidian-vault-service-design.md) ·

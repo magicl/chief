@@ -2,16 +2,14 @@
 # Copyright 2024 Øivind Loe
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
-"""Obsidian vault tool: root-scoped list/read/write/append against one Sync vault.
+"""Obsidian vault tool: root-scoped list/read/write/append/status against one Sync vault.
 
 Root scoping and the first-sync gate are enforced server-side by the vault
 service (see `services/obsidian`); this tool only validates argument shape
-before dispatch and normalizes typed client failures. `sync_pending` and
-`unavailable` are stall conditions the vault service expects callers to
-retry rather than treat as a hard failure, so every dispatch is wrapped in
-`_call_with_retry` with an injectable sleep/delay schedule (production uses
-`time.sleep` with a short exponential-ish backoff; tests inject a fake sleep
-and near-zero delays).
+before dispatch and normalizes typed client failures. For file operations,
+`sync_pending` and `unavailable` are stall conditions the vault service
+expects callers to retry, so those dispatches are wrapped in
+`_call_with_retry`. `status` is the observation path and is never retried.
 """
 
 from __future__ import annotations
@@ -48,12 +46,14 @@ _REQUIRED_ARGUMENTS = {
     'read': ('path',),
     'write': ('path', 'content'),
     'append': ('path', 'content'),
+    'status': (),
 }
 _ARGUMENT_FIELDS = {
     'list': frozenset({'path'}),
     'read': frozenset({'path'}),
     'write': frozenset({'path', 'content'}),
     'append': frozenset({'path', 'content'}),
+    'status': frozenset(),
 }
 # Geometric backoff summing to ~30s, matching the stall budget documented in
 # docs/docs/agents.md's `obsidian` tool section: production retries a
@@ -104,9 +104,10 @@ def _valid_arguments(function: Any, arguments: Any) -> bool:
     if any(name not in arguments for name in required):
         return False
 
-    path = arguments['path']
-    if not isinstance(path, str) or not path or len(path) > _MAX_PATH_LENGTH:
-        return False
+    if 'path' in allowed:
+        path = arguments['path']
+        if not isinstance(path, str) or not path or len(path) > _MAX_PATH_LENGTH:
+            return False
     if 'content' in arguments:
         content = arguments['content']
         if not isinstance(content, str) or len(content) > _MAX_CONTENT_LENGTH:
@@ -115,7 +116,7 @@ def _valid_arguments(function: Any, arguments: Any) -> bool:
 
 
 class ObsidianTool(Tool):
-    """Expose root-scoped Obsidian vault file operations to an agent."""
+    """Expose root-scoped Obsidian vault file operations and first-sync status to an agent."""
 
     name = 'obsidian'
     credential_type = 'obsidian'
@@ -204,7 +205,14 @@ class ObsidianTool(Tool):
         function: str,
         arguments: dict[str, Any],
     ) -> Any:
-        """Route one validated tool function to the client protocol, retrying vault stalls."""
+        """Route one validated tool function to the client protocol.
+
+        File operations retry vault stalls; ``status`` is a single shot so the
+        agent can observe not-ready without sleeping the session.
+        """
+        if function == 'status':
+            body = client.get_status(vault_id=config.vault)
+            return {'ok': True, **body}
         if function == 'list':
             entries = _call_with_retry(
                 lambda: client.list_dir(vault_id=config.vault, path=arguments['path']),
@@ -244,7 +252,7 @@ class ObsidianTool(Tool):
         ctx: ToolContext,
         instance: ToolInstance | None = None,
     ) -> list[ToolFunction]:
-        """Return the matching four-function root-scoped file schema."""
+        """Return the matching root-scoped file schema plus readonly status."""
         path_schema = {
             'type': 'string',
             'minLength': 1,
@@ -304,6 +312,21 @@ class ObsidianTool(Tool):
                 },
                 self._unbound,
                 readonly=False,
+            ),
+            ToolFunction(
+                'status',
+                (
+                    'Report first-sync readiness and whether continuous headless Sync is alive '
+                    'for the configured vault. Not a live "caught up" indicator from Obsidian Sync.'
+                ),
+                {
+                    'type': 'object',
+                    'properties': {},
+                    'required': [],
+                    'additionalProperties': False,
+                },
+                self._unbound,
+                readonly=True,
             ),
         ]
 
