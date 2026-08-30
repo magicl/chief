@@ -259,6 +259,27 @@ class TestDropboxOAuthApplicationConfig(OTestCase):
         self.assertIn('`https://<origin>/settings/keys/oauth/dropbox/callback/`', architecture)
 
 
+class TestComposeSseProxy(OTestCase):
+    """Check that every long-lived event stream uses the SSE proxy path."""
+
+    def test_resource_events_route_uses_unbuffered_sse_location(self) -> None:
+        """Route the global resource stream through the long-lived nginx location."""
+        repository_root = Path(__file__).resolve().parents[3]
+        nginx = (repository_root / 'infra/docker/nginx.conf').read_text()
+        location = re.search(
+            r'location ~ (?P<pattern>\S+) \{(?P<body>.*?)^\s*\}',
+            nginx,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+
+        self.assertIsNotNone(location)
+        pattern = location.group('pattern') if location else r'(?!x)x'
+        body = location.group('body') if location else ''
+        self.assertRegex('/events/', re.compile(pattern))
+        self.assertIn('proxy_buffering off;', body)
+        self.assertIn('proxy_read_timeout 3600s;', body)
+
+
 class TestComposeLocalProviderConfig(OTestCase):
     """Check that Compose uses one fixed local-provider directory."""
 

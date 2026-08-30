@@ -10,6 +10,11 @@ jinja2 template engine, celery glue) and only adds what chief needs on top.
 
 from olib.py.django.app.settingsbase import *  # noqa: F401,F403  pylint: disable=wildcard-import,unused-wildcard-import
 
+# The thread-based agent worker can run 16 sessions concurrently. Preserve
+# olib's low idle floor while leaving headroom for worker and web operations.
+if DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql':  # noqa: F405
+    DATABASES['default']['OPTIONS']['pool']['max_size'] = 20  # noqa: F405
+
 ###########################################################
 # Application definition
 ###########################################################

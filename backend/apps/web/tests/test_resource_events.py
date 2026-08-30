@@ -29,7 +29,7 @@ class FakePubSub:
 
     def __init__(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, Any] | None],
         *,
         subscribe_failure: BaseException | None = None,
         read_failure: BaseException | None = None,
@@ -81,7 +81,7 @@ class FakeRedis:
 
     def __init__(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, Any] | None],
         *,
         subscribe_failure: BaseException | None = None,
         read_failure: BaseException | None = None,
@@ -146,6 +146,46 @@ class TestResourceEventsSse(OTransactionTestCase):
         self.assertEqual(content_type, 'text/event-stream')
         self.assertEqual(cache_control, 'no-cache')
         self.assertEqual(buffering, 'no')
+
+    def test_authenticated_response_releases_request_database_connections(self) -> None:
+        """Return finite authentication connections before the stream waits on Redis."""
+
+        async def request() -> int:
+            """Return the database close count observed while creating the response."""
+            client = AsyncClient()
+            await sync_to_async(client.force_login)(self.user)
+            with patch('django.db.connections.close_all') as close_all:
+                response = await client.get('/events/')
+                assert isinstance(response, StreamingHttpResponse)
+                return close_all.call_count
+
+        self.assertEqual(asyncio.run(request()), 1)
+
+    def test_idle_stream_emits_heartbeat_after_releasing_database_connections(self) -> None:
+        """Keep idle streams alive without retaining post-middleware DB connections."""
+        redis = FakeRedis([None, None])
+
+        async def collect() -> tuple[str, int]:
+            """Consume one idle heartbeat and return the database close count."""
+            client = AsyncClient()
+            await sync_to_async(client.force_login)(self.user)
+            with (
+                patch('apps.web.resource_events.async_client', return_value=redis),
+                patch('apps.web.resource_events.asyncio.sleep') as mock_sleep,
+                patch('apps.web.resource_events.monotonic', side_effect=[100.0, 101.0, 116.0]),
+                patch('django.db.connections.close_all') as close_all,
+            ):
+                response = await client.get('/events/')
+                assert isinstance(response, StreamingHttpResponse)
+                stream = cast(AsyncIterator[bytes], response.streaming_content)
+                chunk = await anext(stream)
+                await stream.aclose()
+                self.assertEqual(mock_sleep.await_count, 1)
+                return chunk.decode(), close_all.call_count
+
+        heartbeat, close_count = asyncio.run(collect())
+        self.assertEqual(heartbeat, ': heartbeat\n\n')
+        self.assertEqual(close_count, 2)
 
     def test_stream_uses_session_user_and_cleans_up(self) -> None:
         """Ignore query identity, emit one event, and close exact resources."""

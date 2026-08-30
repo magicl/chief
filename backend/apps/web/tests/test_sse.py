@@ -298,6 +298,36 @@ class TestSessionActivitiesSse(OTransactionTestCase):
         self.assertEqual(mock_sleep.await_count, 2)
         mock_sleep.assert_awaited_with(0.1)
 
+    def test_response_releases_database_connection_before_stream_iteration(self) -> None:
+        """Return ownership-check connections before the long-lived response starts."""
+        session = make_test_session('sse-request-db-release')
+        username = session.agent.user.username
+
+        async def request() -> int:
+            """Return the database close count observed while creating the response."""
+            client = AsyncClient()
+            user = await sync_to_async(get_user_model().objects.get)(username=username)
+            await sync_to_async(client.force_login)(user)
+            with patch('django.db.connections.close_all') as close_all:
+                response = await client.get(f'/sessions/{session.id}/events/')
+                assert isinstance(response, StreamingHttpResponse)
+                return close_all.call_count
+
+        self.assertEqual(asyncio.run(request()), 1)
+
+    def test_replay_releases_database_connection_before_live_tail(self) -> None:
+        """Return replay-query connections before waiting indefinitely on Redis."""
+        session = make_test_session('sse-replay-db-release')
+        fake = FakeRedis([])
+
+        with (
+            patch('apps.web.views.async_client', return_value=fake),
+            patch('django.db.connections.close_all') as close_all,
+        ):
+            self._collect(session)
+
+        self.assertEqual(close_all.call_count, 2)
+
     def test_unauthenticated_request_redirects_without_activity_data(self) -> None:
         """Anonymous clients are redirected before authoritative activity replay."""
         session = make_test_session('sse-anonymous')

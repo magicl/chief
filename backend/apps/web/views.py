@@ -77,6 +77,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
+from django.db import connections
 from django.http import (
     Http404,
     HttpRequest,
@@ -488,6 +489,9 @@ async def session_events_sse(request: HttpRequest, session_id: UUID) -> Streamin
     """Replay authoritative activities then tail only newer activity revisions."""
     user_id = await sync_to_async(_require_authenticated_user_id)(request)
     await sync_to_async(get_owned_session)(user_id, session_id)
+    # Streaming responses delay request_finished indefinitely, so explicitly
+    # return authentication and ownership connections before Redis setup.
+    await sync_to_async(connections.close_all)()
 
     async def stream() -> AsyncIterator[str]:
         """Yield replay upserts and validated messages from this session's channel."""
@@ -507,6 +511,8 @@ async def session_events_sse(request: HttpRequest, session_id: UUID) -> Streamin
             finally:
                 # The live tail needs only primitive revision state, not replay ORM objects.
                 del activities
+                # Replay is the final database phase; the live tail is Redis-only.
+                await sync_to_async(connections.close_all)()
 
         try:
             client = async_client()

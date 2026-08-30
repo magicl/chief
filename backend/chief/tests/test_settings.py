@@ -6,12 +6,44 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 from olib.py.django.test.cases import OTestCase
+
+
+class TestPostgresPoolSettings(OTestCase):
+    """Verify Chief expands the shared PostgreSQL pool for threaded workloads."""
+
+    def test_chief_overrides_shared_postgres_pool_maximum(self) -> None:
+        """Allow the worker's concurrent threads to borrow independent connections."""
+        process_env = {
+            **os.environ,
+            'POSTGRES_URL': 'postgresql://test:test@localhost:5432/test',
+        }
+        process_env.pop('MYSQL_URL', None)
+        repository_root = Path(__file__).resolve().parents[3]
+        script = (
+            'import json, sys\n'
+            "sys.argv = ['manage.py', 'test']\n"
+            'from chief import settings\n'
+            "print(json.dumps(settings.DATABASES['default']['OPTIONS']['pool']))\n"
+        )
+
+        completed = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=repository_root / 'backend',
+            env=process_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), {'min_size': 1, 'max_size': 20})
 
 
 class TestCredentialSettings(OTestCase):
