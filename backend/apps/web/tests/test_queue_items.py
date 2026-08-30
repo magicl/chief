@@ -167,6 +167,19 @@ class TestQueueItemsView(OTransactionTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'only-item')
 
+    def test_queue_page_keeps_chat_composer(self) -> None:
+        """The agent frame's composer stays visible on the queue page (show_composer must be set)."""
+        queue, _session = make_test_queue(identifier='items-composer-agent', queue_id='inbox')
+        self.client.force_login(queue.agent.user)
+
+        response = self.client.get(reverse('queue_items', kwargs={'agent_id': queue.agent_id, 'queue_id': 'inbox'}))
+
+        self.assertContains(response, 'class="frame-chatbox"')
+        self.assertContains(
+            response,
+            reverse('agent_start_chat', kwargs={'agent_id': queue.agent_id}),
+        )
+
     def test_source_dropdown_lists_queue_sources(self) -> None:
         queue, _session = make_test_queue(identifier='items-source-options-agent', queue_id='inbox')
         make_test_source(queue, source_id='gmail-main')

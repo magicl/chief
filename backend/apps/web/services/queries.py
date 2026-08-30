@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -14,11 +16,13 @@ from apps.agents.block_gate import BlockGateResult, blocks_allow_dispatch
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.agents.services.config_sync import config_source_label
 from apps.sessions.models import AgentSession
+from apps.sessions.services.budget import algorithm_daily_spend, algorithm_monthly_spend
 from apps.sessions.services.queries import activities_for
-from django.db.models import QuerySet
+from django.db.models import Count, Max, QuerySet
 from django.http import Http404
 from libs.agent_spec import list_examples
 from libs.agent_spec.example_catalog import ExampleSpecInfo
+from libs.algorithms import get_algorithm, list_algorithms
 
 RECENT_SESSIONS_LIMIT = 20
 
@@ -45,7 +49,7 @@ def get_owned_direct_parent(session: AgentSession, *, user_id: int) -> DirectPar
     parent_id = session.parent_session_id
     if parent_id is None:
         return None
-    parent = AgentSession.objects.filter(pk=parent_id, agent__user_id=user_id).only('id', 'name').first()
+    parent = AgentSession.objects.filter(pk=parent_id, user_id=user_id).only('id', 'name').first()
     if parent is None:
         return None
     return DirectParentInfo(id=parent.id, name=parent.name)
@@ -70,7 +74,8 @@ def get_dashboard_data(*, user_id: int | None) -> DashboardData:
 
     if user_id is not None:
         agents = agents.filter(user_id=user_id)
-        sessions = sessions.filter(agent__user_id=user_id)
+        # Recent sessions is an agent-owned view; algorithm sessions live under Background.
+        sessions = sessions.filter(user_id=user_id, agent_id__isnull=False)
         examples = list_examples()
     else:
         agents = agents.none()
@@ -81,6 +86,80 @@ def get_dashboard_data(*, user_id: int | None) -> DashboardData:
         agents=agents,
         sessions=sessions[:RECENT_SESSIONS_LIMIT],
         examples=examples,
+    )
+
+
+@dataclass(frozen=True)
+class BackgroundAlgorithmRow:
+    """One registry algorithm summarized for the dashboard Background card.
+
+    Every registered algorithm gets a row even with zero runs, so counts and
+    spend are zero rather than absent.
+    """
+
+    algorithm_id: str
+    display_name: str
+    session_count: int
+    daily_spend: Decimal
+    monthly_spend: Decimal
+    latest_created_at: datetime | None
+
+
+def list_background_algorithms(user_id: int) -> list[BackgroundAlgorithmRow]:
+    """Summarize every registered algorithm for one user (zero-run entries included).
+
+    Session counts come from a single grouped query; spend reuses the shared
+    budget helpers so Background and detail agree on the same numbers.
+    """
+    stats = {
+        row['algorithm_id']: row
+        for row in AgentSession.objects.filter(user_id=user_id, algorithm_id__isnull=False)
+        .values('algorithm_id')
+        .annotate(session_count=Count('id'), latest_created_at=Max('created_at'))
+    }
+    rows: list[BackgroundAlgorithmRow] = []
+    for info in list_algorithms():
+        stat = stats.get(info.algorithm_id)
+        rows.append(
+            BackgroundAlgorithmRow(
+                algorithm_id=info.algorithm_id,
+                display_name=info.display_name,
+                session_count=stat['session_count'] if stat else 0,
+                daily_spend=algorithm_daily_spend(user_id, info.algorithm_id),
+                monthly_spend=algorithm_monthly_spend(user_id, info.algorithm_id),
+                latest_created_at=stat['latest_created_at'] if stat else None,
+            )
+        )
+    return rows
+
+
+@dataclass(frozen=True)
+class AlgorithmDetailData:
+    """Everything the algorithm detail template needs for one user + algorithm."""
+
+    algorithm_id: str
+    display_name: str
+    sessions: QuerySet[AgentSession]
+    daily_spend: Decimal
+    monthly_spend: Decimal
+
+
+def get_algorithm_detail_data(user_id: int, algorithm_id: str) -> AlgorithmDetailData:
+    """Fetch this user's sessions and spend for one registry algorithm, or raise Http404.
+
+    Only ids present in the code registry resolve; stored ids that no longer
+    exist in the registry are treated as unknown.
+    """
+    info = get_algorithm(algorithm_id)
+    if info is None:
+        raise Http404('Algorithm not found')
+    sessions = AgentSession.objects.filter(user_id=user_id, algorithm_id=algorithm_id).order_by('-created_at')
+    return AlgorithmDetailData(
+        algorithm_id=info.algorithm_id,
+        display_name=info.display_name,
+        sessions=sessions,
+        daily_spend=algorithm_daily_spend(user_id, algorithm_id),
+        monthly_spend=algorithm_monthly_spend(user_id, algorithm_id),
     )
 
 
@@ -160,11 +239,15 @@ def get_owned_agent(user_id: int, agent_id: UUID) -> Agent:
 
 
 def get_owned_session(user_id: int, session_id: UUID) -> AgentSession:
-    """Return a session whose agent is owned by user_id, or raise Http404."""
+    """Return a session billed to user_id, or raise Http404.
+
+    Scoping on ``user_id`` covers both owner modes: agent sessions denormalize
+    their agent's owner, and algorithm sessions have no agent to join through.
+    """
     try:
         return AgentSession.objects.select_related('agent', 'agent_config').get(
             pk=session_id,
-            agent__user_id=user_id,
+            user_id=user_id,
         )
     except AgentSession.DoesNotExist as exc:
         raise Http404('Session not found') from exc
@@ -194,6 +277,8 @@ def get_agent_detail_data(user_id: int, agent_id: UUID) -> AgentDetailData:
 
 def get_session_llm_label(session: AgentSession) -> str:
     """Human-readable LLM provider/model label for a session."""
+    if session.agent_config_id is None:
+        return session.algorithm_id or '—'
     spec = session.agent_config.spec if session.agent_config else {}
     llm = spec.get('llm', {})
     provider = llm.get('provider', '')

@@ -35,7 +35,7 @@ backend/
 |-----|-----------------|
 | `apps.agents` | Django/stdlib, `libs.tools`, `libs/agent_spec`, `keys` (via wiring), foundational `bus` publishers, **`queues`** (materialize only) |
 | `apps.queues` | Django/stdlib, `libs.sources`, `sessions` (releasable predicate only), foundational `bus` publishers |
-| `apps.sessions` | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks only) |
+| `apps.sessions` | `agents`, `bus`, `keys` (resolve in tasks), `libs.algorithms` (tasks **and** commands that start algorithm sessions) |
 | `apps.bus` | Django/stdlib only; domain-free |
 | `apps.runner` | `agents`, `sessions`, `bus`, `keys` (resolve), `libs.providers`, `libs.tools` |
 | `apps.keys` | Django/stdlib, `cryptography`, foundational `bus` publishers |
@@ -108,7 +108,9 @@ Standard Django models. Business logic lives in services, not on model methods
 - Register task modules in **`chief/tasks.py`** (imports only — see existing
   `apps.runner.tasks` pattern).
 - **`apps.runner.tasks`**: long-lived session execution (`run_session`).
-- **`apps.sessions.tasks`**: short metadata side work (e.g. `generate_session_name`).
+- **`apps.sessions.tasks`**: short metadata side work. `generate_session_name`
+  creates an **algorithm-owned** session for traces and cost, then patches the
+  chat session name (not dispatched through `run_session`).
 - Tasks never call `publish_*` directly; commands own side effects.
 
 ---
@@ -174,7 +176,7 @@ navigation converges the page.
 | `libs/file` | Shared file normalization + content hashing |
 | `libs/tools` | Tool definitions + registry |
 | `libs/sources` | Source adapter protocol + registry |
-| `libs/algorithms` | Reusable algorithms (may call providers) |
+| `libs/algorithms` | Reusable algorithms plus a code registry (`chat_name`, …); may call providers; Django-free |
 | `libs/web_tables` | Generic table query parsing + paginated list-page DTO (Django-free); shared by `apps.web` views and domain `services/queries.py` modules so neither imports the other |
 
 Libs stay Django-free. When a lib needs credentials, the **app boundary injects**
@@ -182,6 +184,16 @@ callables (`token_supplier`, `secret_supplier`) — libs do not import `apps.key
 Disk parsers in `providers/key` and `providers/data` depend on `libs/file`; Django
 apps own user lookup and ORM ingest, while `apps.local_sync` owns finite
 local-provider reconciliation.
+
+## Sessions and usage ownership
+
+- `AgentSession.user` is required; legacy agent rows are backfilled from `agent.user`.
+- Owner XOR: agent + config **or** `algorithm_id` from the `libs.algorithms` registry. Algorithms are not Agent rows.
+- There is no `target_session` column. Optional `details.target_session_id` lives on the algorithm session’s root activity.
+- `HourlyUsage.user` is required. Agent buckets key `(agent, hour, model)`; algorithm buckets key `(user, algorithm_id, hour, model)`.
+- `user_*_spend` includes both; `agent_*_spend` filters `agent_id` only.
+- Dashboard **Background** lists the registry (including zero runs). **Recent sessions** are agent-owned only.
+- Algorithm one-offs run in `apps.sessions.tasks`, not `run_session`. When an algorithm is invoked inside a tool, inject `ActivityRecorder` only — do not open a second algorithm session.
 
 `libs/agent_spec` holds the **config language** only (types, validation, dict
 upgrades). It does not touch the database or call other apps. Today this package

@@ -620,6 +620,7 @@ class TestDjangoActivityRecorder(OTransactionTestCase):
         """Django recording creates and dispatches one linked child reference."""
         session = make_test_session('django-link')
         recorder = BackendActivityRecorder(DjangoSessionBackend(session))
+        assert session.agent_id is not None
 
         reference = recorder.link_subagent(
             agent_id=session.agent_id,

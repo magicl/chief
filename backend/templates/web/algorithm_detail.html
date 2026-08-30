@@ -1,0 +1,61 @@
+{% extends "web/base.html" %}
+{% from "web/macros/session.html" import session_display_name %}
+
+{% block title %}{{ algorithm_display_name }} — Chief{% endblock %}
+
+{% block extra_styles %}
+  .usage-grid { display: flex; gap: 2rem; flex-wrap: wrap; }
+  .usage-item { display: flex; flex-direction: column; gap: .25rem; }
+  .usage-label { font-size: .8rem; color: #8b919a; }
+  .usage-value { font-size: 1.1rem; font-weight: 500; }
+  .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+  .detail-header h2 { margin: 0; }
+{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+  <div>
+    <h2>{{ algorithm_display_name }}</h2>
+    <p class="muted">Background algorithm · {{ algorithm_id }}</p>
+  </div>
+  <a href="{{ url('dashboard') }}" style="color: #9ec5ff;">Back to Background</a>
+</div>
+
+<section class="card" style="margin-bottom: 1.5rem">
+  <h2>Usage</h2>
+  <div class="usage-grid">
+    <div class="usage-item">
+      <span class="usage-label">Daily spend</span>
+      <span class="usage-value">${{ "%.2f"|format(algorithm_daily_spend) }}</span>
+    </div>
+    <div class="usage-item">
+      <span class="usage-label">Monthly spend</span>
+      <span class="usage-value">${{ "%.2f"|format(algorithm_monthly_spend) }}</span>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Sessions</h2>
+  {% if algorithm_sessions %}
+  <table>
+    <thead>
+      <tr><th>Session</th><th>Status</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+      {% for s in algorithm_sessions %}
+      <tr>
+        <td>
+          <a href="{{ url('session_detail', kwargs={'session_id': s.id}) }}">{{ session_display_name(s) }}</a>
+        </td>
+        <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
+        <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No runs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

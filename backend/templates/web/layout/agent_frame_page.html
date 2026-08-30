@@ -11,7 +11,9 @@
   <div class="frame-main" id="frame-main">
     {% block frame_main %}{% endblock %}
   </div>
+  {% if show_composer %}
   {% include "web/partials/chatbox.html" %}
+  {% endif %}
 </div>
 {% endblock %}
 

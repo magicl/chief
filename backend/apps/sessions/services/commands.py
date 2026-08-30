@@ -35,7 +35,7 @@ from apps.sessions.services.queries import input_activity_count
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
-from libs.algorithms.chat_name import DEFAULT_CHAT_NAME_CONFIG
+from libs.algorithms import DEFAULT_CHAT_NAME_CONFIG, get_algorithm
 
 logger = logging.getLogger(__name__)
 
@@ -465,6 +465,37 @@ def record_input(session: AgentSession, content: str) -> AgentSessionActivity:
     if input_activity_count(session.id) == 1 and DEFAULT_CHAT_NAME_CONFIG.enabled:
         transaction.on_commit(lambda: _schedule_generate_session_name(session.id))
     return row
+
+
+@transaction.atomic
+def create_algorithm_session(*, user_id: int, algorithm_id: str) -> AgentSession:
+    """Open a running session owned by a registered background algorithm.
+
+    Algorithm sessions have no agent, config, or parent — they exist so a
+    one-off job (a Celery task, not the runner) has somewhere to write its
+    activity trace and spend. The caller performs the work inline; nothing is
+    dispatched to ``run_session``.
+    """
+    if get_algorithm(algorithm_id) is None:
+        raise ValidationError({'algorithm_id': 'algorithm must be registered'})
+    return AgentSession.objects.create(
+        user_id=user_id,
+        algorithm_id=algorithm_id,
+        status=AgentSessionStatus.RUNNING,
+        trigger_type=TriggerType.ALGORITHM,
+        started_at=timezone.now(),
+    )
+
+
+def finish_algorithm_session(session: AgentSession, *, name: str | None = None) -> AgentSession:
+    """Name (when still unnamed) and close one algorithm session as done.
+
+    A failed provider call still finishes ``done``: the failure is visible on
+    the session's own llm activity, and the job itself ran to completion.
+    """
+    if name:
+        update_session_name(session.id, name)
+    return set_session_status(session, AgentSessionStatus.DONE, ended_at=timezone.now())
 
 
 def update_session_name(session_id: UUID, name: str, *, source: str = 'auto') -> bool:

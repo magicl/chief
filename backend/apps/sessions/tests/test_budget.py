@@ -5,14 +5,18 @@
 from datetime import timedelta
 from decimal import Decimal
 
-from apps.agents.models import Agent
+from apps.agents.models import Agent, SpendPolicy
 from apps.sessions.models import HourlyUsage
 from apps.sessions.services.budget import (
     agent_daily_spend,
     agent_monthly_spend,
+    algorithm_daily_spend,
+    algorithm_monthly_spend,
     compute_effective_spend_cap,
+    resolve_user_spend_caps,
     user_daily_spend,
     user_monthly_spend,
+    user_rolling_cap_reached,
 )
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -31,6 +35,7 @@ class TestBudgetQueries(OTestCase):
 
     def test_agent_daily_spend_sums_today(self) -> None:
         HourlyUsage.objects.create(
+            user=self.user,
             agent=self.agent,
             hour=self.today_hour,
             model='m',
@@ -43,6 +48,7 @@ class TestBudgetQueries(OTestCase):
     def test_agent_daily_spend_excludes_yesterday(self) -> None:
         yesterday_hour = self.today_hour - timedelta(days=1)
         HourlyUsage.objects.create(
+            user=self.user,
             agent=self.agent,
             hour=yesterday_hour,
             model='m',
@@ -55,6 +61,7 @@ class TestBudgetQueries(OTestCase):
     def test_agent_monthly_spend_includes_earlier_this_month(self) -> None:
         earlier_this_month = self.today_hour.replace(day=1)
         HourlyUsage.objects.create(
+            user=self.user,
             agent=self.agent,
             hour=earlier_this_month,
             model='m',
@@ -62,6 +69,7 @@ class TestBudgetQueries(OTestCase):
             iteration_count=50,
         )
         HourlyUsage.objects.create(
+            user=self.user,
             agent=self.agent,
             hour=self.today_hour,
             model='m2',
@@ -74,6 +82,7 @@ class TestBudgetQueries(OTestCase):
     def test_user_daily_spend_sums_across_agents(self) -> None:
         agent2 = Agent.objects.create(user=self.user, name='B2', identifier='budget-agent-2')
         HourlyUsage.objects.create(
+            user=self.user,
             agent=self.agent,
             hour=self.today_hour,
             model='m',
@@ -81,6 +90,7 @@ class TestBudgetQueries(OTestCase):
             iteration_count=5,
         )
         HourlyUsage.objects.create(
+            user=self.user,
             agent=agent2,
             hour=self.today_hour,
             model='m',
@@ -93,6 +103,7 @@ class TestBudgetQueries(OTestCase):
     def test_user_monthly_spend_sums_across_agents(self) -> None:
         agent2 = Agent.objects.create(user=self.user, name='B2', identifier='budget-agent-2')
         HourlyUsage.objects.create(
+            user=self.user,
             agent=self.agent,
             hour=self.today_hour,
             model='m',
@@ -100,6 +111,7 @@ class TestBudgetQueries(OTestCase):
             iteration_count=5,
         )
         HourlyUsage.objects.create(
+            user=self.user,
             agent=agent2,
             hour=self.today_hour,
             model='m',
@@ -108,6 +120,98 @@ class TestBudgetQueries(OTestCase):
         )
         result = user_monthly_spend(self.user.id)
         self.assertEqual(result, Decimal('3.000000'))
+
+    def test_user_daily_spend_includes_algorithm_bucket(self) -> None:
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=None,
+            algorithm_id='chat_name',
+            hour=self.today_hour,
+            model='gpt-5.4-nano',
+            cost_usd=Decimal('0.400000'),
+        )
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=self.agent,
+            algorithm_id=None,
+            hour=self.today_hour,
+            model='m',
+            cost_usd=Decimal('1.000000'),
+            iteration_count=1,
+        )
+        self.assertEqual(user_daily_spend(self.user.id), Decimal('1.400000'))
+        self.assertEqual(agent_daily_spend(self.agent.id), Decimal('1.000000'))
+
+    def test_algorithm_daily_spend_is_scoped_to_user_and_id(self) -> None:
+        other = User.objects.create_user(username='budget-other', password='x')
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=None,
+            algorithm_id='chat_name',
+            hour=self.today_hour,
+            model='m',
+            cost_usd=Decimal('0.250000'),
+        )
+        HourlyUsage.objects.create(
+            user=other,
+            agent=None,
+            algorithm_id='chat_name',
+            hour=self.today_hour,
+            model='m',
+            cost_usd=Decimal('9.000000'),
+        )
+        self.assertEqual(algorithm_daily_spend(self.user.id, 'chat_name'), Decimal('0.250000'))
+
+    def test_algorithm_monthly_spend_excludes_agent_and_last_month(self) -> None:
+        month_start_hour = self.today_hour.replace(day=1)
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=None,
+            algorithm_id='chat_name',
+            hour=month_start_hour,
+            model='m',
+            cost_usd=Decimal('0.500000'),
+        )
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=None,
+            algorithm_id='chat_name',
+            hour=month_start_hour - timedelta(days=1),
+            model='m',
+            cost_usd=Decimal('7.000000'),
+        )
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=self.agent,
+            algorithm_id=None,
+            hour=self.today_hour,
+            model='m',
+            cost_usd=Decimal('3.000000'),
+            iteration_count=1,
+        )
+        self.assertEqual(algorithm_monthly_spend(self.user.id, 'chat_name'), Decimal('0.500000'))
+
+    def test_resolve_user_spend_caps_reads_spend_policy(self) -> None:
+        self.assertEqual(resolve_user_spend_caps(self.user.id), (None, None))
+        SpendPolicy.objects.create(
+            user=self.user,
+            daily_spend_limit_usd=Decimal('1.00'),
+            monthly_spend_limit_usd=Decimal('20.00'),
+        )
+        self.assertEqual(resolve_user_spend_caps(self.user.id), (Decimal('1.00'), Decimal('20.00')))
+
+    def test_user_rolling_cap_reached_when_daily_met(self) -> None:
+        SpendPolicy.objects.create(user=self.user, daily_spend_limit_usd=Decimal('1.00'))
+        self.assertFalse(user_rolling_cap_reached(self.user.id))
+        HourlyUsage.objects.create(
+            user=self.user,
+            agent=None,
+            algorithm_id='chat_name',
+            hour=self.today_hour,
+            model='m',
+            cost_usd=Decimal('1.000000'),
+        )
+        self.assertTrue(user_rolling_cap_reached(self.user.id))
 
 
 class TestEffectiveSpendCap(OTestCase):

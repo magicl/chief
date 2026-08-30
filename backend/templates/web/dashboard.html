@@ -16,6 +16,29 @@
 
 {% if user.is_authenticated %}
 <section class="card" style="margin-top: 1.5rem">
+  <h2>Background</h2>
+  <table>
+    <thead>
+      <tr><th>Algorithm</th><th>Daily spend</th><th>Sessions</th><th>Last run</th></tr>
+    </thead>
+    <tbody>
+      {% for algorithm in background_algorithms %}
+      <tr>
+        <td>
+          <a href="{{ url('algorithm_detail', kwargs={'algorithm_id': algorithm.algorithm_id}) }}">{{ algorithm.display_name }}</a>
+        </td>
+        <td class="muted">${{ "%.2f"|format(algorithm.daily_spend) }}</td>
+        <td class="muted">{{ algorithm.session_count }}</td>
+        <td class="muted">
+          {% if algorithm.latest_created_at %}{{ algorithm.latest_created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card" style="margin-top: 1.5rem">
   <h2>Usage</h2>
   <div class="usage-grid">
     <div class="usage-item">

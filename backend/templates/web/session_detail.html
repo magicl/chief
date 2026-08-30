@@ -1,7 +1,7 @@
 {% extends "web/layout/agent_frame_page.html" %}
 {% from "web/macros/session.html" import session_display_name %}
 
-{% block title %}Session {{ session_display_name(session) }} — Chief{% endblock %}
+{% block title %}{% if algorithm_id %}{{ algorithm_display_name }}{% else %}Session {{ session_display_name(session) }}{% endif %} — Chief{% endblock %}
 
 {% block head_assets %}
 <link rel="stylesheet" href="{{ static('web/rich-content/rich_content.bundle.css') }}">
@@ -13,9 +13,15 @@
 {% block frame_header %}
 <div>
   <h2>
+    {% if algorithm_id %}
+    <a href="{{ url('algorithm_detail', kwargs={'algorithm_id': algorithm_id}) }}" style="color: inherit; text-decoration: none;">
+      {{ algorithm_display_name }}
+    </a>
+    {% else %}
     <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" style="color: inherit; text-decoration: none;">
       {{ agent.name }}
     </a>
+    {% endif %}
     <span class="muted" style="font-weight: normal;">· <span x-text="displaySessionName">{{ session_display_name(session) }}</span></span>
   </h2>
   {% if parent_session %}
@@ -31,6 +37,9 @@
   </p>
 </div>
 <div class="frame-header-actions">
+  {% if algorithm_id %}
+  <a href="{{ url('algorithm_detail', kwargs={'algorithm_id': algorithm_id}) }}" class="frame-btn muted-btn" style="text-decoration:none;">Back to Background</a>
+  {% else %}
   <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" class="frame-btn muted-btn" style="text-decoration:none;">Back to agent</a>
   <form method="post" action="{{ url('start_agent_session', kwargs={'agent_id': agent.id}) }}">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
@@ -77,6 +86,7 @@
       </form>
     </div>
   </section>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -328,7 +338,9 @@ function sessionView(sessionId, initialName, configModel) {
       this.$nextTick(() => {
         if (this.follow) this.scrollToBottom();
       });
+      {% if show_composer %}
       this.focusChatInput();
+      {% endif %}
     },
     // Retry the root's authoritative snapshot without disturbing page preferences.
     async retryRoot() {

@@ -971,9 +971,11 @@ class TestHistoricalActivityMigrationExecutor(OTransactionTestCase):
         if table_name in connection.introspection.table_names():
             with connection.schema_editor() as schema_editor:
                 schema_editor.delete_model(self.HistoricalEvent)
-        self.recorder.migration_qs.filter(app='agent_sessions').delete()
-        for migration_name in sorted(self.original_migrations):
-            self.recorder.record_applied('agent_sessions', migration_name)
+        # Executor tests may reverse newly added schema migrations before the
+        # intentionally irreversible 0010 boundary stops them.
+        MigrationExecutor(connection).migrate(
+            [('agent_sessions', '0013_alter_agentsession_user_alter_hourlyusage_user')]
+        )
         restored_migrations = set(
             self.recorder.migration_qs.filter(app='agent_sessions').values_list('name', flat=True)
         )

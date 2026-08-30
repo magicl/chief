@@ -72,10 +72,12 @@ class DjangoSessionBackend(SessionBackend):
     @property
     def user_id(self) -> int:
         """Return the owning user used for runtime credential resolution."""
-        return self._session.agent.user_id
+        return self._session.user_id
 
     def get_spec(self) -> AgentConfigSpec:
         """Load the session's pinned agent configuration."""
+        if self._session.agent_config_id is None:
+            raise ValueError('algorithm sessions do not have an agent configuration')
         return self._session.agent_config.get_spec()
 
     def get_status(self) -> str:
