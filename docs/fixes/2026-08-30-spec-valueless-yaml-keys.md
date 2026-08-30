@@ -84,4 +84,4 @@ leniency of parsing.
 
 ## Links
 
-- PR: <pending>
+- PR: https://github.com/magicl/chief/pull/54
