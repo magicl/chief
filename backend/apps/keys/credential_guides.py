@@ -105,11 +105,24 @@ _GUIDES: dict[str, CredentialGuide] = {
     'obsidian': CredentialGuide(
         label='Obsidian Sync',
         find_steps=(
-            'Run the Obsidian Headless (`ob`) login flow for the account that owns the vault to obtain a '
-            'Sync auth token (see https://obsidian.md/sync).',
-            'If the vault has end-to-end encryption enabled, also note its vault password.',
+            'The Sync auth token is not shown anywhere in the Obsidian apps — the only way to get it is to log '
+            'in once with the Obsidian Headless CLI and read the token it stores on disk. You need an active '
+            'Obsidian Sync subscription and Node 22+ on the machine you do this from (it can be your laptop; it '
+            'does not have to be the server running Chief).',
+            'Install the CLI: npm install -g obsidian-headless',
+            'Log in as the account that owns the vault: ob login — it prompts for email, password, and 2FA if '
+            'enabled. Running ob login again afterwards just prints the logged-in account.',
+            'Print the stored token: cat ~/.config/obsidian-headless/auth_token (Linux / XDG_CONFIG_HOME). On '
+            'macOS and Windows it is usually ~/.obsidian-headless/auth_token instead. Copy the whole file '
+            'contents as auth_token below.',
+            'Do not run ob logout until you have copied the token: logout deletes the stored credentials on '
+            'that machine. If you need a new token later, log in again and paste a fresh copy into Chief.',
+            'While logged in, run ob sync-list-remote to see your remote vaults — the id or name listed there is '
+            'what you put in the obsidian tool config (vault field) on the agent.',
+            'If the vault uses end-to-end encryption, also note its encryption password; Chief needs it to read '
+            'the vault. Vaults using standard (managed) encryption do not need one.',
             'Paste the JSON below with auth_token (required) and encryption_password (optional, only for '
-            'E2E-encrypted vaults).',
+            'E2E-encrypted vaults). Full CLI reference: https://obsidian.md/help/sync/headless',
         ),
         scopes=None,
         input_label='Obsidian Sync credential JSON',

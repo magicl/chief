@@ -48,6 +48,33 @@ class TestCredentialGuides(OTestCase):
         self.assertIn('Authenticate', steps)
         self.assertNotIn('does not run the OAuth consent flow', steps)
 
+    def test_obsidian_guide_spells_out_token_extraction(self) -> None:
+        """The Sync token cannot be copied from the Obsidian UI, so the guide must give the exact CLI recipe."""
+        guide = credential_guide('obsidian')
+        assert guide is not None
+        steps = ' '.join(guide.find_steps)
+        self.assertIn('npm install -g obsidian-headless', steps)
+        self.assertIn('ob login', steps)
+        self.assertIn('~/.config/obsidian-headless/auth_token', steps)
+        self.assertIn('~/.obsidian-headless/auth_token', steps)
+        self.assertIn('https://obsidian.md/help/sync/headless', steps)
+        self.assertIn('auth_token', guide.input_placeholder)
+        self.assertIn('encryption_password', guide.input_placeholder)
+
+    def test_obsidian_guide_cautions_that_logout_invalidates_the_token(self) -> None:
+        """`ob logout` on the login machine revokes the pasted token, which silently stops vault sync."""
+        guide = credential_guide('obsidian')
+        assert guide is not None
+        steps = ' '.join(guide.find_steps)
+        self.assertIn('ob logout', steps)
+
+    def test_obsidian_guide_shows_how_to_find_the_vault_name(self) -> None:
+        """The agent's obsidian tool config needs a remote vault id/name, discoverable from the same CLI."""
+        guide = credential_guide('obsidian')
+        assert guide is not None
+        steps = ' '.join(guide.find_steps)
+        self.assertIn('ob sync-list-remote', steps)
+
     def test_ui_guides_cover_all_service_types(self) -> None:
         from apps.keys.types import SERVICE_TYPES
 

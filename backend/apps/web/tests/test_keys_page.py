@@ -142,6 +142,14 @@ class TestKeysPage(OTransactionTestCase):
         self.assertIn(b'gmail.modify', response.content)
         self.assertIn(b'drive.metadata.readonly', response.content)
 
+    def test_shows_obsidian_token_extraction_steps_in_page_data(self) -> None:
+        """The Obsidian CLI recipe must survive JSON serialization into the page, not just live in Python."""
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('settings_keys'))
+        self.assertIn(b'npm install -g obsidian-headless', response.content)
+        self.assertIn(b'ob login', response.content)
+        self.assertIn(b'obsidian-headless/auth_token', response.content)
+
     def test_google_form_renders_provider_capability_catalog_unchecked(self) -> None:
         """Expose provider descriptions, scope URLs, and support state without preselection."""
         self.client.force_login(self.user)
