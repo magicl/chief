@@ -51,4 +51,4 @@ from. No changes to credential storage, JSON shape, sync behavior, or other cred
 
 ## Links
 
-- PR: <url when opened>
+- PR: https://github.com/magicl/chief/pull/52
