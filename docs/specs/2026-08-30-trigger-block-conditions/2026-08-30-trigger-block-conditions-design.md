@@ -1,7 +1,7 @@
 # Trigger block conditions — Design
 
 **Branch:** `feat/2026-08-30-trigger-block-conditions`
-Status: **design**
+Status: **plan**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · Trigger schema from
 [Agent config schema](../2026-07-03-agent-config-schema/2026-07-03-agent-config-schema-design.md) ·
