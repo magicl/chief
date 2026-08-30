@@ -10,6 +10,7 @@ from libs.clients.obsidian.errors import (
     ObsidianNotFoundError,
     ObsidianOutsideRootError,
     ObsidianSyncPendingError,
+    ObsidianUnavailableError,
 )
 from libs.clients.obsidian.mock import MockObsidianVaultClient
 from libs.clients.obsidian.protocol import ObsidianVaultClientProtocol
@@ -35,7 +36,7 @@ class TestMockObsidianVaultClient(OTestCase):
             },
         )
 
-    def test_get_status_does_not_stall_when_not_ready(self) -> None:
+    def test_get_status_reports_not_ready_without_raising(self) -> None:
         client = MockObsidianVaultClient(agent_id='agent-1')
         client.seed_vault('Personal', ready=False)
         self.assertEqual(
@@ -64,16 +65,131 @@ class TestMockObsidianVaultClient(OTestCase):
         client.set_ready('Personal', True)
         self.assertEqual(client.list_dir(vault_id='Personal', path='Journal'), [])
 
-    def test_file_ops_stall_with_sync_pending_until_ready(self) -> None:
+    def test_reads_serve_partial_content_before_first_sync_completes(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+        client.seed_file('Personal', 'Journal/a.md', 'partial')
+
+        self.assertEqual(client.list_dir(vault_id='Personal', path='Journal'), ['a.md'])
+        self.assertEqual(client.read_text(vault_id='Personal', path='Journal/a.md'), 'partial')
+        self.assertFalse(client.get_status(vault_id='Personal')['ready'])
+
+    def test_reads_before_ready_still_enforce_configured_roots(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+        client.seed_file('Personal', 'Other/a.md', 'partial')
+
+        with self.assertRaises(ObsidianOutsideRootError):
+            client.read_text(vault_id='Personal', path='Other/a.md')
+        with self.assertRaises(ObsidianOutsideRootError):
+            client.list_dir(vault_id='Personal', path='Journalism')
+
+    def test_reads_before_ready_report_missing_files_as_not_found(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+
+        with self.assertRaises(ObsidianNotFoundError):
+            client.read_text(vault_id='Personal', path='Journal/missing.md')
+
+    def test_writes_raise_sync_pending_until_ready(self) -> None:
         client = MockObsidianVaultClient(agent_id='agent-1')
         client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
 
         with self.assertRaises(ObsidianSyncPendingError):
-            client.read_text(vault_id='Personal', path='Journal/a.md')
+            client.write_text(vault_id='Personal', path='Journal/a.md', content='hello')
+        with self.assertRaises(ObsidianSyncPendingError):
+            client.append_text(vault_id='Personal', path='Journal/a.md', content='hello')
 
         client.set_ready('Personal', True)
         client.write_text(vault_id='Personal', path='Journal/a.md', content='hello')
         self.assertEqual(client.read_text(vault_id='Personal', path='Journal/a.md'), 'hello')
+
+    def test_writes_before_ready_report_sync_pending_ahead_of_root_scope(self) -> None:
+        """Readiness outranks root scope for mutations, as in the vault service's write path."""
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+
+        with self.assertRaises(ObsidianSyncPendingError):
+            client.write_text(vault_id='Personal', path='Other/a.md', content='hello')
+        with self.assertRaises(ObsidianSyncPendingError):
+            client.append_text(vault_id='Personal', path='Other/a.md', content='hello')
+
+    def test_writes_when_ready_outside_roots_raise_outside_root(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.seed_vault('Personal', ready=True)
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+
+        with self.assertRaises(ObsidianOutsideRootError):
+            client.write_text(vault_id='Personal', path='Other/a.md', content='hello')
+        with self.assertRaises(ObsidianOutsideRootError):
+            client.append_text(vault_id='Personal', path='Other/a.md', content='hello')
+
+    def test_writes_to_unseeded_vault_raise_not_found_before_readiness(self) -> None:
+        """Binding resolution comes first, so an unknown vault never looks merely unsynced."""
+        client = MockObsidianVaultClient(agent_id='agent-1')
+
+        with self.assertRaises(ObsidianNotFoundError):
+            client.write_text(vault_id='Ghost', path='Journal/a.md', content='hello')
+        with self.assertRaises(ObsidianNotFoundError):
+            client.append_text(vault_id='Ghost', path='Journal/a.md', content='hello')
+
+    def test_hard_failure_makes_every_seeded_file_operation_unavailable(self) -> None:
+        """A seeded bound vault reports hard failure before readiness or root scope."""
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.seed_vault('Personal', ready=False)
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+        client.set_failed('Personal', True)
+
+        operations = (
+            lambda: client.list_dir(vault_id='Personal', path='Other'),
+            lambda: client.read_text(vault_id='Personal', path='Other/a.md'),
+            lambda: client.write_text(vault_id='Personal', path='Other/a.md', content='write'),
+            lambda: client.append_text(vault_id='Personal', path='Other/a.md', content='append'),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaises(ObsidianUnavailableError):
+                operation()
+
+        self.assertEqual(
+            client.get_status(vault_id='Personal'),
+            {
+                'vault_id': 'Personal',
+                'ready': False,
+                'initial_sync_complete': False,
+                'sync_process_alive': False,
+            },
+        )
+
+    def test_hard_failure_can_reset_and_recover_through_normal_readiness(self) -> None:
+        """Clearing failure restores partial reads and the existing write readiness gate."""
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.seed_vault('Personal', ready=False)
+        client.ensure_vaults([{'vault_id': 'Personal', 'roots': ['Journal']}])
+        client.seed_file('Personal', 'Journal/a.md', 'partial')
+        client.set_failed('Personal', True)
+        client.set_failed('Personal', False)
+
+        self.assertEqual(client.read_text(vault_id='Personal', path='Journal/a.md'), 'partial')
+        with self.assertRaises(ObsidianSyncPendingError):
+            client.write_text(vault_id='Personal', path='Journal/a.md', content='blocked')
+
+        client.set_ready('Personal', True)
+        client.write_text(vault_id='Personal', path='Journal/a.md', content='recovered')
+        self.assertEqual(client.read_text(vault_id='Personal', path='Journal/a.md'), 'recovered')
+
+    def test_unseeded_vault_remains_not_found_when_failure_control_is_unused(self) -> None:
+        """Hard-failure support does not change unknown-vault precedence."""
+        client = MockObsidianVaultClient(agent_id='agent-1')
+
+        operations = (
+            lambda: client.list_dir(vault_id='Ghost', path='Journal'),
+            lambda: client.read_text(vault_id='Ghost', path='Journal/a.md'),
+            lambda: client.write_text(vault_id='Ghost', path='Journal/a.md', content='write'),
+            lambda: client.append_text(vault_id='Ghost', path='Journal/a.md', content='append'),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaises(ObsidianNotFoundError):
+                operation()
 
     def test_write_then_append_accumulates_content(self) -> None:
         client = MockObsidianVaultClient(agent_id='agent-1')

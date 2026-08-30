@@ -4,17 +4,16 @@
 # ~
 """Obsidian vault tool: root-scoped list/read/write/append/status against one Sync vault.
 
-Root scoping and the first-sync gate are enforced server-side by the vault
-service (see `services/obsidian`); this tool only validates argument shape
-before dispatch and normalizes typed client failures. For file operations,
-`sync_pending` and `unavailable` are stall conditions the vault service
-expects callers to retry, so those dispatches are wrapped in
-`_call_with_retry`. `status` is the observation path and is never retried.
+Root scoping and the write-time first-sync gate are enforced server-side by the
+vault service (see `services/obsidian`); this tool only validates argument shape
+before dispatch and normalizes typed client failures. Every function is a single
+client call: `sync_pending` and `unavailable` are returned to the agent as typed
+failures so it can decide whether to wait or do something else, rather than
+being absorbed inside the tool while the session stays open.
 """
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
@@ -56,10 +55,6 @@ _ARGUMENT_FIELDS = {
     'append': frozenset({'path', 'content'}),
     'status': frozenset(),
 }
-# Geometric backoff summing to ~30s, matching the stall budget documented in
-# docs/docs/agents.md's `obsidian` tool section: production retries a
-# first-sync/unavailable stall for roughly half a minute before giving up.
-_DEFAULT_RETRY_DELAYS: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0)
 _NOT_READY_REASON = 'Obsidian vault is not ready'
 READINESS_UNAVAILABLE_REASON = 'Obsidian vault readiness could not be confirmed'
 
@@ -77,23 +72,6 @@ def _failure(exc: ObsidianVaultError) -> dict[str, Any]:
     )
     kind = next((name for failure_type, name in mappings if isinstance(exc, failure_type)), 'api')
     return {'ok': False, 'error': {'kind': kind, 'message': str(exc)}}
-
-
-def _call_with_retry(fn: Callable[[], Any], *, sleep: Callable[[float], None], delays: tuple[float, ...]) -> Any:
-    """Call ``fn()``, retrying on retryable vault stalls per the given delay schedule.
-
-    ``sync_pending`` (first sync not complete) and ``unavailable`` (transient vault
-    service trouble) are expected to clear on their own; every other typed failure
-    propagates immediately. The attempt after the schedule is exhausted is not
-    wrapped, so a still-failing vault surfaces its real error to the caller instead
-    of retrying forever.
-    """
-    for delay in delays:
-        try:
-            return fn()
-        except (ObsidianSyncPendingError, ObsidianUnavailableError):
-            sleep(delay)
-    return fn()
 
 
 def _valid_arguments(function: Any, arguments: Any) -> bool:
@@ -123,16 +101,6 @@ class ObsidianTool(Tool):
 
     name = 'obsidian'
     credential_type = 'obsidian'
-
-    def __init__(
-        self,
-        *,
-        sleep: Callable[[float], None] = time.sleep,
-        delays: tuple[float, ...] = _DEFAULT_RETRY_DELAYS,
-    ) -> None:
-        """Retain the retryable-stall backoff schedule; tests inject a fake sleep and short delays."""
-        self._sleep = sleep
-        self._delays = delays
 
     def readiness(self, ctx: ToolContext, instance: ToolInstance) -> BlockResult:
         """Report ready only when the configured vault's status is literal ``true``.
@@ -225,45 +193,23 @@ class ObsidianTool(Tool):
         function: str,
         arguments: dict[str, Any],
     ) -> Any:
-        """Route one validated tool function to the client protocol.
+        """Route one validated tool function to the client protocol as a single call.
 
-        File operations retry vault stalls; ``status`` is a single shot so the
-        agent can observe not-ready without sleeping the session.
+        Assumes arguments already passed `_valid_arguments`; typed client failures are
+        left to propagate so `bind` can normalize them into a common result.
         """
         if function == 'status':
             body = client.get_status(vault_id=config.vault)
             return {'ok': True, **body}
         if function == 'list':
-            entries = _call_with_retry(
-                lambda: client.list_dir(vault_id=config.vault, path=arguments['path']),
-                sleep=self._sleep,
-                delays=self._delays,
-            )
-            return {'ok': True, 'entries': entries}
+            return {'ok': True, 'entries': client.list_dir(vault_id=config.vault, path=arguments['path'])}
         if function == 'read':
-            content = _call_with_retry(
-                lambda: client.read_text(vault_id=config.vault, path=arguments['path']),
-                sleep=self._sleep,
-                delays=self._delays,
-            )
-            return {'ok': True, 'content': content}
+            return {'ok': True, 'content': client.read_text(vault_id=config.vault, path=arguments['path'])}
         if function == 'write':
-            _call_with_retry(
-                lambda: client.write_text(vault_id=config.vault, path=arguments['path'], content=arguments['content']),
-                sleep=self._sleep,
-                delays=self._delays,
-            )
+            client.write_text(vault_id=config.vault, path=arguments['path'], content=arguments['content'])
             return {'ok': True}
         if function == 'append':
-            _call_with_retry(
-                lambda: client.append_text(
-                    vault_id=config.vault,
-                    path=arguments['path'],
-                    content=arguments['content'],
-                ),
-                sleep=self._sleep,
-                delays=self._delays,
-            )
+            client.append_text(vault_id=config.vault, path=arguments['path'], content=arguments['content'])
             return {'ok': True}
         raise ObsidianConfigError('Unknown Obsidian tool function')
 

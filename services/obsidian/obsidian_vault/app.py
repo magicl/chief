@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from obsidian_vault.auth import BearerTokenAuth
 from obsidian_vault.bindings import SyncPendingError, VaultBindingStore
-from obsidian_vault.files import VaultFileService
+from obsidian_vault.files import VaultFileService, VaultUnavailableError
 from obsidian_vault.paths import PathGateError
 from obsidian_vault.supervisor import HeadlessSupervisor
 from pydantic import BaseModel
@@ -64,13 +64,14 @@ def _error_body(kind: str, message: str) -> dict[str, Any]:
 def _file_op_error_response(exc: Exception) -> JSONResponse:
     """Map a file-op exception to the shared error JSON response with the right HTTP status.
 
-    `SyncPendingError` and `PathGateError`/`FileNotFoundError` are the typed
-    exceptions `VaultFileService` raises; anything else (including `KeyError`
-    for an agent with no binding to the vault) is reported as `unavailable`
-    per the vault service's normative error contract.
+    Pending, unavailable, path-gate, and missing-path failures have explicit
+    mappings; anything else (including `KeyError` for an unbound agent) is
+    reported as `unavailable` per the vault service's normative contract.
     """
     if isinstance(exc, SyncPendingError):
         return JSONResponse(status_code=503, content=_error_body('sync_pending', str(exc)))
+    if isinstance(exc, VaultUnavailableError):
+        return JSONResponse(status_code=500, content=_error_body('unavailable', str(exc)))
     if isinstance(exc, PathGateError):
         return JSONResponse(status_code=403, content=_error_body('outside_root', str(exc)))
     if isinstance(exc, FileNotFoundError):
@@ -107,20 +108,40 @@ def create_app(
     auth = BearerTokenAuth(token)
     authenticated = Depends(auth)
 
+    def _guarded_readiness(
+        vault_id: str,
+        *,
+        observed_complete: bool | None = None,
+    ) -> tuple[bool, bool]:
+        """Publish and snapshot readiness only while a live reference still exists.
+
+        A true marker observation made before locking is rechecked under the
+        per-vault lock because last-reference teardown may clear it meanwhile.
+        Callers must not hold this lock while waiting on supervisor startup.
+        """
+        with store.lock_for(vault_id):
+            initial_sync_complete = (
+                supervisor.is_initial_sync_complete(vault_id)
+                if observed_complete is None or observed_complete
+                else False
+            )
+            if store.has_references(vault_id) and initial_sync_complete:
+                store.mark_vault_ready(vault_id)
+            return initial_sync_complete, store.is_vault_ready(vault_id)
+
     def _start_supervisor_and_maybe_ready(vault_id: str, credential: VaultCredential) -> None:
         """Start (or reuse) supervisor sync for vault_id; mark it ready if already fully synced.
 
-        Serialized per vault_id via `store.lock_for` so concurrent ensure
-        calls for the same vault can't race and double-start `ob`.
+        The supervisor owns single-flight with short internal state locking,
+        so its potentially long call runs without the store's file lock.
+        Ready publication then uses that lock to exclude last-ref teardown.
         """
-        with store.lock_for(vault_id):
-            supervisor.ensure_vault(
-                vault_id,
-                auth_token=credential.auth_token,
-                encryption_password=credential.encryption_password,
-            )
-            if supervisor.is_initial_sync_complete(vault_id):
-                store.mark_vault_ready(vault_id)
+        supervisor.ensure_vault(
+            vault_id,
+            auth_token=credential.auth_token,
+            encryption_password=credential.encryption_password,
+        )
+        _guarded_readiness(vault_id)
 
     @app.put('/v1/agents/{agent_id}/vaults', dependencies=[authenticated])
     def ensure_vaults(agent_id: str, body: EnsureBindingsRequest) -> dict[str, Any]:
@@ -165,12 +186,11 @@ def create_app(
         `is_initial_sync_complete` and flips the store to ready the first
         time it observes completion.
         """
-        initial_sync_complete = supervisor.is_initial_sync_complete(vault_id)
-        if initial_sync_complete and not store.is_vault_ready(vault_id):
-            store.mark_vault_ready(vault_id)
+        observed_complete = supervisor.is_initial_sync_complete(vault_id)
+        initial_sync_complete, ready = _guarded_readiness(vault_id, observed_complete=observed_complete)
         return {
             'vault_id': vault_id,
-            'ready': store.is_vault_ready(vault_id),
+            'ready': ready,
             'initial_sync_complete': initial_sync_complete,
             'sync_process_alive': supervisor.is_process_alive(vault_id),
         }

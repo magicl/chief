@@ -6,8 +6,12 @@
 
 Models the vault service's own first-sync gate and root scoping (see
 `services/obsidian/obsidian_vault/{bindings,files,paths}.py`) closely enough
-for `obsidian` tool tests to exercise the `sync_pending` stall/retry path and
-root enforcement without a running vault service.
+for `obsidian` tool tests to exercise partial reads during first sync,
+`sync_pending` writes, and root enforcement without a running vault service.
+
+As in the vault service, only mutations wait for first sync: list and read
+serve whatever has landed so far, while write and append raise
+`ObsidianSyncPendingError` until the vault is ready.
 """
 
 from __future__ import annotations
@@ -20,14 +24,16 @@ from libs.clients.obsidian.errors import (
     ObsidianNotFoundError,
     ObsidianOutsideRootError,
     ObsidianSyncPendingError,
+    ObsidianUnavailableError,
 )
 
 
 @dataclass
 class _VaultRecord:
-    """In-memory state for one seeded vault: readiness and a flat path -> content map."""
+    """In-memory state for one seeded vault: lifecycle flags and flat file content."""
 
     ready: bool = False
+    failed: bool = False
     files: dict[str, str] = field(default_factory=dict)
 
 
@@ -70,6 +76,17 @@ class MockObsidianVaultClient:
         record = self._vaults.setdefault(vault_id, _VaultRecord())
         record.ready = ready
 
+    def set_failed(self, vault_id: str, failed: bool = True) -> None:
+        """Set or clear a seeded vault's hard first-sync failure state.
+
+        The vault must already be seeded so this test control cannot change
+        unknown-vault operations from `not_found` to `unavailable`.
+        """
+        record = self._bound_record(vault_id)
+        record.failed = failed
+        if failed:
+            record.ready = False
+
     def set_sync_process_alive(self, vault_id: str, alive: bool) -> None:
         """Override whether get_status reports the continuous sync child as running."""
         self._sync_alive[vault_id] = alive
@@ -93,7 +110,7 @@ class MockObsidianVaultClient:
             'vault_id': vault_id,
             'ready': record.ready,
             'initial_sync_complete': record.ready,
-            'sync_process_alive': self._sync_alive.get(vault_id, True),
+            'sync_process_alive': self._sync_alive.get(vault_id, not record.failed),
         }
 
     def seed_file(self, vault_id: str, path: str, content: str) -> None:
@@ -114,21 +131,49 @@ class MockObsidianVaultClient:
         self.released = True
         self._bound_roots = {}
 
-    def _gate(self, vault_id: str, path: str) -> _VaultRecord:
-        """Require first-sync readiness then root scoping; return the vault's record."""
+    def _bound_record(self, vault_id: str) -> _VaultRecord:
+        """Resolve the seeded vault record, mirroring the service's binding lookup."""
         record = self._vaults.get(vault_id)
         if record is None:
             raise ObsidianNotFoundError(f'obsidian vault not seeded: {vault_id}')
-        if not record.ready:
-            raise ObsidianSyncPendingError(f'vault {vault_id!r} has not completed first sync yet')
+        return record
+
+    def _require_root(self, vault_id: str, path: str) -> None:
+        """Raise unless path sits inside the roots this agent bound for vault_id."""
         roots = self._bound_roots.get(vault_id, [])
         if not _matches_configured_root(_segments(path), roots):
             raise ObsidianOutsideRootError(f'path is outside configured roots: {path!r}')
+
+    def _require_available(self, vault_id: str, record: _VaultRecord) -> None:
+        """Raise unavailable when the seeded vault is in hard first-sync failure."""
+        if record.failed:
+            raise ObsidianUnavailableError(f'obsidian vault first sync failed: {vault_id}')
+
+    def _authorize_read(self, vault_id: str, path: str) -> _VaultRecord:
+        """Resolve the binding then enforce root scope; reads never wait for first sync."""
+        record = self._bound_record(vault_id)
+        self._require_available(vault_id, record)
+        self._require_root(vault_id, path)
+        return record
+
+    def _gate_write(self, vault_id: str, path: str) -> _VaultRecord:
+        """Resolve the binding, require first-sync readiness, then enforce root scope.
+
+        The order matters and matches `VaultFileService._binding_context`, which looks up the
+        binding and calls `require_ready` before `open_file_under_roots` applies root
+        scoping. So a vault that is still syncing reports `sync_pending` even for a path
+        the agent may not touch, and only a ready vault reports `outside_root`.
+        """
+        record = self._bound_record(vault_id)
+        self._require_available(vault_id, record)
+        if not record.ready:
+            raise ObsidianSyncPendingError(f'vault {vault_id!r} has not completed first sync yet')
+        self._require_root(vault_id, path)
         return record
 
     def list_dir(self, *, vault_id: str, path: str) -> list[str]:
-        """List direct child names (files and synthesized dirs) under path."""
-        record = self._gate(vault_id, path)
+        """List direct child names (files and synthesized dirs) under path, ready or not."""
+        record = self._authorize_read(vault_id, path)
         prefix = path.rstrip('/') + '/'
         names = {
             file_path[len(prefix) :].split('/', 1)[0] for file_path in record.files if file_path.startswith(prefix)
@@ -136,18 +181,18 @@ class MockObsidianVaultClient:
         return sorted(names)
 
     def read_text(self, *, vault_id: str, path: str) -> str:
-        """Return seeded content for path, raising if it was never written."""
-        record = self._gate(vault_id, path)
+        """Return seeded content for path (ready or not), raising if it was never written."""
+        record = self._authorize_read(vault_id, path)
         if path not in record.files:
             raise ObsidianNotFoundError(f'obsidian file not found: {path}')
         return record.files[path]
 
     def write_text(self, *, vault_id: str, path: str, content: str) -> None:
-        """Create or overwrite the seeded content at path."""
-        record = self._gate(vault_id, path)
+        """Create or overwrite the seeded content at path once first sync has completed."""
+        record = self._gate_write(vault_id, path)
         record.files[path] = content
 
     def append_text(self, *, vault_id: str, path: str, content: str) -> None:
-        """Append to (or create) the seeded content at path."""
-        record = self._gate(vault_id, path)
+        """Append to (or create) the seeded content at path once first sync has completed."""
+        record = self._gate_write(vault_id, path)
         record.files[path] = record.files.get(path, '') + content

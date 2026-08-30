@@ -588,15 +588,28 @@ backend directly.
 | `status` | Report first-sync readiness and whether continuous headless Sync is alive | yes |
 
 Every path must resolve within one of the tool instance's configured `roots`
-(enforced server-side by the vault service). Until a vault's **initial full
-Sync** completes, file operations stall/retry on a retryable `sync_pending`
-condition with backoff; the tool call blocks rather than failing immediately,
-for roughly 30 seconds total (a geometric delay schedule) before surfacing the
-retryable failure kind to the caller. `status` does **not** stall or retry:
-`ready: false` is a successful observation. Its fields are Chief first-sync
-and process liveness (`ready`, `initial_sync_complete`, `sync_process_alive`),
-not `ob sync-status` and not a “caught up with Obsidian Sync” indicator.
-Results use the shared `{ok, …}` /
+(enforced server-side by the vault service). The **initial full Sync** remains
+the readiness boundary: completion publishes `.sync-ready` and makes
+`status.ready` true. Gate session start with a trigger `blocks` entry
+`kind: tool_ready` and `tool: <instance id>` — see the complete example under
+[Block conditions](#block-conditions). `status` returns only `ready`,
+`initial_sync_complete`, and `sync_process_alive` (Chief first-sync and
+process liveness, not `ob sync-status` and not a “caught up with Obsidian
+Sync” indicator); `ready: false` is a successful observation.
+
+Once first Sync has started, `list` and `read` may expose a partial,
+concurrently changing checkout. A leftover checkout after a Sync timeout is
+still readable. Missing paths remain `not_found`, and root enforcement always
+applies. If Sync never started or the vault was stopped, `list` and `read`
+return `sync_pending`. A hard `ob` failure returns `unavailable`.
+
+`write` and `append` require the first full Sync. They return `sync_pending`
+while Sync is still in progress, after a timeout leftover, or if Sync never
+started or was stopped, and `unavailable` after a hard `ob` failure. There is
+no tool retry or sleep; the first typed result is returned. The HTTP request
+can still wait up to its configured timeout if the vault service hangs. A
+higher-level caller may still treat `sync_pending` / `unavailable` as
+transient. Results use the shared `{ok, …}` /
 typed `{ok: false, error: {kind, message}}` shape, where `kind` includes
 `auth`, `forbidden`, `outside_root`, `not_found`, `sync_pending`,
 `unavailable`, and `config`.
