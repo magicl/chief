@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from time import monotonic
 from typing import Any, Protocol, cast
 from uuid import UUID
 
@@ -18,12 +19,15 @@ from apps.bus.resources import RESOURCE_NAMES, user_resource_channel
 from asgiref.sync import sync_to_async
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser
+from django.db import connections
 from django.http import Http404, HttpRequest, StreamingHttpResponse
 from django.views.decorators.http import require_GET
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 logger = logging.getLogger(__name__)
+RESOURCE_SSE_POLL_SECONDS = 1.0
+RESOURCE_SSE_HEARTBEAT_SECONDS = 15.0
 
 
 class _AsyncClosable(Protocol):
@@ -80,9 +84,15 @@ def _validated_resource_message(data: Any) -> dict[str, str] | None:
 async def resource_events_sse(request: HttpRequest) -> StreamingHttpResponse:
     """Tail only the authenticated user's resource refresh channel."""
     user_id = await sync_to_async(_require_authenticated_user_id)(request)
+    # Streaming responses delay request_finished indefinitely, so explicitly
+    # return authentication connections before the Redis-only phase.
+    await sync_to_async(connections.close_all)()
 
     async def stream() -> AsyncIterator[str]:
         """Subscribe lazily and release each Redis resource on disconnect."""
+        # Response middleware runs after the view-level close and may touch the
+        # database, so release once more at the actual long-lived boundary.
+        await sync_to_async(connections.close_all)()
         try:
             client = async_client()
         except RuntimeError:
@@ -100,13 +110,21 @@ async def resource_events_sse(request: HttpRequest) -> StreamingHttpResponse:
                     except (RedisConnectionError, RedisTimeoutError):
                         logger.debug('Resource refresh subscription unavailable')
                         return
+                    last_heartbeat = monotonic()
                     while True:
                         try:
-                            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                            message = await pubsub.get_message(
+                                ignore_subscribe_messages=True,
+                                timeout=RESOURCE_SSE_POLL_SECONDS,
+                            )
                         except (RedisConnectionError, RedisTimeoutError):
                             logger.debug('Resource refresh stream unavailable')
                             return
                         if message is None:
+                            now = monotonic()
+                            if now - last_heartbeat >= RESOURCE_SSE_HEARTBEAT_SECONDS:
+                                yield ': heartbeat\n\n'
+                                last_heartbeat = now
                             await asyncio.sleep(0.1)
                             continue
                         if message.get('type') != 'message':
