@@ -149,6 +149,83 @@ class TestAgentConfigSpec(OTestCase):
         self.assertEqual(spec.tools[0].type, 'gmail')
         self.assertEqual(spec.tools[0].config['subject'], 'me@example.com')
 
+    def test_valueless_yaml_keys_fall_back_to_defaults(self) -> None:
+        """A bare ``integrations:`` key in YAML parses as None and must mean "omitted"."""
+        spec = load_spec(
+            {
+                'schema_version': 4,
+                'llm': {'provider': 'openai', 'model': 'gpt-5.4-mini'},
+                'system_prompt': 'hello',
+                'description': None,
+                'limits': None,
+                'integrations': None,
+                'triggers': None,
+                'tools': None,
+                'queues': None,
+                'skills': None,
+            }
+        )
+        self.assertEqual(spec.integrations, [])
+        self.assertEqual(spec.triggers, [])
+        self.assertEqual(spec.tools, [])
+        self.assertEqual(spec.queues, [])
+        self.assertEqual(spec.skills, [])
+        self.assertIsNone(spec.limits.max_iterations)
+        self.assertIsNone(spec.description)
+
+    def test_valueless_nested_keys_fall_back_to_defaults(self) -> None:
+        spec = load_spec(
+            {
+                **MINIMAL_SPEC_DICT,
+                'tools': [{'id': 'clock', 'type': 'clock', 'config': None, 'deny': None}],
+                'queues': [{'id': 'inbox', 'sources': None}],
+            }
+        )
+        self.assertEqual(spec.tools[0].config, {})
+        self.assertEqual(spec.tools[0].allow, ['*'])
+        self.assertEqual(spec.tools[0].deny, [])
+        self.assertEqual(spec.queues[0].sources, [])
+        self.assertEqual(spec.queues[0].max_attempts, 3)
+
+    def test_valueless_allow_is_rejected_rather_than_allowing_everything(self) -> None:
+        """A bare ``allow:`` must fail validation, not fall back to the permissive default."""
+        with self.assertRaises(ValidationError):
+            load_spec(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'tools': [{'id': 'clock', 'type': 'clock', 'allow': None}],
+                }
+            )
+
+    def test_valueless_aliased_source_key_falls_back_to_required(self) -> None:
+        """``type:`` is an alias for adapter_type, so a bare key must read as missing."""
+        with self.assertRaises(ValidationError) as caught:
+            load_spec(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'queues': [{'id': 'inbox', 'sources': [{'id': 'src-a', 'type': None}]}],
+                }
+            )
+        self.assertIn('missing', str(caught.exception))
+
+    def test_explicit_null_on_nullable_field_survives(self) -> None:
+        """Dropping valueless keys must not disturb nulls that carry meaning."""
+        spec = load_spec(
+            {
+                **MINIMAL_SPEC_DICT,
+                'triggers': [
+                    {
+                        'name': 'sweep',
+                        'kind': 'schedule',
+                        'cron': '0 * * * *',
+                        'prompt': 'Run sweep.',
+                        'max_sessions': None,
+                    },
+                ],
+            }
+        )
+        self.assertIsNone(spec.triggers[0].max_sessions)
+
     def test_duplicate_integration_ids_rejected(self) -> None:
         with self.assertRaises(ValidationError):
             load_spec(

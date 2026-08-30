@@ -7,8 +7,11 @@
 from __future__ import annotations
 
 import re
+import types
+import typing
 from decimal import Decimal
-from typing import Any, Literal
+from functools import lru_cache
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -17,14 +20,60 @@ AGENT_CONFIG_SPEC_VERSION = 4
 _INSTANCE_ID_RE = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
 
-class LLMSpec(BaseModel):
+def _accepts_null(annotation: Any) -> bool:
+    """Whether *annotation* admits None, i.e. some member of it is ``None`` or ``Any``."""
+    if annotation is None or annotation is types.NoneType or annotation is Any:
+        return True
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        return any(_accepts_null(arg) for arg in typing.get_args(annotation))
+    return False
+
+
+@lru_cache(maxsize=None)
+def _keys_accepting_null(model: type[BaseModel]) -> frozenset[str]:
+    """Input keys (field names plus string aliases) whose field admits an explicit null."""
+    keys: set[str] = set()
+    for name, field in model.model_fields.items():
+        if not _accepts_null(field.annotation):
+            continue
+        keys.add(name)
+        if isinstance(field.validation_alias, str):
+            keys.add(field.validation_alias)
+    return frozenset(keys)
+
+
+class SpecModel(BaseModel):
+    """Base for spec models: a valueless YAML key (``integrations:``) means "omitted"."""
+
+    # Keys kept null even though their field rejects null, so that a malformed value fails
+    # validation rather than silently falling back to a permissive default.
+    strict_null_keys: ClassVar[frozenset[str]] = frozenset()
+
+    @model_validator(mode='before')
+    @classmethod
+    def _drop_valueless_keys(cls, data: Any) -> Any:
+        """Drop null-valued keys so the field default applies, unless the field admits null.
+
+        YAML parses a key with no value as None, which pydantic then rejects for any
+        non-nullable field. Fields typed to admit None keep their null, so an explicit
+        ``credential_ref: null`` still opts out of an inherited integration credential.
+        """
+        if not isinstance(data, dict):
+            return data
+        keep = _keys_accepting_null(cls) | cls.strict_null_keys
+        if not any(value is None and key not in keep for key, value in data.items()):
+            return data
+        return {key: value for key, value in data.items() if value is not None or key in keep}
+
+
+class LLMSpec(SpecModel):
     provider: str  # e.g. "openai", "anthropic", "local_openai", "repeat"
     model: str
     temperature: float | None = None
     credential_ref: str | None = None
 
 
-class SessionLimitsSpec(BaseModel):
+class SessionLimitsSpec(SpecModel):
     """Per-session hard limits declared in agent config YAML."""
 
     max_iterations: int | None = None
@@ -52,7 +101,7 @@ class SessionLimitsSpec(BaseModel):
         return v
 
 
-class TriggerSpec(BaseModel):
+class TriggerSpec(SpecModel):
     name: str
     kind: Literal['schedule', 'manual', 'agent', 'queue', 'button']
     cron: str | None = None
@@ -131,7 +180,7 @@ class TriggerSpec(BaseModel):
         return self
 
 
-class IntegrationSpec(BaseModel):
+class IntegrationSpec(SpecModel):
     """Shared connection details referenced by tools and sources."""
 
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
@@ -140,7 +189,11 @@ class IntegrationSpec(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-class ToolInstance(BaseModel):
+class ToolInstance(SpecModel):
+    # A valueless ``allow:`` must not fall back to the permissive ['*'] default; reject it so
+    # a malformed permission list fails validation instead of granting every function.
+    strict_null_keys: ClassVar[frozenset[str]] = frozenset({'allow'})
+
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
     type: str
     integration: str | None = None
@@ -150,7 +203,7 @@ class ToolInstance(BaseModel):
     deny: list[str] = []
 
 
-class SourceSpec(BaseModel):
+class SourceSpec(SpecModel):
     """YAML fragment for one source nested under a queue."""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -162,7 +215,7 @@ class SourceSpec(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-class QueueSpec(BaseModel):
+class QueueSpec(SpecModel):
     """YAML fragment for one agent-scoped queue and optional nested sources."""
 
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
@@ -228,7 +281,7 @@ def _apply_integration(entry: dict[str, Any], integrations: dict[str, dict[str, 
     return out
 
 
-class SkillSpec(BaseModel):
+class SkillSpec(SpecModel):
     """Named prompt block loadable on demand via the load_skill tool."""
 
     id: str = Field(pattern=_INSTANCE_ID_RE.pattern)
@@ -236,7 +289,7 @@ class SkillSpec(BaseModel):
     content: str = Field(min_length=1)
 
 
-class AgentConfigSpec(BaseModel):
+class AgentConfigSpec(SpecModel):
     schema_version: Literal[4] = 4
     description: str | None = None
     llm: LLMSpec

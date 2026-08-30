@@ -81,6 +81,15 @@ skills: []         # prompt blocks loaded on demand (see Skills)
 | `queues` | list of `QueueSpec` | no | Agent-scoped work queues |
 | `skills` | list of `SkillSpec` | no | Named prompt blocks available on demand |
 
+An optional key written with no value (`integrations:` on its own line) parses as null and is
+treated the same as leaving the key out — the field falls back to its default. This applies to
+nested keys too, such as a tool's `config:` or a queue's `sources:`. Fields that are documented
+as nullable, such as `credential_ref` and `max_sessions`, keep the explicit null and its meaning.
+
+A tool's `allow:` is the one exception: leaving it valueless is rejected rather than falling back
+to the permissive `['*']` default, so a malformed permission list cannot silently grant every
+function. See [Allow / deny gating](#allow--deny-gating).
+
 ---
 
 ## LLM
@@ -247,6 +256,9 @@ The runner checks `allow` and `deny` before dispatching any function call:
 - If `allow` contains `'*'`, all functions are permitted unless in `deny`.
 - If `allow` is an explicit list, only those functions are permitted.
 - `deny` always wins over `allow`.
+
+Omit `allow` entirely to accept the permissive default. Writing the key with no value is
+rejected, so an unfinished edit fails validation instead of granting every function.
 
 ### Built-in tools
 

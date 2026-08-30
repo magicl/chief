@@ -16,11 +16,27 @@ from libs.agent_spec.yaml_roundtrip import (
     load_yaml_document,
     plain_dict,
 )
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 
 class ConfigMutationError(ValueError):
     """Helper mutation could not be applied."""
+
+
+def _entries(container: Any, key: str) -> list[Any]:
+    """Read the list at *key*, treating a missing or valueless YAML key as empty."""
+    value = container.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _entries_for_append(container: Any, key: str) -> list[Any]:
+    """Read the list at *key* for insertion, creating it when missing or valueless."""
+    value = container.get(key)
+    if isinstance(value, list):
+        return value
+    created: CommentedSeq = CommentedSeq()
+    container[key] = created
+    return created
 
 
 def _tool_entry(mutation: dict[str, Any]) -> CommentedMap:
@@ -107,13 +123,13 @@ def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
         return
 
     if action == 'add_tool':
-        tools = doc.setdefault('tools', [])
+        tools = _entries_for_append(doc, 'tools')
         tools.append(_tool_entry(mutation))
         return
 
     if action == 'remove_tool':
         tool_id = mutation['id']
-        tools = doc.get('tools', [])
+        tools = _entries(doc, 'tools')
         filtered = [item for item in tools if item.get('id') != tool_id]
         if len(filtered) == len(tools):
             raise ConfigMutationError(f'Unknown tool instance {tool_id!r}')
@@ -121,13 +137,13 @@ def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
         return
 
     if action == 'add_trigger':
-        triggers = doc.setdefault('triggers', [])
+        triggers = _entries_for_append(doc, 'triggers')
         triggers.append(_trigger_entry(mutation))
         return
 
     if action == 'remove_trigger':
         name = mutation['name']
-        triggers = doc.get('triggers', [])
+        triggers = _entries(doc, 'triggers')
         filtered = [item for item in triggers if item.get('name') != name]
         if len(filtered) == len(triggers):
             raise ConfigMutationError(f'Unknown trigger {name!r}')
@@ -135,13 +151,13 @@ def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
         return
 
     if action == 'add_queue':
-        queues = doc.setdefault('queues', [])
+        queues = _entries_for_append(doc, 'queues')
         queues.append(_queue_entry(mutation))
         return
 
     if action == 'remove_queue':
         queue_id = mutation['id']
-        queues = doc.get('queues', [])
+        queues = _entries(doc, 'queues')
         filtered = [item for item in queues if item.get('id') != queue_id]
         if len(filtered) == len(queues):
             raise ConfigMutationError(f'Unknown queue {queue_id!r}')
@@ -150,11 +166,11 @@ def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
 
     if action == 'add_source':
         queue_id = mutation['queue_id']
-        queues = doc.get('queues', [])
+        queues = _entries(doc, 'queues')
         found = False
         for queue in queues:
             if queue.get('id') == queue_id:
-                sources = queue.setdefault('sources', [])
+                sources = _entries_for_append(queue, 'sources')
                 sources.append(_source_entry(mutation))
                 found = True
                 break
@@ -165,12 +181,12 @@ def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
     if action == 'remove_source':
         queue_id = mutation['queue_id']
         source_id = mutation['id']
-        queues = doc.get('queues', [])
+        queues = _entries(doc, 'queues')
         found = False
         for queue in queues:
             if queue.get('id') != queue_id:
                 continue
-            sources = queue.get('sources', [])
+            sources = _entries(queue, 'sources')
             filtered = [item for item in sources if item.get('id') != source_id]
             if len(filtered) == len(sources):
                 raise ConfigMutationError(f'Unknown source {source_id!r} in queue {queue_id!r}')
