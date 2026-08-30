@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from apps.agents.block_gate import blocks_allow_dispatch
 from apps.agents.models import AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue
 from apps.runner.budget_gate import budget_allows_dispatch
@@ -100,7 +101,7 @@ def _active_triggers(*, kind: str) -> list[Trigger]:
 
 
 def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = None) -> bool:
-    """Start a session when an active agent's schedule trigger beat task fires."""
+    """Gate and start a session when an active schedule trigger's beat task fires."""
     from apps.agents.services.schedule_beat import disable_schedule_trigger_beat
     from apps.runner.dispatch import push_chat_and_dispatch
     from apps.runner.session_start import start_trigger_session
@@ -128,8 +129,12 @@ def dispatch_schedule_trigger(*, trigger_id: UUID | str, now: datetime | None = 
         disable_schedule_trigger_beat(trigger.id)
         return False
 
-    # Budget check outside the atomic block to avoid holding the row lock during spend queries
+    # Budget must run first; both spend queries and block probes may perform I/O, so
+    # neither belongs inside the trigger row lock.
     if not budget_allows_dispatch(agent):
+        Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
+        return False
+    if not blocks_allow_dispatch(agent, trigger).ready:
         Trigger.objects.filter(pk=trigger.pk).update(last_fired_at=now)
         return False
 
@@ -169,7 +174,7 @@ def _resolve_queue_for_trigger(trigger: Trigger) -> Queue | None:
 
 
 def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
-    """Start sessions and take items while *trigger* has free ``max_sessions`` slots."""
+    """Gate, start, and take items while *trigger* has free concurrency slots."""
     from apps.queues.services.commands import take_item
     from apps.runner.dispatch import push_chat_and_dispatch
     from apps.runner.session_start import StartSessionError, start_trigger_session
@@ -177,8 +182,11 @@ def _fill_queue_trigger_slots(trigger: Trigger, queue: Queue) -> int:
     started = 0
 
     while True:
-        # Budget check outside the atomic block to avoid holding the row lock during spend queries
+        # Budget stays first; block evaluators may perform HTTP I/O, so both probes
+        # must complete before locking or creating the session that takes the item.
         if not budget_allows_dispatch(trigger.agent):
+            break
+        if not blocks_allow_dispatch(trigger.agent, trigger).ready:
             break
 
         take_result = None

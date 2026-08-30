@@ -13,4 +13,7 @@ class AgentsConfig(AppConfig):
         from apps.agents.tools_wiring import wire_tools
 
         wire_tools()
+        from apps.agents.block_wiring import wire_block_kinds
+
+        wire_block_kinds()
         from apps.agents import signals  # noqa: F401  # pylint: disable=unused-import

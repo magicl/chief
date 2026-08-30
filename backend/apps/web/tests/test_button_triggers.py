@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
+from apps.agents.block_gate import BlockGateResult
 from apps.agents.ingest import persist_agent_config
 from apps.agents.models import AgentStatus, Trigger
 from apps.agents.services.config_commands import create_from_example
@@ -83,6 +84,37 @@ class TestButtonTriggersWeb(OTransactionTestCase):
                 kwargs={'agent_id': self.agent.id, 'trigger_id': self.trigger.id},
             ),
         )
+
+    @patch('apps.web.services.queries.blocks_allow_dispatch')
+    def test_blocked_button_remains_visible_with_reason(self, mock_gate: MagicMock) -> None:
+        """A blocked button is disabled while exposing its operator-safe reason."""
+        mock_gate.return_value = BlockGateResult(ready=False, reason='vault is syncing')
+        self.client.force_login(self.user)
+        session = start_manual_session(self.agent)
+
+        agent_response = self.client.get(reverse('agent_detail', kwargs={'agent_id': self.agent.id}))
+        session_response = self.client.get(reverse('session_detail', kwargs={'session_id': session.id}))
+
+        for response in (agent_response, session_response):
+            with self.subTest(path=response.request['PATH_INFO']):
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, BUTTON_TEXT)
+                self.assertContains(response, f'disabled aria-describedby="button-block-{self.trigger.id}"')
+                self.assertContains(response, f'id="button-block-{self.trigger.id}"')
+                self.assertContains(response, 'vault is syncing')
+
+    @patch('apps.web.services.queries.blocks_allow_dispatch')
+    def test_ready_button_remains_enabled(self, mock_gate: MagicMock) -> None:
+        """A ready button preserves the existing actionable form control."""
+        mock_gate.return_value = BlockGateResult(ready=True)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('agent_detail', kwargs={'agent_id': self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, BUTTON_TEXT)
+        self.assertNotContains(response, f'aria-describedby="button-block-{self.trigger.id}"')
+        self.assertNotContains(response, f'id="button-block-{self.trigger.id}"')
 
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
     def test_run_button_creates_session_and_redirects(self, mock_push: MagicMock) -> None:

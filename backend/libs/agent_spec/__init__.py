@@ -25,6 +25,7 @@ from libs.agent_spec.registry import get_spec_migrations, latest_spec_version
 from libs.agent_spec.spec import (
     AGENT_CONFIG_SPEC_VERSION,
     AgentConfigSpec,
+    BlockSpec,
     IntegrationSpec,
     LLMSpec,
     QueueSpec,
@@ -32,12 +33,14 @@ from libs.agent_spec.spec import (
     SkillSpec,
     SourceSpec,
     ToolInstance,
+    ToolReadyBlockSpec,
     TriggerSpec,
 )
 
 __all__ = [
     'AGENT_CONFIG_SPEC_VERSION',
     'AgentConfigSpec',
+    'BlockSpec',
     'ExampleSpecInfo',
     'IntegrationSpec',
     'LLMSpec',
@@ -46,6 +49,7 @@ __all__ = [
     'SkillSpec',
     'SourceSpec',
     'ToolInstance',
+    'ToolReadyBlockSpec',
     'TriggerSpec',
     'SpecMigrationError',
     'UnsupportedSpecVersionError',

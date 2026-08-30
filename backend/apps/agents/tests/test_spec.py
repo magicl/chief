@@ -520,6 +520,112 @@ class TestTriggerSpec(OTestCase):
                 }
             )
 
+    def test_trigger_blocks_default_to_empty_list(self) -> None:
+        """Omitted blocks preserve the legacy unblocked trigger behavior."""
+        spec = AgentConfigSpec.model_validate(MINIMAL_SPEC_DICT)
+        self.assertEqual(spec.triggers[0].blocks, [])
+
+    def test_trigger_accepts_explicit_empty_blocks(self) -> None:
+        """An explicit empty block list is accepted as unblocked."""
+        spec = AgentConfigSpec.model_validate(
+            {
+                **MINIMAL_SPEC_DICT,
+                'triggers': [{'name': 'manual', 'kind': 'manual', 'blocks': []}],
+            }
+        )
+        self.assertEqual(spec.triggers[0].blocks, [])
+
+    def test_tool_ready_block_references_declared_tool(self) -> None:
+        """A tool_ready block round-trips when it names a declared tool."""
+        raw = {
+            **MINIMAL_SPEC_DICT,
+            'tools': [{'id': 'vault', 'type': 'obsidian', 'config': {'vault': 'journal'}}],
+            'triggers': [
+                {
+                    'name': 'run',
+                    'kind': 'button',
+                    'button_text': 'Run',
+                    'prompt': 'Run now.',
+                    'blocks': [{'kind': 'tool_ready', 'tool': 'vault'}],
+                }
+            ],
+        }
+        spec = AgentConfigSpec.model_validate(raw)
+        self.assertEqual(
+            spec.triggers[0].model_dump(mode='json')['blocks'],
+            [{'kind': 'tool_ready', 'tool': 'vault'}],
+        )
+
+    def test_tool_ready_block_rejects_undeclared_tool(self) -> None:
+        """Reject a tool_ready reference absent from the current spec."""
+        with self.assertRaises(ValidationError) as caught:
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'tools': [{'id': 'clock', 'type': 'clock'}],
+                    'triggers': [
+                        {
+                            'name': 'manual',
+                            'kind': 'manual',
+                            'blocks': [{'kind': 'tool_ready', 'tool': 'vault'}],
+                        }
+                    ],
+                }
+            )
+        self.assertIn('vault', str(caught.exception))
+
+    def test_tool_ready_block_requires_tool_id(self) -> None:
+        """Require the tool id field on every tool_ready condition."""
+        with self.assertRaises(ValidationError) as caught:
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {'name': 'manual', 'kind': 'manual', 'blocks': [{'kind': 'tool_ready'}]},
+                    ],
+                }
+            )
+        err = caught.exception.errors()[0]
+        self.assertEqual(err['loc'], ('triggers', 0, 'blocks', 0, 'tool_ready', 'tool'))
+        self.assertEqual(err['type'], 'missing')
+
+    def test_unknown_block_kind_is_rejected(self) -> None:
+        """Reject condition kinds without a supported schema and evaluator."""
+        with self.assertRaises(ValidationError) as caught:
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'triggers': [
+                        {'name': 'manual', 'kind': 'manual', 'blocks': [{'kind': 'future'}]},
+                    ],
+                }
+            )
+        err = caught.exception.errors()[0]
+        self.assertEqual(err['loc'], ('triggers', 0, 'blocks', 0))
+        self.assertEqual(err['type'], 'union_tag_invalid')
+        self.assertIn("'future'", err['msg'])
+        self.assertIn("'tool_ready'", err['msg'])
+
+    def test_tool_ready_block_rejects_unknown_fields(self) -> None:
+        """Forbid undeclared fields on the strict tool_ready condition."""
+        with self.assertRaises(ValidationError) as caught:
+            AgentConfigSpec.model_validate(
+                {
+                    **MINIMAL_SPEC_DICT,
+                    'tools': [{'id': 'vault', 'type': 'obsidian'}],
+                    'triggers': [
+                        {
+                            'name': 'manual',
+                            'kind': 'manual',
+                            'blocks': [{'kind': 'tool_ready', 'tool': 'vault', 'timeout': 30}],
+                        }
+                    ],
+                }
+            )
+        err = caught.exception.errors()[0]
+        self.assertEqual(err['loc'], ('triggers', 0, 'blocks', 0, 'tool_ready', 'timeout'))
+        self.assertEqual(err['type'], 'extra_forbidden')
+
     def test_button_max_sessions_defaults_to_none(self) -> None:
         spec = AgentConfigSpec.model_validate(
             {

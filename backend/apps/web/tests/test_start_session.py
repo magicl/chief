@@ -3,7 +3,9 @@
 # See LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
 # ~
 import logging
+from unittest.mock import MagicMock, patch
 
+from apps.agents.block_gate import BlockGateResult
 from apps.agents.models import AgentStatus
 from apps.agents.services.config_commands import create_from_example
 from apps.sessions.models import AgentSession
@@ -43,6 +45,27 @@ class TestStartAgentSessionView(OTransactionTestCase):
         self.assertEqual(response['Location'], reverse('session_detail', kwargs={'session_id': session.id}))
         page = self.client.get(response['Location'])
         self.assertEqual(page.status_code, 200)
+
+    @patch('apps.web.services.queries.blocks_allow_dispatch')
+    def test_blocked_manual_start_surfaces_are_disabled_with_reason(self, mock_gate: MagicMock) -> None:
+        """Agent chat and session header expose why a new manual session cannot start."""
+        self.client.force_login(self.user)
+        assert self.agent.current_config is not None
+        session = AgentSession.objects.create(
+            agent=self.agent,
+            agent_config=self.agent.current_config,
+        )
+        mock_gate.return_value = BlockGateResult(ready=False, reason='vault is syncing')
+
+        agent_page = self.client.get(reverse('agent_detail', kwargs={'agent_id': self.agent.id}))
+        session_page = self.client.get(reverse('session_detail', kwargs={'session_id': session.id}))
+
+        self.assertContains(agent_page, 'id="manual-block-reason"')
+        self.assertContains(agent_page, 'aria-describedby="manual-block-reason"')
+        self.assertContains(agent_page, 'vault is syncing')
+        self.assertContains(session_page, 'id="new-session-block-reason"')
+        self.assertContains(session_page, 'aria-describedby="new-session-block-reason"')
+        self.assertContains(session_page, 'vault is syncing')
 
     @expectLogItems(
         [ExpectLogItem('django.request', logging.WARNING, r'Bad Request: /agents/[0-9a-f-]+/start/', count=1)]

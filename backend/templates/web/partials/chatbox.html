@@ -4,7 +4,14 @@
     {% for t in button_triggers %}
     <form method="post" action="{{ url('agent_run_button_trigger', kwargs={'agent_id': agent.id, 'trigger_id': t.id}) }}">
       <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-      <button type="submit" class="frame-btn">{{ t.spec['button_text'] }}</button>
+      <button
+        type="submit"
+        class="frame-btn"
+        {% if t.blocked %}disabled aria-describedby="button-block-{{ t.id }}"{% endif %}
+      >{{ t.button_text }}</button>
+      {% if t.blocked %}
+      <span id="button-block-{{ t.id }}" class="input-hint">{{ t.block_reason }}</span>
+      {% endif %}
     </form>
     {% endfor %}
   </div>
@@ -22,8 +29,13 @@
       placeholder="Message the agent…"
       x-ref="chatInput"
       @keydown.enter="onChatKeydown($event)"
+      {% if manual_blocked %}disabled aria-describedby="manual-block-reason"{% endif %}
     ></textarea>
+    {% if manual_blocked %}
+    <p id="manual-block-reason" class="input-hint">{{ manual_block_reason }}</p>
+    {% else %}
     <p class="input-hint">Enter to send · Shift+Enter or Ctrl+Enter for a new line</p>
+    {% endif %}
   </form>
   {% else %}
   <form

@@ -33,6 +33,7 @@ from libs.clients.obsidian.errors import (
 )
 
 _TIMEOUT = 30.0
+_STATUS_TIMEOUT = 2.0
 
 # Maps the vault service's normative `error.kind` values (see
 # `services/obsidian/obsidian_vault/app.py` and the Task 7 plan's normative
@@ -101,11 +102,12 @@ class ObsidianVaultClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
+        timeout: float = _TIMEOUT,
     ) -> dict[str, Any]:
-        """Issue one request and map any non-2xx or transport failure to a typed error."""
+        """Issue one request with its operation timeout and map failures to typed errors."""
         headers = {'Authorization': f'Bearer {self._token}'}
         try:
-            with httpx.Client(base_url=self._base_url, transport=self._transport, timeout=_TIMEOUT) as client:
+            with httpx.Client(base_url=self._base_url, transport=self._transport, timeout=timeout) as client:
                 resp = client.request(method, path, params=params, json=json_body, headers=headers)
         except httpx.HTTPError as exc:
             raise ObsidianUnavailableError(f'obsidian vault service unreachable ({path})') from exc
@@ -142,7 +144,7 @@ class ObsidianVaultClient:
 
     def get_status(self, *, vault_id: str) -> dict[str, Any]:
         """Fetch vault-level first-sync and process-liveness flags (`GET /v1/vaults/{vault_id}/status`)."""
-        return _parse_status_body(self._request('GET', f'/v1/vaults/{vault_id}/status'))
+        return _parse_status_body(self._request('GET', f'/v1/vaults/{vault_id}/status', timeout=_STATUS_TIMEOUT))
 
     def ensure_vaults(self, bindings: list[dict[str, Any]]) -> None:
         """Upsert this agent's desired vault bindings (`PUT /v1/agents/{agent_id}/vaults`).

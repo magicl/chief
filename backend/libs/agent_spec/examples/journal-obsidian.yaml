@@ -39,5 +39,8 @@ triggers:
     queue: inbox
     prompt: Append this email as a journal entry.
     max_sessions: 1
+    blocks:
+      - kind: tool_ready
+        tool: vault
   - name: manual
     kind: manual

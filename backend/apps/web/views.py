@@ -66,6 +66,7 @@ from apps.web.services.queries import (
     get_agent_detail_data,
     get_credential_for_write_check,
     get_dashboard_data,
+    get_manual_trigger_gate,
     get_owned_agent,
     get_owned_direct_parent,
     get_owned_session,
@@ -207,6 +208,7 @@ def _require_authenticated_user_id(request: HttpRequest) -> int:
 def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str, Any]:
     """Build template context for the chat input box."""
     button_triggers = list_active_button_triggers(agent)
+    manual_gate = get_manual_trigger_gate(agent)
     if session is None:
         return {
             'agent': agent,
@@ -214,6 +216,8 @@ def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str,
             'chat_mode': 'start',
             'chat_post_url': reverse('agent_start_chat', kwargs={'agent_id': agent.id}),
             'button_triggers': button_triggers,
+            'manual_blocked': not manual_gate.ready,
+            'manual_block_reason': manual_gate.reason,
         }
     return {
         'agent': agent,
@@ -221,6 +225,8 @@ def _chatbox_context(*, agent: Agent, session: AgentSession | None) -> dict[str,
         'chat_mode': 'continue',
         'chat_post_url': reverse('session_chat', kwargs={'session_id': session.id}),
         'button_triggers': button_triggers,
+        'manual_blocked': not manual_gate.ready,
+        'manual_block_reason': manual_gate.reason,
     }
 
 

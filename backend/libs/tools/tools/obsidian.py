@@ -33,6 +33,7 @@ from libs.clients.obsidian.errors import (
 from libs.clients.obsidian.protocol import ObsidianVaultClientProtocol
 from libs.tools.base import Tool, ToolFunction
 from libs.tools.context import ToolContext
+from libs.tools.readiness import BlockResult
 
 if TYPE_CHECKING:
     from libs.agent_spec.spec import ToolInstance
@@ -59,6 +60,8 @@ _ARGUMENT_FIELDS = {
 # docs/docs/agents.md's `obsidian` tool section: production retries a
 # first-sync/unavailable stall for roughly half a minute before giving up.
 _DEFAULT_RETRY_DELAYS: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0)
+_NOT_READY_REASON = 'Obsidian vault is not ready'
+READINESS_UNAVAILABLE_REASON = 'Obsidian vault readiness could not be confirmed'
 
 
 def _failure(exc: ObsidianVaultError) -> dict[str, Any]:
@@ -130,6 +133,23 @@ class ObsidianTool(Tool):
         """Retain the retryable-stall backoff schedule; tests inject a fake sleep and short delays."""
         self._sleep = sleep
         self._delays = delays
+
+    def readiness(self, ctx: ToolContext, instance: ToolInstance) -> BlockResult:
+        """Report ready only when the configured vault's status is literal ``true``.
+
+        Configuration, transport, authentication, and service failures deliberately
+        collapse to a stable operator-safe reason; raw provider text may contain
+        deployment details and must not pass through the trigger gate.
+        """
+        try:
+            config = parse_obsidian_tool_config(instance.config)
+            client = self._build_client(ctx, instance)
+            status = client.get_status(vault_id=config.vault)
+        except ObsidianVaultError:
+            return BlockResult(ready=False, reason=READINESS_UNAVAILABLE_REASON)
+        if status.get('ready') is not True:
+            return BlockResult(ready=False, reason=_NOT_READY_REASON)
+        return BlockResult(ready=True)
 
     def bind(
         self,
