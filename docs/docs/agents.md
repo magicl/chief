@@ -508,8 +508,9 @@ and do not add `ok`; failures return `{ok: false, error: {kind, message}}`, wher
 
 #### `obsidian`
 
-Root-scoped `list` / `read` / `write` / `append` access to one Obsidian Sync vault.
-Requires an `obsidian` credential (Obsidian Sync auth token). The vault itself is
+Root-scoped `list` / `read` / `write` / `append` access to one Obsidian Sync vault,
+plus readonly `status`. Requires an `obsidian` credential (Obsidian Sync auth
+token). The vault itself is
 kept in sync by a separate `services/obsidian` process — see
 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — not by `apps.keys` or the Chief
 backend directly.
@@ -527,13 +528,18 @@ backend directly.
 | `read` | Read the UTF-8 text content of one vault file | yes |
 | `write` | Create or overwrite one vault file with new content | no |
 | `append` | Append content to one vault file, creating it (and parent dirs) if missing | no |
+| `status` | Report first-sync readiness and whether continuous headless Sync is alive | yes |
 
 Every path must resolve within one of the tool instance's configured `roots`
 (enforced server-side by the vault service). Until a vault's **initial full
 Sync** completes, file operations stall/retry on a retryable `sync_pending`
 condition with backoff; the tool call blocks rather than failing immediately,
 for roughly 30 seconds total (a geometric delay schedule) before surfacing the
-retryable failure kind to the caller. Results use the shared `{ok, …}` /
+retryable failure kind to the caller. `status` does **not** stall or retry:
+`ready: false` is a successful observation. Its fields are Chief first-sync
+and process liveness (`ready`, `initial_sync_complete`, `sync_process_alive`),
+not `ob sync-status` and not a “caught up with Obsidian Sync” indicator.
+Results use the shared `{ok, …}` /
 typed `{ok: false, error: {kind, message}}` shape, where `kind` includes
 `auth`, `forbidden`, `outside_root`, `not_found`, `sync_pending`,
 `unavailable`, and `config`.

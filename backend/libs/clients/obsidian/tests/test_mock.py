@@ -23,6 +23,37 @@ class TestMockObsidianVaultClient(OTestCase):
         protocol_client: ObsidianVaultClientProtocol = client
         self.assertIsInstance(protocol_client, ObsidianVaultClientProtocol)
 
+    def test_get_status_unseeded_vault_is_all_false(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        self.assertEqual(
+            client.get_status(vault_id='Unknown'),
+            {
+                'vault_id': 'Unknown',
+                'ready': False,
+                'initial_sync_complete': False,
+                'sync_process_alive': False,
+            },
+        )
+
+    def test_get_status_does_not_stall_when_not_ready(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.seed_vault('Personal', ready=False)
+        self.assertEqual(
+            client.get_status(vault_id='Personal'),
+            {
+                'vault_id': 'Personal',
+                'ready': False,
+                'initial_sync_complete': False,
+                'sync_process_alive': True,
+            },
+        )
+
+    def test_get_status_can_report_dead_sync_child(self) -> None:
+        client = MockObsidianVaultClient(agent_id='agent-1')
+        client.seed_vault('Personal', ready=True)
+        client.set_sync_process_alive('Personal', False)
+        self.assertFalse(client.get_status(vault_id='Personal')['sync_process_alive'])
+
     def test_ensure_vaults_records_call_and_binds_roots(self) -> None:
         client = MockObsidianVaultClient(agent_id='agent-1')
         bindings = [{'vault_id': 'Personal', 'roots': ['Journal'], 'credential': {'auth_token': 'tok'}}]

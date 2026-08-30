@@ -51,12 +51,13 @@ class TestObsidianTool(OTestCase):
     """Verify schemas, binding, dispatch, retry, and typed failure normalization."""
 
     def test_exposes_exact_function_surface(self) -> None:
-        """Expose exactly list/read/write/append, marking reads read-only."""
+        """Expose list/read/write/append/status, marking reads and status read-only."""
         functions = {fn.name: fn for fn in ObsidianTool().functions(_make_ctx())}
 
-        self.assertEqual(set(functions), {'list', 'read', 'write', 'append'})
+        self.assertEqual(set(functions), {'list', 'read', 'write', 'append', 'status'})
         self.assertTrue(functions['list'].readonly)
         self.assertTrue(functions['read'].readonly)
+        self.assertTrue(functions['status'].readonly)
         self.assertFalse(functions['write'].readonly)
         self.assertFalse(functions['append'].readonly)
 
@@ -66,7 +67,7 @@ class TestObsidianTool(OTestCase):
         self.assertEqual(ObsidianTool.credential_type, 'obsidian')
 
     def test_function_schemas_apply_exact_constraints(self) -> None:
-        """Declare the exact closed schemas for all four file operations."""
+        """Declare the exact closed schemas for file operations and status."""
         functions = {fn.name: fn for fn in ObsidianTool().functions(_make_ctx())}
 
         path = {
@@ -105,6 +106,12 @@ class TestObsidianTool(OTestCase):
                     'type': 'object',
                     'properties': {'path': path, 'content': content},
                     'required': ['path', 'content'],
+                    'additionalProperties': False,
+                },
+                'status': {
+                    'type': 'object',
+                    'properties': {},
+                    'required': [],
                     'additionalProperties': False,
                 },
             },
@@ -177,6 +184,12 @@ class TestObsidianTool(OTestCase):
         client = MagicMock()
         client.list_dir.return_value = ['a.md', 'sub']
         client.read_text.return_value = 'hello'
+        client.get_status.return_value = {
+            'vault_id': 'Personal',
+            'ready': True,
+            'initial_sync_complete': True,
+            'sync_process_alive': True,
+        }
         invoke = ObsidianTool().bind(
             _make_ctx(
                 agent_id=uuid4(),
@@ -189,11 +202,22 @@ class TestObsidianTool(OTestCase):
         self.assertEqual(invoke('read', {'path': 'Journal/a.md'}), {'ok': True, 'content': 'hello'})
         self.assertEqual(invoke('write', {'path': 'Journal/a.md', 'content': 'hi'}), {'ok': True})
         self.assertEqual(invoke('append', {'path': 'Journal/a.md', 'content': ' there'}), {'ok': True})
+        self.assertEqual(
+            invoke('status', {}),
+            {
+                'ok': True,
+                'vault_id': 'Personal',
+                'ready': True,
+                'initial_sync_complete': True,
+                'sync_process_alive': True,
+            },
+        )
 
         client.list_dir.assert_called_once_with(vault_id='Personal', path='Journal')
         client.read_text.assert_called_once_with(vault_id='Personal', path='Journal/a.md')
         client.write_text.assert_called_once_with(vault_id='Personal', path='Journal/a.md', content='hi')
         client.append_text.assert_called_once_with(vault_id='Personal', path='Journal/a.md', content=' there')
+        client.get_status.assert_called_once_with(vault_id='Personal')
 
     def test_malformed_direct_invocations_return_safe_config_failures(self) -> None:
         """Normalize missing required arguments and unknown functions at the tool boundary."""
@@ -210,6 +234,7 @@ class TestObsidianTool(OTestCase):
             ('list', {}, 'Obsidian tool arguments are invalid'),
             ('write', {'path': 'a.md'}, 'Obsidian tool arguments are invalid'),
             ('append', {'content': 'x'}, 'Obsidian tool arguments are invalid'),
+            ('status', {'path': 'Journal'}, 'Obsidian tool arguments are invalid'),
             ('delete', {}, 'Unknown Obsidian tool function'),
         )
         for function, arguments, expected_message in cases:
@@ -260,6 +285,8 @@ class TestObsidianTool(OTestCase):
         self.assertFalse(_valid_arguments('write', {'path': 'a.md', 'content': 'x' * 1_000_001}))
         self.assertFalse(_valid_arguments('unknown', {'path': 'a.md'}))
         self.assertFalse(_valid_arguments('list', 'not-a-mapping'))
+        self.assertTrue(_valid_arguments('status', {}))
+        self.assertFalse(_valid_arguments('status', {'path': 'Journal'}))
 
     def test_maps_hard_typed_failures_to_common_kinds(self) -> None:
         """Normalize every non-retryable Obsidian client failure without exposing provider details."""
@@ -376,6 +403,50 @@ class TestObsidianTool(OTestCase):
         )
         self.assertEqual(recorded_delays, [0.0, 0.0])
         self.assertEqual(client.list_dir.call_count, 3)
+
+    def test_status_does_not_retry_sync_pending(self) -> None:
+        """Surface sync_pending from status immediately without sleeping."""
+        client = MagicMock()
+        client.get_status.side_effect = ObsidianSyncPendingError('first sync not complete')
+        recorded_delays: list[float] = []
+        invoke = ObsidianTool(sleep=recorded_delays.append, delays=(0.05, 0.1)).bind(
+            _make_ctx(
+                agent_id=uuid4(),
+                client_factory=cast(Callable[..., ObsidianVaultClientProtocol], lambda **_kwargs: client),
+            ),
+            ToolInstance(id='vault', type='obsidian', config=_CONFIG),
+        )
+
+        result = invoke('status', {})
+
+        self.assertEqual(
+            result,
+            {'ok': False, 'error': {'kind': 'sync_pending', 'message': 'first sync not complete'}},
+        )
+        self.assertEqual(recorded_delays, [])
+        self.assertEqual(client.get_status.call_count, 1)
+
+    def test_status_does_not_retry_unavailable(self) -> None:
+        """Surface unavailable from status immediately without sleeping."""
+        client = MagicMock()
+        client.get_status.side_effect = ObsidianUnavailableError('vault service unreachable')
+        recorded_delays: list[float] = []
+        invoke = ObsidianTool(sleep=recorded_delays.append, delays=(0.05, 0.1)).bind(
+            _make_ctx(
+                agent_id=uuid4(),
+                client_factory=cast(Callable[..., ObsidianVaultClientProtocol], lambda **_kwargs: client),
+            ),
+            ToolInstance(id='vault', type='obsidian', config=_CONFIG),
+        )
+
+        result = invoke('status', {})
+
+        self.assertEqual(
+            result,
+            {'ok': False, 'error': {'kind': 'unavailable', 'message': 'vault service unreachable'}},
+        )
+        self.assertEqual(recorded_delays, [])
+        self.assertEqual(client.get_status.call_count, 1)
 
     def test_default_construction_uses_real_sleep(self) -> None:
         """Default construction wires ``time.sleep`` so production callers stall for real."""

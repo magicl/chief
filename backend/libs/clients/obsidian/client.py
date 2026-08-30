@@ -55,6 +55,28 @@ def _require_nonempty_str(value: str, *, field: str) -> str:
     return value
 
 
+def _parse_status_body(body: dict[str, Any]) -> dict[str, Any]:
+    """Require the vault-service status shape; reject truthy non-bools."""
+    vault_id = body.get('vault_id')
+    ready = body.get('ready')
+    initial_sync_complete = body.get('initial_sync_complete')
+    sync_process_alive = body.get('sync_process_alive')
+    if (
+        not isinstance(vault_id, str)
+        or not vault_id
+        or not isinstance(ready, bool)
+        or not isinstance(initial_sync_complete, bool)
+        or not isinstance(sync_process_alive, bool)
+    ):
+        raise ObsidianUnavailableError('obsidian vault service returned invalid status')
+    return {
+        'vault_id': vault_id,
+        'ready': ready,
+        'initial_sync_complete': initial_sync_complete,
+        'sync_process_alive': sync_process_alive,
+    }
+
+
 class ObsidianVaultClient:
     """Thin wrapper over the Obsidian vault service's `/v1` HTTP API for one agent."""
 
@@ -117,6 +139,10 @@ class ObsidianVaultClient:
                     message = raw_message
         error_cls = _KIND_TO_ERROR.get(kind, ObsidianUnavailableError) if kind is not None else ObsidianUnavailableError
         raise error_cls(message)
+
+    def get_status(self, *, vault_id: str) -> dict[str, Any]:
+        """Fetch vault-level first-sync and process-liveness flags (`GET /v1/vaults/{vault_id}/status`)."""
+        return _parse_status_body(self._request('GET', f'/v1/vaults/{vault_id}/status'))
 
     def ensure_vaults(self, bindings: list[dict[str, Any]]) -> None:
         """Upsert this agent's desired vault bindings (`PUT /v1/agents/{agent_id}/vaults`).

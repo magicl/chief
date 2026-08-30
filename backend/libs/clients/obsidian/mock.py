@@ -57,6 +57,7 @@ class MockObsidianVaultClient:
         self._agent_id = agent_id
         self._vaults: dict[str, _VaultRecord] = {}
         self._bound_roots: dict[str, list[str]] = {}
+        self._sync_alive: dict[str, bool] = {}
         self.ensure_calls: list[list[dict[str, Any]]] = []
         self.released = False
 
@@ -68,6 +69,32 @@ class MockObsidianVaultClient:
         """Flip a seeded vault's first-sync readiness, modeling a late-completing sync."""
         record = self._vaults.setdefault(vault_id, _VaultRecord())
         record.ready = ready
+
+    def set_sync_process_alive(self, vault_id: str, alive: bool) -> None:
+        """Override whether get_status reports the continuous sync child as running."""
+        self._sync_alive[vault_id] = alive
+
+    def get_status(self, *, vault_id: str) -> dict[str, Any]:
+        """Return first-sync flags without the file-op ready/root gate.
+
+        Unseeded vaults match the vault service's all-false 200 body. Seeded
+        vaults use record.ready for both ready and initial_sync_complete;
+        sync_process_alive defaults to True unless set_sync_process_alive.
+        """
+        record = self._vaults.get(vault_id)
+        if record is None:
+            return {
+                'vault_id': vault_id,
+                'ready': False,
+                'initial_sync_complete': False,
+                'sync_process_alive': False,
+            }
+        return {
+            'vault_id': vault_id,
+            'ready': record.ready,
+            'initial_sync_complete': record.ready,
+            'sync_process_alive': self._sync_alive.get(vault_id, True),
+        }
 
     def seed_file(self, vault_id: str, path: str, content: str) -> None:
         """Seed one file's content directly, bypassing readiness/root checks."""
