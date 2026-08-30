@@ -98,6 +98,7 @@ class TestObsidianVaultClientStatus(OTestCase):
             captured['path'] = request.url.path
             captured['params'] = dict(request.url.params)
             captured['auth'] = request.headers.get('Authorization')
+            captured['timeout'] = request.extensions['timeout']
             return httpx.Response(
                 200,
                 json={
@@ -114,6 +115,7 @@ class TestObsidianVaultClientStatus(OTestCase):
         self.assertEqual(captured['path'], '/v1/vaults/Personal/status')
         self.assertEqual(captured['params'], {})
         self.assertEqual(captured['auth'], 'Bearer service-token')
+        self.assertEqual(captured['timeout'], {'connect': 2.0, 'read': 2.0, 'write': 2.0, 'pool': 2.0})
         self.assertEqual(
             body,
             {

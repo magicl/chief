@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from apps.agents.block_gate import blocks_allow_dispatch
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.runner.session_start import StartSessionError, start_trigger_session
 from apps.sessions.models import AgentSession, AgentSessionStatus
@@ -29,6 +30,10 @@ def start_manual_session(agent: Agent, *, initial_message: str = '') -> AgentSes
     ).first()
     if trigger is None:
         raise StartSessionError(f'No active manual trigger for agent {agent.identifier!r}')
+
+    gate = blocks_allow_dispatch(agent, trigger)
+    if not gate.ready:
+        raise StartSessionError(gate.reason or f'Trigger {trigger.name!r} is blocked')
 
     session = start_trigger_session(agent, trigger)
 
@@ -61,6 +66,9 @@ def start_button_session(agent: Agent, trigger: Trigger) -> AgentSession:
     # Budget check outside the atomic block to avoid holding the row lock during spend queries.
     if not budget_allows_dispatch(agent):
         raise StartSessionError(f'Agent {agent.identifier!r} is over budget')
+    gate = blocks_allow_dispatch(agent, trigger)
+    if not gate.ready:
+        raise StartSessionError(gate.reason or f'Trigger {trigger.name!r} is blocked')
 
     with transaction.atomic():
         try:

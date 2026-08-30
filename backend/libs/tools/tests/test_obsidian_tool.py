@@ -24,7 +24,12 @@ from libs.clients.obsidian.errors import (
 )
 from libs.clients.obsidian.protocol import ObsidianVaultClientProtocol
 from libs.tools.context import ToolContext
-from libs.tools.tools.obsidian import ObsidianTool, _valid_arguments
+from libs.tools.tools.clock import ClockTool
+from libs.tools.tools.obsidian import (
+    READINESS_UNAVAILABLE_REASON,
+    ObsidianTool,
+    _valid_arguments,
+)
 
 from olib.py.django.test.cases import OTestCase
 
@@ -49,6 +54,78 @@ def _make_ctx(
 
 class TestObsidianTool(OTestCase):
     """Verify schemas, binding, dispatch, retry, and typed failure normalization."""
+
+    def test_base_tool_readiness_defaults_ready(self) -> None:
+        """Ordinary tools without an external startup dependency are ready by default."""
+        result = ClockTool().readiness(
+            _make_ctx(),
+            ToolInstance(id='clock-instance', type='clock'),
+        )
+
+        self.assertTrue(result.ready)
+        self.assertEqual(result.reason, '')
+
+    def test_readiness_reflects_injected_client_vault_status(self) -> None:
+        """Probe the configured vault through the same injected factory used by file operations."""
+        client = MagicMock()
+        client.get_status.return_value = {'vault_id': 'Personal', 'ready': False}
+        factory = MagicMock(return_value=client)
+        agent_id = uuid4()
+        instance = ToolInstance(id='vault', type='obsidian', config=_CONFIG)
+        ctx = _make_ctx(
+            agent_id=agent_id,
+            client_factory=cast(Callable[..., ObsidianVaultClientProtocol], factory),
+        )
+
+        blocked = ObsidianTool().readiness(ctx, instance)
+        client.get_status.return_value = {'vault_id': 'Personal', 'ready': True}
+        ready = ObsidianTool().readiness(ctx, instance)
+
+        self.assertFalse(blocked.ready)
+        self.assertTrue(ready.ready)
+        factory.assert_called_with(agent_id=str(agent_id), config=_CONFIG, instance_id='vault')
+        client.get_status.assert_called_with(vault_id='Personal')
+
+    def test_readiness_requires_literal_true_status(self) -> None:
+        """Malformed or merely truthy status values cannot open the dispatch gate."""
+        client = MagicMock()
+        factory = cast(Callable[..., ObsidianVaultClientProtocol], lambda **_kwargs: client)
+        tool = ObsidianTool()
+        instance = ToolInstance(id='vault', type='obsidian', config=_CONFIG)
+
+        for status in ({}, {'ready': None}, {'ready': 1}, {'ready': 'true'}):
+            with self.subTest(status=status):
+                client.get_status.return_value = status
+                self.assertFalse(tool.readiness(_make_ctx(agent_id=uuid4(), client_factory=factory), instance).ready)
+
+    def test_readiness_absorbs_client_failures_without_secret_details(self) -> None:
+        """Provider and transport failures return a generic operator-safe not-ready result."""
+        client = MagicMock()
+        client.get_status.side_effect = ObsidianUnavailableError('token abc123 was rejected')
+        instance = ToolInstance(id='vault', type='obsidian', config=_CONFIG)
+
+        result = ObsidianTool().readiness(
+            _make_ctx(
+                agent_id=uuid4(),
+                client_factory=cast(Callable[..., ObsidianVaultClientProtocol], lambda **_kwargs: client),
+            ),
+            instance,
+        )
+
+        self.assertFalse(result.ready)
+        self.assertNotIn('abc123', result.reason)
+        self.assertNotIn('token', result.reason.lower())
+
+    @override_settings(OBSIDIAN_VAULT_URL='', OBSIDIAN_VAULT_TOKEN='')
+    def test_readiness_without_service_url_is_not_ready(self) -> None:
+        """An installation without a configured vault service cannot confirm readiness."""
+        result = ObsidianTool().readiness(
+            _make_ctx(agent_id=uuid4()),
+            ToolInstance(id='vault', type='obsidian', config=_CONFIG),
+        )
+
+        self.assertFalse(result.ready)
+        self.assertEqual(result.reason, READINESS_UNAVAILABLE_REASON)
 
     def test_exposes_exact_function_surface(self) -> None:
         """Expose list/read/write/append/status, marking reads and status read-only."""

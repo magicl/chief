@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from libs.agent_spec.spec import ToolInstance
 
 from libs.tools.context import ToolContext
+from libs.tools.readiness import BlockResult
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,10 @@ class Tool(ABC):
     def should_include(self, ctx: ToolContext) -> bool:
         """Whether this auto-tool should appear for the given context."""
         return True
+
+    def readiness(self, ctx: ToolContext, instance: ToolInstance) -> BlockResult:
+        """Report whether this configured tool can support a newly started session."""
+        return BlockResult(ready=True)
 
     def invoke(self, function: str, arguments: dict[str, Any]) -> Any:
         """Default function dispatch. Used when bind() returns None."""

@@ -66,8 +66,14 @@ class TestScheduleGateIntegration(OTestCase):
         trigger = Trigger.objects.get(agent=agent, agent_config=config, name='sweep')
         return agent, trigger
 
+    @patch('apps.runner.scheduling.blocks_allow_dispatch')
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
-    def test_dispatch_blocked_when_daily_budget_exceeded(self, mock_push: MagicMock) -> None:
+    def test_dispatch_blocked_when_daily_budget_exceeded(
+        self,
+        mock_push: MagicMock,
+        mock_blocks: MagicMock,
+    ) -> None:
+        """A failed budget check short-circuits the later block probes."""
         agent, trigger = self._schedule_agent(
             username='gate-daily-over',
             daily_limit=Decimal('1.00'),
@@ -87,6 +93,7 @@ class TestScheduleGateIntegration(OTestCase):
 
         self.assertFalse(result)
         self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
+        mock_blocks.assert_not_called()
         mock_push.assert_not_called()
 
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
@@ -165,8 +172,14 @@ class TestQueueGateIntegration(OTestCase):
         queue = Queue.objects.get(agent=agent, queue_id='inbox')
         return agent, trigger, queue
 
+    @patch('apps.runner.scheduling.blocks_allow_dispatch')
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
-    def test_queue_dispatch_blocked_when_monthly_budget_exceeded(self, mock_push: MagicMock) -> None:
+    def test_queue_dispatch_blocked_when_monthly_budget_exceeded(
+        self,
+        mock_push: MagicMock,
+        mock_blocks: MagicMock,
+    ) -> None:
+        """Queue dispatch does not probe blocks after the budget gate closes."""
         agent, _trigger, queue = self._queue_agent(
             username='qgate-monthly-over',
             monthly_limit=Decimal('5.00'),
@@ -184,4 +197,5 @@ class TestQueueGateIntegration(OTestCase):
 
         self.assertEqual(stats.queue_sessions, 0)
         self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
+        mock_blocks.assert_not_called()
         mock_push.assert_not_called()

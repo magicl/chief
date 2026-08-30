@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from apps.agents.block_gate import BlockGateResult
 from apps.agents.ingest import persist_agent_config
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind
 from apps.runner.session_lifecycle import (
@@ -16,7 +17,7 @@ from apps.runner.session_lifecycle import (
 )
 from apps.runner.session_start import StartSessionError
 from apps.runner.start import start_button_session, start_manual_session
-from apps.sessions.models import AgentSessionStatus
+from apps.sessions.models import AgentSession, AgentSessionStatus
 from django.contrib.auth import get_user_model
 from libs.agent_spec import AgentConfigSpec, LLMSpec, TriggerSpec
 
@@ -39,6 +40,26 @@ def _button_agent_config(*, triggers: list[TriggerSpec] | None = None) -> AgentC
 
 
 class TestStartManualSession(OTestCase):
+    def _manual_agent(self) -> Agent:
+        """Create an active agent with a current manual trigger."""
+        user = get_user_model().objects.create_user(username='manual-start', password='x')
+        agent = Agent.objects.create(
+            user_id=user.pk,
+            name='Manual',
+            identifier='manual-start-agent',
+            status=AgentStatus.ACTIVE,
+        )
+        persist_agent_config(
+            agent,
+            AgentConfigSpec(
+                llm=LLMSpec(provider='openai', model='gpt-5.4-mini'),
+                system_prompt='hello',
+                triggers=[TriggerSpec(name='manual', kind='manual')],
+            ),
+            source_rev='manual-start-v1',
+        )
+        return agent
+
     def test_disabled_agent_is_rejected(self) -> None:
         user = get_user_model().objects.create_user(username='manual-disabled', password='x')
         agent = Agent.objects.create(
@@ -59,6 +80,17 @@ class TestStartManualSession(OTestCase):
 
         with self.assertRaisesRegex(StartSessionError, 'disabled'):
             start_manual_session(agent)
+
+    @patch('apps.runner.start.blocks_allow_dispatch')
+    def test_manual_block_reason_prevents_session_start(self, mock_gate: MagicMock) -> None:
+        """A manual trigger reports its first block reason without creating a session."""
+        agent = self._manual_agent()
+        mock_gate.return_value = BlockGateResult(ready=False, reason='vault is syncing')
+
+        with self.assertRaisesRegex(StartSessionError, 'vault is syncing'):
+            start_manual_session(agent)
+
+        self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
 
 
 class TestStartButtonSession(OTestCase):
@@ -111,6 +143,37 @@ class TestStartButtonSession(OTestCase):
 
         with self.assertRaisesRegex(StartSessionError, 'over budget'):
             start_button_session(agent, trigger)
+
+    @patch('apps.runner.start.blocks_allow_dispatch')
+    @patch('apps.runner.budget_gate.budget_allows_dispatch', return_value=True)
+    def test_button_block_reason_prevents_session_start(
+        self,
+        _mock_budget: MagicMock,
+        mock_gate: MagicMock,
+    ) -> None:
+        """A button trigger reports its block reason after the budget gate passes."""
+        agent, trigger = self._button_agent()
+        mock_gate.return_value = BlockGateResult(ready=False, reason='vault is syncing')
+
+        with self.assertRaisesRegex(StartSessionError, 'vault is syncing'):
+            start_button_session(agent, trigger)
+
+        self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
+
+    @patch('apps.runner.start.blocks_allow_dispatch')
+    @patch('apps.runner.budget_gate.budget_allows_dispatch', return_value=False)
+    def test_button_budget_short_circuits_block_probe(
+        self,
+        _mock_budget: MagicMock,
+        mock_gate: MagicMock,
+    ) -> None:
+        """An exhausted budget avoids a potentially remote readiness probe."""
+        agent, trigger = self._button_agent()
+
+        with self.assertRaisesRegex(StartSessionError, 'over budget'):
+            start_button_session(agent, trigger)
+
+        mock_gate.assert_not_called()
 
     @patch('apps.runner.scheduling.trigger_has_capacity', return_value=False)
     def test_start_button_rejects_when_at_capacity(self, _mock_capacity: MagicMock) -> None:

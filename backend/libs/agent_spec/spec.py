@@ -11,7 +11,7 @@ import types
 import typing
 from decimal import Decimal
 from functools import lru_cache
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -101,6 +101,26 @@ class SessionLimitsSpec(SpecModel):
         return v
 
 
+class ToolReadyBlockSpec(SpecModel):
+    """Block a trigger until one declared tool instance reports it is ready.
+
+    ``tool`` names a ``tools[].id`` on the same spec; the cross-reference is checked by
+    ``AgentConfigSpec`` because a trigger alone cannot see the tool list.
+    """
+
+    # Unknown keys are rejected so a typo (e.g. a misspelled option) fails ingestion instead
+    # of quietly widening the gate at runtime.
+    model_config = ConfigDict(extra='forbid')
+
+    kind: Literal['tool_ready']
+    tool: str = Field(pattern=_INSTANCE_ID_RE.pattern)
+
+
+# Discriminated on ``kind`` so an unknown kind is an ingestion failure rather than a
+# condition that silently never blocks. Future kinds join this union; nothing else changes.
+BlockSpec = Annotated[ToolReadyBlockSpec, Field(discriminator='kind')]
+
+
 class TriggerSpec(SpecModel):
     name: str
     kind: Literal['schedule', 'manual', 'agent', 'queue', 'button']
@@ -111,6 +131,7 @@ class TriggerSpec(SpecModel):
     max_sessions: int | None = None
     max_iterations: int | None = None
     max_cost_usd: Decimal | None = None
+    blocks: list[BlockSpec] = Field(default_factory=list)
 
     @field_validator('button_text')
     @classmethod
@@ -356,4 +377,16 @@ class AgentConfigSpec(SpecModel):
                 raise ValueError(
                     f"trigger {trigger.name!r} references unknown queue {trigger.queue!r}",
                 )
+        return self
+
+    @model_validator(mode='after')
+    def _trigger_block_refs(self) -> AgentConfigSpec:
+        """Ensure tool_ready blocks reference tool instances declared in tools[]."""
+        tool_ids = {tool.id for tool in self.tools}
+        for trigger in self.triggers:
+            for block in trigger.blocks:
+                if isinstance(block, ToolReadyBlockSpec) and block.tool not in tool_ids:
+                    raise ValueError(
+                        f"trigger {trigger.name!r} block references unknown tool {block.tool!r}",
+                    )
         return self

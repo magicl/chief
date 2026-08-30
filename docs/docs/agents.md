@@ -213,9 +213,66 @@ triggers:
 | `max_sessions` | int | Max concurrent sessions; defaults to `1` for schedule/queue, `null` for manual and button |
 | `max_iterations` | int | Optional per-session iteration cap; must be at least `1` |
 | `max_cost_usd` | decimal | Optional positive per-session cost cap in USD |
+| `blocks` | list of block conditions | Optional gates that must all pass before a session starts (see Block conditions) |
 
 Trigger limits only narrow the agent-level `limits` and server defaults. Chief uses
 the lowest configured value at the global, agent, and trigger levels.
+
+### Block conditions
+
+`blocks` holds conditions that must pass before Chief starts a session for the
+trigger. Omitting `blocks` — or setting it to `[]` — keeps the trigger's existing
+behavior, so configs written before this field keep working unchanged.
+
+```yaml
+tools:
+  - id: journal-vault
+    type: obsidian
+    credential_ref: obsidian-sync
+    config:
+      vault: journal
+
+queues:
+  - id: journal
+
+triggers:
+  - name: journal-worker
+    kind: queue
+    queue: journal
+    prompt: Process the next journal item.
+    blocks:
+      - kind: tool_ready
+        tool: journal-vault
+```
+
+Semantics:
+
+- **Ordered AND.** Every entry must report ready. Chief evaluates entries in list
+  order and short-circuits on the first one that is not ready, so put the cheapest
+  or most likely blocker first.
+- **Fail closed.** An unknown condition handler, a failed probe, or a timeout counts
+  as not ready; the trigger does not start a session.
+- **Blocked dispatch is a skip, not a failure.** A blocked `queue` trigger leaves its
+  items available and retries on the next dispatch; a blocked `schedule` trigger skips
+  that cron tick without catching up; blocked `manual` and `button` starts report the
+  block reason instead of creating a session.
+
+#### `tool_ready`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | `tool_ready` | Required condition kind |
+| `tool` | string | Required `tools[].id` declared on this same agent |
+
+`tool_ready` waits until the named tool instance reports that it can support a new
+session. Most tools are always ready; the `obsidian` tool is ready only once its vault
+service reports that the initial sync finished, which keeps a journal or notes agent
+from working against an empty vault.
+
+The reference is strict: `tool` must match a `tools[].id` on the same agent, unknown
+`kind` values are rejected, and unknown fields inside a condition are rejected. All
+three are config validation failures at save or disk-sync time rather than conditions
+that silently never block.
 
 ---
 

@@ -78,6 +78,49 @@ triggers:
             validate_agent_config_yaml(raw)
         self.assertTrue(any('cron' in item.path for item in ctx.exception.errors))
 
+    def test_trigger_blocks_accepted_in_yaml_validation(self) -> None:
+        """Accept a supported block that references a declared tool in YAML."""
+        raw = """
+schema_version: 4
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+system_prompt: hi
+tools:
+  - id: clock
+    type: clock
+triggers:
+  - name: triage
+    kind: button
+    button_text: Triage
+    prompt: Triage now.
+    blocks:
+      - kind: tool_ready
+        tool: clock
+"""
+        parsed = validate_agent_config_yaml(raw)
+        self.assertEqual(parsed.triggers[0].blocks[0].tool, 'clock')
+
+    def test_unknown_block_kind_rejected_in_yaml_validation(self) -> None:
+        """Report an unsupported block kind through the YAML validation boundary."""
+        raw = """
+schema_version: 4
+llm:
+  provider: openai
+  model: gpt-5.4-mini
+system_prompt: hi
+triggers:
+  - name: triage
+    kind: button
+    button_text: Triage
+    prompt: Triage now.
+    blocks:
+      - kind: not_a_block_kind
+"""
+        with self.assertRaises(ConfigValidationError) as ctx:
+            validate_agent_config_yaml(raw)
+        self.assertTrue(any('blocks' in item.path for item in ctx.exception.errors))
+
     def test_six_field_cron_rejected_in_yaml_validation(self) -> None:
         raw = """
 schema_version: 2

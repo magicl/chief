@@ -11,6 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+from apps.agents.block_gate import BlockGateResult
 from apps.agents.ingest import persist_agent_config
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.queues.models import Queue, QueueItem, QueueItemStatus
@@ -253,6 +254,29 @@ class TestDispatchScheduleTriggers(OTestCase):
         trigger.refresh_from_db()
         self.assertEqual(trigger.last_fired_at, fire_at)
 
+    @patch('apps.runner.scheduling.blocks_allow_dispatch')
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
+    def test_blocked_dispatch_records_tick_without_queue_beat_catch_up(
+        self,
+        mock_push: MagicMock,
+        mock_blocks: MagicMock,
+    ) -> None:
+        """A blocked cron tick is recorded and is not retried by the queue beat."""
+        agent, trigger = self._schedule_agent()
+        fire_at = datetime(2026, 7, 5, 14, 0, tzinfo=UTC)
+        mock_blocks.return_value = BlockGateResult(ready=False, reason='vault is syncing')
+
+        started = dispatch_schedule_trigger(trigger_id=trigger.id, now=fire_at)
+        queue_stats = dispatch_queue_triggers()
+
+        self.assertFalse(started)
+        self.assertEqual(queue_stats.queue_sessions, 0)
+        self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
+        trigger.refresh_from_db()
+        self.assertEqual(trigger.last_fired_at, fire_at)
+        mock_blocks.assert_called_once_with(agent, trigger)
+        mock_push.assert_not_called()
+
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
     def test_second_dispatch_at_capacity_does_not_start_another_session(self, mock_push: MagicMock) -> None:
         agent, trigger = self._schedule_agent()
@@ -409,6 +433,47 @@ class TestDispatchQueueTriggers(OTestCase):
         self.assertIn(QUEUE_PROMPT, message)
         self.assertIn(f'item_id: {put_result.item_id}', message)
         self.assertIn(json.dumps({'subject': 'hello'}, indent=2, sort_keys=True), message)
+
+    @patch('apps.runner.scheduling.blocks_allow_dispatch')
+    @patch('apps.runner.dispatch.push_chat_and_dispatch')
+    def test_blocked_targeted_dispatch_retries_on_queue_beat_when_ready(
+        self,
+        mock_push: MagicMock,
+        mock_blocks: MagicMock,
+    ) -> None:
+        """A blocked on-put attempt leaves work for the existing queue beat retry."""
+        agent, trigger, queue = self._queue_agent(
+            username='queue-blocked',
+            identifier='queue-blocked-agent',
+        )
+        put_result = commands.put_item(queue=queue, payload={'subject': 'hello'})
+
+        def block_first_attempt(_agent: Agent, _trigger: Trigger) -> BlockGateResult:
+            """Block the targeted attempt, then allow the periodic retry."""
+            if mock_blocks.call_count == 1:
+                return BlockGateResult(ready=False, reason='vault is syncing')
+            return BlockGateResult(ready=True)
+
+        mock_blocks.side_effect = block_first_attempt
+
+        blocked_stats = dispatch_queue_triggers_for_queue(queue_pk=str(queue.pk))
+
+        item = QueueItem.objects.get(pk=put_result.item_id)
+        self.assertEqual(blocked_stats.queue_sessions, 0)
+        self.assertEqual(item.status, QueueItemStatus.AVAILABLE)
+        self.assertIsNone(item.taken_by_session_id)
+        self.assertFalse(AgentSession.objects.filter(agent=agent).exists())
+        mock_push.assert_not_called()
+
+        ready_stats = dispatch_queue_triggers()
+
+        item.refresh_from_db()
+        self.assertEqual(ready_stats.queue_sessions, 1)
+        self.assertEqual(item.status, QueueItemStatus.TAKEN)
+        session = AgentSession.objects.get(agent=agent, trigger_ref=trigger.id)
+        self.assertEqual(item.taken_by_session_id, session.id)
+        self.assertGreaterEqual(mock_blocks.call_count, 2)
+        mock_push.assert_called_once()
 
     @patch('apps.runner.dispatch.push_chat_and_dispatch')
     def test_max_sessions_capacity_skips_second_dispatch(self, mock_push: MagicMock) -> None:

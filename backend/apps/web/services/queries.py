@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from apps.agents.block_gate import BlockGateResult, blocks_allow_dispatch
 from apps.agents.models import Agent, AgentStatus, Trigger, TriggerKind, TriggerStatus
 from apps.agents.services.config_sync import config_source_label
 from apps.sessions.models import AgentSession
@@ -83,11 +84,21 @@ def get_dashboard_data(*, user_id: int | None) -> DashboardData:
     )
 
 
-def list_active_button_triggers(agent: Agent) -> list[Trigger]:
-    """Return active button triggers on the agent's current config, in YAML order."""
+@dataclass(frozen=True)
+class ButtonTriggerInfo:
+    """Render-safe button trigger state including its current block verdict."""
+
+    id: UUID
+    button_text: str
+    blocked: bool
+    block_reason: str
+
+
+def list_active_button_triggers(agent: Agent) -> list[ButtonTriggerInfo]:
+    """Return current button triggers with render-time readiness in YAML order."""
     if agent.status != AgentStatus.ACTIVE or agent.current_config is None:
         return []
-    return list(
+    triggers = list(
         Trigger.objects.filter(
             agent=agent,
             agent_config=agent.current_config,
@@ -95,14 +106,49 @@ def list_active_button_triggers(agent: Agent) -> list[Trigger]:
             status=TriggerStatus.ACTIVE,
         ).order_by('id')
     )
+    results: list[ButtonTriggerInfo] = []
+    for trigger in triggers:
+        gate = blocks_allow_dispatch(agent, trigger)
+        results.append(
+            ButtonTriggerInfo(
+                id=trigger.id,
+                button_text=str(trigger.spec['button_text']),
+                blocked=not gate.ready,
+                block_reason=gate.reason,
+            )
+        )
+    return results
+
+
+def get_manual_trigger_gate(agent: Agent) -> BlockGateResult:
+    """Return the active manual trigger's block verdict for new-session controls."""
+    if agent.status != AgentStatus.ACTIVE or agent.current_config is None:
+        return BlockGateResult(ready=True)
+    trigger = Trigger.objects.filter(
+        agent=agent,
+        agent_config=agent.current_config,
+        kind=TriggerKind.MANUAL,
+        status=TriggerStatus.ACTIVE,
+    ).first()
+    if trigger is None:
+        return BlockGateResult(ready=True)
+    return blocks_allow_dispatch(agent, trigger)
 
 
 def get_active_button_trigger(agent: Agent, trigger_id: UUID) -> Trigger:
     """Return one active button trigger on the agent's current config, or raise Http404."""
-    for trigger in list_active_button_triggers(agent):
-        if trigger.id == trigger_id:
-            return trigger
-    raise Http404('Trigger not found')
+    if agent.status != AgentStatus.ACTIVE or agent.current_config is None:
+        raise Http404('Trigger not found')
+    try:
+        return Trigger.objects.get(
+            id=trigger_id,
+            agent=agent,
+            agent_config=agent.current_config,
+            kind=TriggerKind.BUTTON,
+            status=TriggerStatus.ACTIVE,
+        )
+    except Trigger.DoesNotExist as exc:
+        raise Http404('Trigger not found') from exc
 
 
 def get_owned_agent(user_id: int, agent_id: UUID) -> Agent:

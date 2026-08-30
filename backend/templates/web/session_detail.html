@@ -34,7 +34,14 @@
   <a href="{{ url('agent_detail', kwargs={'agent_id': agent.id}) }}" class="frame-btn muted-btn" style="text-decoration:none;">Back to agent</a>
   <form method="post" action="{{ url('start_agent_session', kwargs={'agent_id': agent.id}) }}">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-    <button type="submit" class="frame-btn">New session</button>
+    <button
+      type="submit"
+      class="frame-btn"
+      {% if manual_blocked %}disabled aria-describedby="new-session-block-reason"{% endif %}
+    >New session</button>
+    {% if manual_blocked %}
+    <span id="new-session-block-reason" class="muted" style="font-size:.8rem;">{{ manual_block_reason }}</span>
+    {% endif %}
   </form>
   <section class="session-control card" aria-label="Session controls">
     <h3 class="session-control-title">Session</h3>
