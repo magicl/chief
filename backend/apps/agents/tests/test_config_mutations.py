@@ -6,10 +6,12 @@
 
 from apps.agents.services.config_mutations import (
     ConfigMutationError,
+    _tool_readiness_blocks,
     apply_config_mutation,
 )
 from libs.agent_spec import load_example
 from libs.agent_spec.yaml_dump import dump_agent_config_spec
+from libs.agent_spec.yaml_roundtrip import load_yaml_document
 
 from olib.py.django.test.cases import OTestCase
 
@@ -189,3 +191,150 @@ queues:
                 VALUELESS_COLLECTIONS_YAML,
                 {'action': 'remove_queue', 'id': 'inbox'},
             )
+
+
+READINESS_TOOLS_YAML = """schema_version: 4
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+system_prompt: |
+  Process work.
+tools:
+  - id: first-vault
+    type: obsidian
+    credential_ref: obsidian-sync
+    config:
+      vault: first
+      roots: [Journal]
+  - id: clock
+    type: clock
+    allow: [now]
+  - id: second-vault
+    type: obsidian
+    credential_ref: obsidian-sync
+    config:
+      vault: second
+      roots: [Notes]
+triggers:
+  - name: manual
+    kind: manual
+queues:
+  - id: inbox
+"""
+
+ALWAYS_READY_TOOLS_YAML = """schema_version: 4
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+system_prompt: |
+  Process work.
+tools:
+  - id: clock
+    type: clock
+    allow: [now]
+triggers:
+  - name: manual
+    kind: manual
+queues:
+  - id: inbox
+"""
+
+
+class TriggerReadinessBlockTests(OTestCase):
+    """Add trigger helpers gate queue/schedule sessions on readiness-reporting tools."""
+
+    def test_add_schedule_trigger_gates_on_readiness_tools_in_document_order(self) -> None:
+        """Schedule helpers gate on each readiness-reporting tool in YAML order."""
+        updated = apply_config_mutation(
+            READINESS_TOOLS_YAML,
+            {'action': 'add_trigger', 'name': 'sweep', 'kind': 'schedule', 'cron': '0 * * * *'},
+        )
+        trigger = load_yaml_document(updated)['triggers'][-1]
+        self.assertEqual(
+            [dict(block) for block in trigger['blocks']],
+            [
+                {'kind': 'tool_ready', 'tool': 'first-vault'},
+                {'kind': 'tool_ready', 'tool': 'second-vault'},
+            ],
+        )
+
+    def test_add_queue_trigger_gates_on_readiness_tools(self) -> None:
+        """Queue helpers gate on readiness-reporting tools already in the YAML."""
+        updated = apply_config_mutation(
+            READINESS_TOOLS_YAML,
+            {'action': 'add_trigger', 'name': 'worker', 'kind': 'queue', 'queue': 'inbox'},
+        )
+        trigger = load_yaml_document(updated)['triggers'][-1]
+        self.assertEqual(
+            [dict(block) for block in trigger['blocks']],
+            [
+                {'kind': 'tool_ready', 'tool': 'first-vault'},
+                {'kind': 'tool_ready', 'tool': 'second-vault'},
+            ],
+        )
+
+    def test_add_trigger_with_only_always_ready_tools_omits_blocks(self) -> None:
+        """Always-ready tools do not add an empty or ineffective block list."""
+        updated = apply_config_mutation(
+            ALWAYS_READY_TOOLS_YAML,
+            {'action': 'add_trigger', 'name': 'sweep', 'kind': 'schedule', 'cron': '0 * * * *'},
+        )
+        self.assertNotIn('blocks', load_yaml_document(updated)['triggers'][-1])
+
+    def test_manual_button_and_agent_triggers_omit_readiness_blocks(self) -> None:
+        """Manual, button, and agent helper triggers remain ungated even when readiness tools exist."""
+        for mutation in (
+            {'action': 'add_trigger', 'name': 'manual-two', 'kind': 'manual'},
+            {
+                'action': 'add_trigger',
+                'name': 'button',
+                'kind': 'button',
+                'button_text': 'Run',
+                'prompt': 'Run now.',
+            },
+            {
+                'action': 'add_trigger',
+                'name': 'child',
+                'kind': 'agent',
+                'prompt': 'Run this child task.',
+            },
+        ):
+            with self.subTest(kind=mutation['kind']):
+                updated = apply_config_mutation(READINESS_TOOLS_YAML, mutation)
+                self.assertNotIn('blocks', load_yaml_document(updated)['triggers'][-1])
+
+    def test_add_schedule_trigger_with_valueless_tools_omits_blocks(self) -> None:
+        """A valueless tools key behaves like an empty list during readiness scanning."""
+        updated = apply_config_mutation(
+            VALUELESS_COLLECTIONS_YAML,
+            {'action': 'add_trigger', 'name': 'sweep', 'kind': 'schedule', 'cron': '0 * * * *'},
+        )
+        self.assertNotIn('blocks', load_yaml_document(updated)['triggers'][-1])
+
+    def test_readiness_block_scan_skips_rows_the_spec_would_reject(self) -> None:
+        """Rows that never reach the validator (non-mapping, partial, unknown type) are skipped.
+
+        Exercised directly because such a document cannot survive whole-spec validation,
+        yet the scan runs before that check and must not raise on half-typed YAML.
+        """
+        doc = load_yaml_document(
+            """tools:
+  - just-a-string
+  - id: no-type
+  - type: obsidian
+  - id: unknown-tool
+    type: not-registered
+  - id: nested-type
+    type:
+      nested: mapping
+  - id:
+      not: a-string
+    type: obsidian
+  - id: list-type
+    type: [obsidian]
+  - id: real-vault
+    type: obsidian
+""",
+        )
+        blocks = _tool_readiness_blocks(doc)
+        self.assertEqual([dict(block) for block in blocks], [{'kind': 'tool_ready', 'tool': 'real-vault'}])

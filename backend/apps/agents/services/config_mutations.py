@@ -16,7 +16,13 @@ from libs.agent_spec.yaml_roundtrip import (
     load_yaml_document,
     plain_dict,
 )
+from libs.tools.base import Tool
+from libs.tools.registry import get_tool
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+# Design allowlist: only queue and schedule helpers auto-inject tool_ready blocks.
+# Manual, button, and agent remain ungated; later tools never backfill existing triggers.
+_AUTO_GATED_TRIGGER_KINDS = frozenset({'queue', 'schedule'})
 
 
 class ConfigMutationError(ValueError):
@@ -75,6 +81,32 @@ def _trigger_entry(mutation: dict[str, Any]) -> CommentedMap:
     if max_sessions is not None:
         entry['max_sessions'] = int(max_sessions)
     return entry
+
+
+def _tool_readiness_blocks(doc: CommentedMap) -> CommentedSeq:
+    """Build ordered ``tool_ready`` blocks for tool rows whose type probes readiness.
+
+    A tool type reports readiness when it overrides ``Tool.readiness``; gating on
+    always-ready types would add conditions that can never block. The scan runs before
+    whole-document validation, so half-written rows (non-mapping, missing or non-string
+    ``id`` or ``type``, unregistered type) are skipped rather than raising here.
+    """
+    blocks: CommentedSeq = CommentedSeq()
+    for item in _entries(doc, 'tools'):
+        if not isinstance(item, dict):
+            continue
+        tool_id = item.get('id')
+        tool_type = item.get('type')
+        if not isinstance(tool_id, str) or not isinstance(tool_type, str):
+            continue
+        tool = get_tool(tool_type)
+        if tool is None or type(tool).readiness is Tool.readiness:
+            continue
+        block: CommentedMap = CommentedMap()
+        block['kind'] = 'tool_ready'
+        block['tool'] = tool_id
+        blocks.append(block)
+    return blocks
 
 
 def _queue_entry(mutation: dict[str, Any]) -> CommentedMap:
@@ -138,7 +170,14 @@ def _apply_mutation_to_doc(doc: CommentedMap, mutation: dict[str, Any]) -> None:
 
     if action == 'add_trigger':
         triggers = _entries_for_append(doc, 'triggers')
-        triggers.append(_trigger_entry(mutation))
+        trigger = _trigger_entry(mutation)
+        # Gate unattended kinds on tools already declared; later tool additions never
+        # backfill an existing trigger, so this is a one-shot default at insert time.
+        if mutation['kind'] in _AUTO_GATED_TRIGGER_KINDS:
+            blocks = _tool_readiness_blocks(doc)
+            if blocks:
+                trigger['blocks'] = blocks
+        triggers.append(trigger)
         return
 
     if action == 'remove_trigger':

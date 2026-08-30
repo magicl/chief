@@ -1,7 +1,7 @@
 # Config helper auto-gates queue/schedule triggers on tool readiness — Design
 
 **Branch:** `feat/2026-08-30-helper-trigger-tool-ready`
-Status: **plan**
+Status: **review**
 
 Architecture reference: [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) · YAML helpers from
 [Agent configuration UI](../2026-07-04-agent-config-ui/2026-07-04-agent-config-ui-design.md) ·
