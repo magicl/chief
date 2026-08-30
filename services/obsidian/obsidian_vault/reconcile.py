@@ -81,6 +81,8 @@ def apply_bindings_snapshot(
     """Replace local bindings from `agents` and align supervisors with the result.
 
     Returns ``(needs_start, released)`` from the store for tests/observability.
+    Supervisor starts own single-flight and run without the store's file lock;
+    release still rechecks references while holding that lock before stopping.
     """
     credentials_by_vault: dict[str, dict[str, Any]] = {}
     for entry in agents:
@@ -104,13 +106,15 @@ def apply_bindings_snapshot(
         encryption_password = credential.get('encryption_password')
         if encryption_password is not None and not isinstance(encryption_password, str):
             encryption_password = None
+        # Supervisor single-flight owns start serialization without holding
+        # the store's file lock across potentially long subprocess waits.
+        supervisor.ensure_vault(
+            vault_id,
+            auth_token=auth_token,
+            encryption_password=encryption_password,
+        )
         with store.lock_for(vault_id):
-            supervisor.ensure_vault(
-                vault_id,
-                auth_token=auth_token,
-                encryption_password=encryption_password,
-            )
-            if supervisor.is_initial_sync_complete(vault_id):
+            if store.has_references(vault_id) and supervisor.is_initial_sync_complete(vault_id):
                 store.mark_vault_ready(vault_id)
 
     return needs_start, released

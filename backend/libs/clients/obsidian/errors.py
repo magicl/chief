@@ -7,7 +7,9 @@
 Mirrors the vault service's normative error body kinds (see
 `services/obsidian/obsidian_vault/app.py`): `sync_pending`, `outside_root`,
 `not_found`, `forbidden`, `auth`, `config`, `unavailable`. `sync_pending` and
-`unavailable` are retryable by callers (e.g. the `obsidian` tool).
+`unavailable` may be transient and retryable to a higher-level caller. That is
+not a client or tool retry policy: the HTTP client and `obsidian` tool each
+make one attempt and return the first typed result.
 """
 
 from __future__ import annotations
@@ -18,7 +20,9 @@ class ObsidianVaultError(Exception):
 
 
 class ObsidianSyncPendingError(ObsidianVaultError):
-    """The vault has not completed its first Sync yet (kind ``sync_pending``, retryable)."""
+    """Raised for kind ``sync_pending``: list/read before first Sync has started
+    (including after stop/reset), or write/append before first full Sync completes.
+    """
 
 
 class ObsidianOutsideRootError(ObsidianVaultError):
@@ -42,4 +46,6 @@ class ObsidianConfigError(ObsidianVaultError):
 
 
 class ObsidianUnavailableError(ObsidianVaultError):
-    """The vault service is unreachable or failed unexpectedly (kind ``unavailable``, retryable)."""
+    """Raised for kind ``unavailable``: a hard ``ob`` first-sync failure, an
+    unreachable vault service, or an unexpected service failure.
+    """

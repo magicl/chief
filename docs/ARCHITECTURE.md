@@ -552,6 +552,30 @@ password) are a normal `apps.keys` credential referenced by `credential_ref`.
 **pulls on startup** to rebuild its in-memory binding map after restart — credentials
 are never persisted on the vault volume. Incremental materialize/delete notifications
 continue after that. File IO walks paths with `O_NOFOLLOW` descriptor ops so symlinks
-cannot escape configured roots. Until a vault's initial full Sync completes, the vault
-service returns a retryable `sync_pending` error that the tool stalls/retries on with
-backoff.
+cannot escape configured roots.
+
+The first full Sync remains the readiness boundary. The supervisor publishes the
+`.sync-ready` marker only after that Sync completes; this is what `status.ready` and
+a trigger `blocks` entry with `kind: tool_ready` and `tool: <instance id>` mean
+(complete example: `docs/docs/agents.md` Block conditions). Use that trigger gate
+when a session must not start before the initial checkout is complete. Readiness is
+not a claim that continuous Sync is currently caught up with every remote change.
+
+Once ensure has started and no hard first-sync failure occurred, `list` and `read`
+may inspect the checkout during `SYNCING` or after a timeout leaves it `PARTIAL`.
+That checkout is intentionally partial and racy: Sync can change it concurrently,
+missing paths return `not_found`, and the configured-root gate is always enforced.
+`NOT_STARTED` (ensure never started, or after stop/reset) returns `sync_pending`
+for list/read; a hard first-sync failure (`FAILED`) returns `unavailable`.
+
+`write` and `append` require the first full Sync. They return `sync_pending` while
+the vault is `SYNCING`, `PARTIAL`, or `NOT_STARTED`, and `unavailable` after a
+hard failure (`FAILED`). There is no tool retry or sleep; the first typed result
+is returned. The HTTP client still waits up to its configured request timeout if
+the vault service hangs. `sync_pending` and `unavailable` may still be transient
+and retryable to a higher-level caller; that is not a client or tool retry policy.
+
+Supervisor state transitions use a short state lock, while one-shot subprocess waits
+run outside both that lock and the per-vault file-mutation lock. Reads intentionally
+take no file lock so partial checkout inspection stays available; mutations retain
+the per-vault lock.

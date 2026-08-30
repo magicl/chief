@@ -7,34 +7,120 @@ import unittest
 import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
 from obsidian_vault.bindings import SyncPendingError, VaultBindingStore
-from obsidian_vault.files import VaultFileService
+from obsidian_vault.files import VaultFileService, VaultUnavailableError
 from obsidian_vault.paths import PathGateError, open_file_under_roots
+from obsidian_vault.supervisor import FakeSupervisor, VaultSyncState
 
 
 class TestVaultFileService(unittest.TestCase):
     def setUp(self) -> None:
+        """Create a bound vault whose checkout is partial but directly seedable."""
         stack = contextlib.ExitStack()
         self.addCleanup(stack.close)
         self.vault_root = Path(stack.enter_context(TemporaryDirectory()))
         self.store = VaultBindingStore()
+        self.supervisor = FakeSupervisor(auto_complete=False)
         self.store.ensure_agent(
             'agent-1',
             [{'vault_id': 'Personal', 'roots': ['Journal'], 'credential': {'auth_token': 'tok'}}],
         )
-        self.files = VaultFileService(self.store, vault_root_for=lambda vault_id: self.vault_root)
+        self.supervisor.ensure_vault('Personal', auth_token='tok')
+        self.files = VaultFileService(
+            self.store,
+            vault_root_for=lambda vault_id: self.vault_root,
+            sync_state_for=self.supervisor.sync_state,
+        )
 
     def _mark_ready(self) -> None:
+        """Move both supervisor and binding-store gates to ready."""
+        self.supervisor.complete('Personal')
         self.store.mark_vault_ready('Personal')
 
-    def test_read_before_ready_raises_sync_pending(self) -> None:
-        with self.assertRaises(SyncPendingError):
-            self.files.read_text('agent-1', 'Personal', 'Journal/note.md')
+    def test_partial_checkout_allows_list_and_read(self) -> None:
+        """A started partial checkout exposes whatever content is already present."""
+        journal = self.vault_root / 'Journal'
+        journal.mkdir()
+        (journal / 'note.md').write_text('partial', encoding='utf-8')
 
-    def test_list_dir_before_ready_raises_sync_pending(self) -> None:
+        self.assertEqual(self.files.list_dir('agent-1', 'Personal', 'Journal'), ['note.md'])
+        self.assertEqual(self.files.read_text('agent-1', 'Personal', 'Journal/note.md'), 'partial')
+
+    def test_partial_checkout_keeps_write_and_append_pending(self) -> None:
+        """Mutations remain blocked until the binding store records full readiness."""
         with self.assertRaises(SyncPendingError):
-            self.files.list_dir('agent-1', 'Personal', 'Journal')
+            self.files.write_text('agent-1', 'Personal', 'Journal/note.md', 'write')
+        with self.assertRaises(SyncPendingError):
+            self.files.append_text('agent-1', 'Personal', 'Journal/note.md', 'append')
+
+    def test_syncing_checkout_allows_reads_but_keeps_mutations_pending(self) -> None:
+        """An in-flight first sync exposes partial reads without enabling mutations."""
+        journal = self.vault_root / 'Journal'
+        journal.mkdir()
+        (journal / 'note.md').write_text('syncing', encoding='utf-8')
+        files = VaultFileService(
+            self.store,
+            vault_root_for=lambda vault_id: self.vault_root,
+            sync_state_for=lambda vault_id: VaultSyncState.SYNCING,
+        )
+
+        self.assertEqual(files.list_dir('agent-1', 'Personal', 'Journal'), ['note.md'])
+        self.assertEqual(files.read_text('agent-1', 'Personal', 'Journal/note.md'), 'syncing')
+        with self.assertRaises(SyncPendingError):
+            files.write_text('agent-1', 'Personal', 'Journal/note.md', 'write')
+        with self.assertRaises(SyncPendingError):
+            files.append_text('agent-1', 'Personal', 'Journal/note.md', 'append')
+
+    def test_unknown_sync_state_rejects_every_file_operation(self) -> None:
+        """An impossible supervisor state fails closed as vault unavailable."""
+        files = VaultFileService(
+            self.store,
+            vault_root_for=lambda vault_id: self.vault_root,
+            sync_state_for=lambda vault_id: cast(VaultSyncState, 'impossible'),
+        )
+
+        operations = (
+            lambda: files.list_dir('agent-1', 'Personal', 'Journal'),
+            lambda: files.read_text('agent-1', 'Personal', 'Journal/note.md'),
+            lambda: files.write_text('agent-1', 'Personal', 'Journal/note.md', 'write'),
+            lambda: files.append_text('agent-1', 'Personal', 'Journal/note.md', 'append'),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaises(VaultUnavailableError):
+                operation()
+
+    def test_bound_not_started_checkout_keeps_reads_pending(self) -> None:
+        """A binding without a supervisor attempt cannot expose a checkout."""
+        files = VaultFileService(
+            self.store,
+            vault_root_for=lambda vault_id: self.vault_root,
+            sync_state_for=lambda vault_id: VaultSyncState.NOT_STARTED,
+        )
+
+        with self.assertRaises(SyncPendingError):
+            files.list_dir('agent-1', 'Personal', 'Journal')
+        with self.assertRaises(SyncPendingError):
+            files.read_text('agent-1', 'Personal', 'Journal/note.md')
+        with self.assertRaises(SyncPendingError):
+            files.write_text('agent-1', 'Personal', 'Journal/note.md', 'write')
+        with self.assertRaises(SyncPendingError):
+            files.append_text('agent-1', 'Personal', 'Journal/note.md', 'append')
+
+    def test_failed_checkout_rejects_every_file_operation(self) -> None:
+        """A hard first-sync failure makes both reads and writes unavailable."""
+        self.supervisor.fail('Personal')
+
+        operations = (
+            lambda: self.files.list_dir('agent-1', 'Personal', 'Journal'),
+            lambda: self.files.read_text('agent-1', 'Personal', 'Journal/note.md'),
+            lambda: self.files.write_text('agent-1', 'Personal', 'Journal/note.md', 'write'),
+            lambda: self.files.append_text('agent-1', 'Personal', 'Journal/note.md', 'append'),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaises(VaultUnavailableError):
+                operation()
 
     def test_write_then_read_roundtrip(self) -> None:
         self._mark_ready()
@@ -80,12 +166,12 @@ class TestVaultFileService(unittest.TestCase):
             self.files.write_text('agent-1', 'Personal', 'Secrets/x.md', 'nope')
 
     def test_read_escape_via_dotdot_raises_path_gate(self) -> None:
-        self._mark_ready()
+        """Partial reads still enforce configured-root traversal safety."""
         with self.assertRaises(PathGateError):
             self.files.read_text('agent-1', 'Personal', 'Journal/../Secrets/x.md')
 
     def test_read_missing_file_raises_file_not_found(self) -> None:
-        self._mark_ready()
+        """Partial reads preserve the missing-file failure."""
         with self.assertRaises(FileNotFoundError):
             self.files.read_text('agent-1', 'Personal', 'Journal/missing.md')
 
@@ -110,20 +196,33 @@ class TestVaultFileService(unittest.TestCase):
         self.assertEqual(self.files.read_text('agent-1', 'Personal', 'Journal/note.md'), 'agent-1 content')
         self.assertEqual(self.files.read_text('agent-2', 'Personal', 'Inbox/item.md'), 'agent-2 content')
 
-    def test_write_holds_per_vault_lock_during_io(self) -> None:
+    def test_list_and_read_do_not_acquire_per_vault_lock(self) -> None:
+        """Read operations accept races with sync and never take the writer lock."""
+        journal = self.vault_root / 'Journal'
+        journal.mkdir()
+        (journal / 'note.md').write_text('partial', encoding='utf-8')
+
+        with unittest.mock.patch.object(self.store, 'lock_for', side_effect=AssertionError('read lock acquired')):
+            self.assertEqual(self.files.list_dir('agent-1', 'Personal', 'Journal'), ['note.md'])
+            self.assertEqual(self.files.read_text('agent-1', 'Personal', 'Journal/note.md'), 'partial')
+
+    def test_write_and_append_hold_per_vault_lock_during_io(self) -> None:
+        """Mutations serialize descriptor IO with the shared per-vault writer lock."""
         self._mark_ready()
         lock = self.store.lock_for('Personal')
-        observed_locked_state: dict[str, bool] = {}
+        observed_locked_states: list[bool] = []
         original_open = open_file_under_roots
 
         def spy_open(*args: object, **kwargs: object) -> int:
-            observed_locked_state['locked'] = lock.locked()
+            """Record whether each mutation opens its target while holding the lock."""
+            observed_locked_states.append(lock.locked())
             return original_open(*args, **kwargs)  # type: ignore[arg-type]
 
         with unittest.mock.patch('obsidian_vault.files.open_file_under_roots', spy_open):
             self.files.write_text('agent-1', 'Personal', 'Journal/note.md', 'hi')
+            self.files.append_text('agent-1', 'Personal', 'Journal/note.md', ' there')
 
-        self.assertTrue(observed_locked_state['locked'])
+        self.assertEqual(observed_locked_states, [True, True])
         self.assertFalse(lock.locked())
 
     def test_read_rejects_symlink_leaf(self) -> None:

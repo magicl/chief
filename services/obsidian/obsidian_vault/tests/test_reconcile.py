@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import threading
 import unittest
 from typing import Any
 from unittest import mock
@@ -44,6 +45,42 @@ class _FakeSupervisor:
         return vault_id in self.complete
 
 
+class _BlockingPublicationSupervisor(_FakeSupervisor):
+    """Make completion visible only after a concurrent last-ref stop."""
+
+    def __init__(self) -> None:
+        """Initialize deterministic ensure gates and stopped state."""
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.completed = False
+
+    def ensure_vault(
+        self,
+        vault_id: str,
+        *,
+        auth_token: str,
+        encryption_password: str | None,
+    ) -> None:
+        """Block ensure, then expose an adversarial completion after release."""
+        del auth_token, encryption_password
+        self.ensured.append(vault_id)
+        self.started.set()
+        if not self.release.wait(timeout=1):
+            raise AssertionError('reconcile test did not release blocked ensure')
+        self.completed = True
+
+    def stop_vault(self, vault_id: str) -> None:
+        """Record stop and clear completion until the blocked call returns."""
+        super().stop_vault(vault_id)
+        self.completed = False
+
+    def is_initial_sync_complete(self, vault_id: str) -> bool:
+        """Return whether the blocked attempt has exposed completion."""
+        del vault_id
+        return self.completed
+
+
 class TestFetchBindingsSnapshot(unittest.TestCase):
     def test_fetch_returns_agents_list(self) -> None:
         """Successful Chief response yields the agents payload."""
@@ -69,6 +106,7 @@ class TestApplyBindingsSnapshot(unittest.TestCase):
         store = VaultBindingStore()
         supervisor = _FakeSupervisor()
         supervisor.complete.add('Personal')
+        vault_lock = store.lock_for('Personal')
         agents = [
             {
                 'agent_id': 'agent-1',
@@ -82,7 +120,15 @@ class TestApplyBindingsSnapshot(unittest.TestCase):
             }
         ]
 
-        needs_start, released = apply_bindings_snapshot(store, supervisor, agents)
+        original_ensure = supervisor.ensure_vault
+
+        def ensure_without_file_lock(*args: Any, **kwargs: Any) -> None:
+            """Verify reconcile releases the file lock across supervisor startup."""
+            self.assertFalse(vault_lock.locked())
+            original_ensure(*args, **kwargs)
+
+        with mock.patch.object(supervisor, 'ensure_vault', side_effect=ensure_without_file_lock):
+            needs_start, released = apply_bindings_snapshot(store, supervisor, agents)
 
         self.assertEqual(needs_start, ['Personal'])
         self.assertEqual(released, [])
@@ -101,6 +147,47 @@ class TestApplyBindingsSnapshot(unittest.TestCase):
         apply_bindings_snapshot(store, supervisor, [])
 
         self.assertEqual(supervisor.stopped, ['Personal'])
+
+    def test_release_during_blocked_start_prevents_stale_ready(self) -> None:
+        """Snapshot apply cannot publish ready after its last reference is stopped."""
+        store = VaultBindingStore()
+        supervisor = _BlockingPublicationSupervisor()
+        agents = [
+            {
+                'agent_id': 'agent-1',
+                'bindings': [
+                    {
+                        'vault_id': 'Personal',
+                        'roots': ['Journal'],
+                        'credential': {'auth_token': 'sync-tok'},
+                    }
+                ],
+            }
+        ]
+        apply_failures: list[BaseException] = []
+
+        def apply_snapshot() -> None:
+            """Apply the snapshot while the test controls ensure completion."""
+            try:
+                apply_bindings_snapshot(store, supervisor, agents)
+            except BaseException as exc:  # noqa: BLE001
+                apply_failures.append(exc)
+
+        apply_thread = threading.Thread(target=apply_snapshot)
+        apply_thread.start()
+        self.assertTrue(supervisor.started.wait(timeout=5))
+
+        self.assertEqual(store.release_agent('agent-1'), ['Personal'])
+        with store.lock_for('Personal'):
+            if not store.has_references('Personal'):
+                supervisor.stop_vault('Personal')
+        supervisor.release.set()
+        apply_thread.join(timeout=5)
+
+        self.assertFalse(apply_thread.is_alive())
+        self.assertFalse(apply_failures, apply_failures)
+        self.assertEqual(supervisor.stopped, ['Personal'])
+        self.assertFalse(store.is_vault_ready('Personal'))
 
 
 class TestReconcileRetries(unittest.TestCase):

@@ -42,7 +42,11 @@ CHIEF_INTERNAL_URL = os.environ.get('CHIEF_INTERNAL_URL', '').rstrip('/')
 
 _store = VaultBindingStore()
 _supervisor = ObsidianHeadlessSupervisor(OBSIDIAN_VAULT_DATA)
-_files = VaultFileService(_store, vault_root_for=_supervisor.vault_dir)
+_files = VaultFileService(
+    _store,
+    vault_root_for=_supervisor.vault_dir,
+    sync_state_for=_supervisor.sync_state,
+)
 
 
 def _startup_reconcile() -> None:

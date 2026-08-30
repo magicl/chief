@@ -11,9 +11,10 @@ inter-service bearer token is a static Compose-injected secret (see
 credential, so it is taken directly rather than through a lazy supplier.
 `transport` is a test seam for `httpx.MockTransport`.
 
-This client does not retry `sync_pending` / `unavailable` failures itself —
-that stall/backoff policy belongs to the `obsidian` tool (Task 8), which
-knows the session/tool timeout budget the client does not.
+The HTTP client makes one request per operation and does not retry
+`sync_pending` / `unavailable` failures. Those failures may be transient and
+retryable to a higher-level caller, but the `obsidian` tool also makes only
+one client call and returns the first typed result.
 """
 
 from __future__ import annotations
@@ -36,8 +37,7 @@ _TIMEOUT = 30.0
 _STATUS_TIMEOUT = 2.0
 
 # Maps the vault service's normative `error.kind` values (see
-# `services/obsidian/obsidian_vault/app.py` and the Task 7 plan's normative
-# contract) to typed client failures.
+# `services/obsidian/obsidian_vault/app.py`) to typed client failures.
 _KIND_TO_ERROR: dict[str, type[ObsidianVaultError]] = {
     'sync_pending': ObsidianSyncPendingError,
     'outside_root': ObsidianOutsideRootError,
