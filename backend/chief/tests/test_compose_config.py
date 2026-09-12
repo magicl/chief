@@ -373,6 +373,51 @@ class TestComposeRichContentAssets(OTestCase):
         )
 
 
+class TestComposeNginxNaming(OTestCase):
+    """Check slot-safe names and config restart watches on the local nginx services."""
+
+    # Service -> (container_name source string, conf file it mounts at /etc/nginx/nginx.conf).
+    # The suffix carries an empty default so rendering without a slot env file stays quiet.
+    expected_nginx_services = {
+        'chief-nginx': ('chief-nginx${DOCO_SUFFIX:-}', './nginx.conf'),
+        'chief-static': ('chief-static${DOCO_SUFFIX:-}', '../k8s/nginx.static.conf'),
+    }
+
+    def test_nginx_services_declare_slot_safe_container_names(self) -> None:
+        """Both nginx containers take an explicit name that stays unique across DOCO slots."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+
+        for service_name, (container_name, _conf_path) in self.expected_nginx_services.items():
+            self.assertEqual(compose['services'][service_name].get('container_name'), container_name)
+
+    def test_only_nginx_services_declare_container_names(self) -> None:
+        """Explicit names stay on the nginx services and nowhere else."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+
+        named_services = {
+            service_name for service_name, service in compose['services'].items() if 'container_name' in service
+        }
+        self.assertEqual(named_services, set(self.expected_nginx_services))
+
+    def test_nginx_services_restart_on_mounted_config_change(self) -> None:
+        """Each service watches exactly the conf file it bind-mounts and restarts on edits."""
+        repository_root = Path(__file__).resolve().parents[3]
+        compose_path = repository_root / 'infra/docker/docker-compose.yml'
+        compose = YAML(typ='safe').load(compose_path.read_text())
+
+        for service_name, (_container_name, conf_path) in self.expected_nginx_services.items():
+            service = compose['services'][service_name]
+            self.assertEqual(
+                service.get('develop', {}).get('watch'),
+                [{'path': conf_path, 'action': 'restart'}],
+            )
+            self.assertIn(f'{conf_path}:/etc/nginx/nginx.conf:ro', service['volumes'])
+
+
 class TestComposeObsidianVaultService(OTestCase):
     """Check that Compose wires the Obsidian vault service and its backend consumers."""
 

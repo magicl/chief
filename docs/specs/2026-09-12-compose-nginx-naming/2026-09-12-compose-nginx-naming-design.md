@@ -1,7 +1,7 @@
 # Compose nginx naming and shared local pattern
 
 **Branch:** `feat/2026-09-12-compose-nginx-naming`
-Status: **plan**
+Status: **review**
 
 Same change lands in **floors**, **hello**, and **chief** (three PRs, same branch name). This file is the chief copy; the other two apps keep an identical spec in their `docs/specs/` trees.
 
@@ -35,7 +35,7 @@ Use stock `nginx:alpine` everywhere. Bind-mount config. Set `container_name` fro
 # Reverse proxy — same shape in each app (service/prefix names differ)
 <app>-nginx:
   image: nginx:alpine
-  container_name: <app>-nginx${DOCO_SUFFIX}
+  container_name: <app>-nginx${DOCO_SUFFIX:-}
   volumes:
     - ./nginx.conf:/etc/nginx/nginx.conf:ro
     - ./nginx-conf.d:/etc/nginx/conf.d:ro
@@ -51,7 +51,7 @@ Use stock `nginx:alpine` everywhere. Bind-mount config. Set `container_name` fro
 # Static nginx — floors, chief, and hello (hello via compose-static-assets)
 <app>-static:
   image: nginx:alpine
-  container_name: <app>-static${DOCO_SUFFIX}
+  container_name: <app>-static${DOCO_SUFFIX:-}
   volumes:
     # keep the conf path this repo already uses
     - <existing nginx.static.conf>:/etc/nginx/nginx.conf:ro
@@ -66,7 +66,7 @@ Hello’s static conf is compose-local (`infra/docker/nginx.static.conf`). Floor
 
 Slot examples: `floors-nginx`, `floors-nginx_1`, `hello-nginx_2`, `chief-static_1`.
 
-`container_name` overrides Compose’s `project-service-N` name. Suffix is required so DOCO slots do not collide.
+`container_name` overrides Compose’s `project-service-N` name. Suffix is required so DOCO slots do not collide. Write it as `${DOCO_SUFFIX:-}` (explicit empty default) so rendering without a slot env file stays warning-free instead of emitting “variable is not set”.
 
 If the running Compose is older than 2.32 (no `action: restart`), use `sync+restart` with `target: /etc/nginx/nginx.conf` (hello already uses this). Prefer `restart` when available: the bind mount already updates the file.
 
@@ -103,4 +103,4 @@ No Python/JS test gate change required unless a repo already snapshots compose Y
 
 - Local nginx services in floors, hello, and chief compose files share the pattern above.
 - Hello has no compose `build` for the reverse proxy.
-- Log prefixes for those services are `<app>-nginx${DOCO_SUFFIX}` / `<app>-static${DOCO_SUFFIX}`.
+- Log prefixes for those services are `<app>-nginx${DOCO_SUFFIX:-}` / `<app>-static${DOCO_SUFFIX:-}`.
