@@ -1,7 +1,7 @@
 # Compose nginx naming and shared local pattern
 
 **Branch:** `feat/2026-09-12-compose-nginx-naming`
-Status: **design**
+Status: **plan**
 
 Same change lands in **floors**, **hello**, and **chief** (three PRs, same branch name). This file is the chief copy; the other two apps keep an identical spec in their `docs/specs/` trees.
 
