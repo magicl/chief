@@ -3,7 +3,9 @@
 **Branch:** `feat/2026-09-12-compose-nginx-naming`
 Status: **design**
 
-Same change lands in **floors**, **hello**, and **chief** (three PRs, same branch name). This file is the chief copy; floors and hello keep an identical spec in their `docs/specs/` trees.
+Same change lands in **floors**, **hello**, and **chief** (three PRs, same branch name). This file is the chief copy; the other two apps keep an identical spec in their `docs/specs/` trees.
+
+Hello’s compose static lane is a separate spec ([`2026-09-12-compose-static-assets`](https://github.com/magicl/hello/blob/main/docs/specs/2026-09-12-compose-static-assets/2026-09-12-compose-static-assets-design.md), branch `feat/2026-09-12-compose-static-assets`): `hello-static` (`nginx:alpine`) plus `hello-static-builder`. **This spec does not add that lane.** It names and watches `hello-static` the same way as `floors-static` / `chief-static`. Implement naming **on top of** the static-lane compose file (rebase or merge that branch first if it is not on `main` yet). Do not name `hello-static-builder` here (it is not nginx).
 
 ## Problem
 
@@ -23,6 +25,7 @@ Compose project names (`chief-s1-chief-nginx-1`) already exist for the long-live
 - Kubernetes / production nginx images (`Dockerfile.static` and similar stay as they are).
 - Changing proxy routes or `nginx.conf` location blocks.
 - Stopping the official image’s `/docker-entrypoint.sh` log lines (those are the image, not the name).
+- Adding hello’s compose static lane (that is `feat/2026-09-12-compose-static-assets`). This spec only names `hello-static` once it exists.
 
 ## Chosen approach
 
@@ -45,18 +48,21 @@ Use stock `nginx:alpine` everywhere. Bind-mount config. Set `container_name` fro
 ```
 
 ```yaml
-# Static nginx — floors and chief only (hello has no compose static service today)
+# Static nginx — floors, chief, and hello (hello via compose-static-assets)
 <app>-static:
   image: nginx:alpine
   container_name: <app>-static${DOCO_SUFFIX}
   volumes:
-    - ../k8s/nginx.static.conf:/etc/nginx/nginx.conf:ro
+    # keep the conf path this repo already uses
+    - <existing nginx.static.conf>:/etc/nginx/nginx.conf:ro
     # existing static/asset mounts unchanged
   develop:
     watch:
-      - path: ../k8s/nginx.static.conf
+      - path: <that same conf file>
         action: restart
 ```
+
+Hello’s static conf is compose-local (`infra/docker/nginx.static.conf`). Floors and chief keep `infra/k8s/nginx.static.conf`. This spec does not switch hello onto the k8s file.
 
 Slot examples: `floors-nginx`, `floors-nginx_1`, `hello-nginx_2`, `chief-static_1`.
 
@@ -69,7 +75,7 @@ If the running Compose is older than 2.32 (no `action: restart`), use `sync+rest
 | Repo | Reverse proxy | Static nginx | Extra |
 |------|---------------|--------------|--------|
 | floors | `floors-nginx`: add `container_name`, `develop.watch` restart | `floors-static`: same | Ensure `infra/docker/nginx-conf.d/` exists (compose already mounts it; directory is missing in-tree). |
-| hello | `hello-nginx`: add `container_name`, empty `nginx-conf.d` mount, `watch` restart; **remove** `build:` / `Dockerfile.nginx` | none in compose | Delete `infra/docker/Dockerfile.nginx`. Keep `Dockerfile.static` (k8s/prod). |
+| hello | `hello-nginx`: add `container_name`, empty `nginx-conf.d` mount, `watch` restart; **remove** `build:` / `Dockerfile.nginx` | `hello-static`: add `container_name`; keep existing watch on `./nginx.static.conf` (switch `sync+restart` to `restart` if Compose ≥ 2.32) | Delete `infra/docker/Dockerfile.nginx`. Keep k8s `Dockerfile.static`. Do not recreate `hello-static` / builder — that is `feat/2026-09-12-compose-static-assets`. |
 | chief | `chief-nginx`: add `container_name`, `watch` restart | `chief-static`: add `container_name`, `watch` restart | `nginx-conf.d` already present. |
 
 Keep existing `depends_on`, ports, healthchecks, and extra volume mounts (chief static assets path, floors static/loaders).
@@ -82,6 +88,7 @@ Compose YAML; no new runtime feature. Verification:
 
 - `docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/overlays/slot-0.env config` (and slot-1) interpolates `container_name` as `<app>-nginx` / `<app>-nginx_1`.
 - Hello compose config no longer references `Dockerfile.nginx`.
+- Hello `hello-static` interpolates `hello-static` / `hello-static_1` (after the static-lane compose file is present).
 - Optional: `orunr docker compose` on one slot and confirm log prefixes are the new names, not namesgenerator.
 
 No Python/JS test gate change required unless a repo already snapshots compose YAML.
