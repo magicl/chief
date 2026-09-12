@@ -48,6 +48,13 @@ services:
   # Reverse proxy: routes /static to static nginx, everything else to backend.
   chief-nginx:
     image: nginx:alpine
+    # DOCO_SUFFIX keeps the name unique per DOCO slot (empty on slot 0, _1/_2/… elsewhere).
+    container_name: chief-nginx${DOCO_SUFFIX:-}
+    develop:
+      watch:
+        # The conf is bind-mounted, so a restart is enough to pick up edits.
+        - path: ./nginx.conf
+          action: restart
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       # Empty conf.d so the image's default.conf is not loaded (our nginx.conf does not include conf.d)
@@ -66,6 +73,13 @@ services:
   # Nginx service that serves collected static files from backend/.output/static.
   chief-static:
     image: nginx:alpine
+    # DOCO_SUFFIX keeps the name unique per DOCO slot (empty on slot 0, _1/_2/… elsewhere).
+    container_name: chief-static${DOCO_SUFFIX:-}
+    develop:
+      watch:
+        # The conf is bind-mounted, so a restart is enough to pick up edits.
+        - path: ../k8s/nginx.static.conf
+          action: restart
     volumes:
       - ../k8s/nginx.static.conf:/etc/nginx/nginx.conf:ro
       - ../../backend/.output/static:/etc/storage/public/static

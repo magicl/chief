@@ -46,7 +46,7 @@ Expected: non-zero because container names and watch rules are absent.
 In `infra/docker/docker-compose.yml`, add to `chief-nginx`:
 
 ```yaml
-container_name: chief-nginx${DOCO_SUFFIX}
+container_name: chief-nginx${DOCO_SUFFIX:-}
 develop:
   watch:
     - path: ./nginx.conf
@@ -56,7 +56,7 @@ develop:
 Add to `chief-static`:
 
 ```yaml
-container_name: chief-static${DOCO_SUFFIX}
+container_name: chief-static${DOCO_SUFFIX:-}
 develop:
   watch:
     - path: ../k8s/nginx.static.conf
