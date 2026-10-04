@@ -39,6 +39,9 @@ dmypy.json
 .venv/
 .pyenv/
 
+# Leftover logo_images staging dirs if a prepare process is killed mid-run
+.logo-images-*/
+
 # direnv-generated orun completion scripts
 .direnv/
 
