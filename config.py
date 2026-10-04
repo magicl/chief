@@ -137,11 +137,8 @@ class ClusterInfo(BuildArgoServiceClusterInfo, CdnClusterInfo, VersionClusterInf
 @version_template
 class Config:
     displayName = 'Chief'
-    # GitHub org and repo for managed CI workflows (orun init --github).
-    githubOrg = 'magicl'
-    githubRepo = 'chief'
-    # True → ARC runner label ol-base-{githubOrg}; False → ol-base-{githubRepo}.
-    githubInOrg = False
+    # Full ARC runs-on label. Keep the current listener until ol-base-light exists.
+    githubTestRunner = 'ol-base-chief'
     tools = ['python', 'javascript']
     license = 'apache'
     eval_suites = {'inbox': 'evals.inbox:get_suite'}
