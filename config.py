@@ -137,8 +137,8 @@ class ClusterInfo(BuildArgoServiceClusterInfo, CdnClusterInfo, VersionClusterInf
 @version_template
 class Config:
     displayName = 'Chief'
-    # Full ARC runs-on label. Keep the current listener until ol-base-light exists.
-    githubTestRunner = 'ol-base-chief'
+    # Full ARC runs-on label for the oivindloe light pool.
+    githubTestRunner = 'ol-base-oivindloe-light'
     tools = ['python', 'javascript']
     license = 'apache'
     eval_suites = {'inbox': 'evals.inbox:get_suite'}
