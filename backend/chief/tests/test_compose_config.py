@@ -741,3 +741,20 @@ class TestProductionContainerConfig(OTestCase):
         backend_dockerignore = backend_dockerignore_path.read_text()
         self.assertIn('\n.output\n', backend_dockerignore)
         self.assertNotIn('!backend/.output/static', backend_dockerignore)
+
+    def test_production_backend_image_uses_shared_slim_runtime(self) -> None:
+        """The hosted backend installs only a refreshed CA bundle on the pinned slim image."""
+        repository_root = Path(__file__).resolve().parents[3]
+        source = (repository_root / 'backend/Dockerfile.prod').read_text()
+
+        self.assertIn(f'FROM {_PYTHON_IMAGE}', source)
+        self.assertIn('ENV DEBUG=false', source)
+        self.assertIn('ENV DJANGO_ENV=production', source)
+        self.assertIn('apt-get install -y --no-install-recommends ca-certificates', source)
+        self.assertIn('rm -rf /var/lib/apt/lists/*', source)
+        self.assertIn('uv export --frozen --package chief-backend-env', source)
+        self.assertIn('--require-hashes', source)
+        self.assertNotIn('default-libmysqlclient-dev', source)
+        self.assertNotIn('net-tools', source)
+        self.assertNotIn('wget', source)
+        self.assertNotIn('curl', source)
