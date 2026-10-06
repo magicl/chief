@@ -50,15 +50,15 @@ jobs:
           OLIB_CHECKOUT_TOKEN: ${{ secrets.OLIB_CHECKOUT_TOKEN }}
         run: |
           if [ -z "$OLIB_CHECKOUT_TOKEN" ]; then
-            echo '::error::OLIB_CHECKOUT_TOKEN secret is empty. Add an org/repo Actions secret with Contents:Read on magicl/olib.'
+            echo '::error::OLIB_CHECKOUT_TOKEN secret is empty. Add an org/repo Actions secret with Contents:Read on oivindloe/olib.'
             exit 1
           fi
-          # Parent checkout uses GITHUB_TOKEN; this PAT only needs Contents:Read on magicl/olib.
+          # Parent checkout uses GITHUB_TOKEN; this PAT only needs Contents:Read on oivindloe/olib.
           # Rewrite .gitmodules first — `submodule sync` copies that URL into .git/config and would
           # otherwise restore the SSH remote from .gitmodules and fail host-key checks.
           # Only init `olib` — consumers may have other SSH submodules that fail host-key checks
           # on runners (public HTTPS would work; SSH still needs known_hosts even for public repos).
-          git config -f .gitmodules submodule.olib.url "https://x-access-token:${OLIB_CHECKOUT_TOKEN}@github.com/magicl/olib.git"
+          git config -f .gitmodules submodule.olib.url "https://x-access-token:${OLIB_CHECKOUT_TOKEN}@github.com/oivindloe/olib.git"
           git submodule sync olib
           git submodule update --init --depth=1 olib
       - name: Init
