@@ -1,3 +1,3 @@
 [submodule "olib"]
 	path = olib
-	url = git@github.com:magicl/olib
+	url = git@github.com:oivindloe/olib
