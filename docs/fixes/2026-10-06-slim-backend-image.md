@@ -34,4 +34,4 @@ No findings.
 
 ## Links
 
-- PR:
+- PR: https://github.com/oivindloe/chief/pull/66
