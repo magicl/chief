@@ -31,4 +31,4 @@ The compose edge redirects those hosts to `localhost` with a 308, keeping the po
 
 ## Links
 
-- PR:
+- PR: https://github.com/oivindloe/chief/pull/65
