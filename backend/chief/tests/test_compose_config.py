@@ -259,6 +259,23 @@ class TestDropboxOAuthApplicationConfig(OTestCase):
         self.assertIn('`https://<origin>/settings/keys/oauth/dropbox/callback/`', architecture)
 
 
+class TestComposeLoopbackHost(OTestCase):
+    """Compose edge must not leave the browser on a numeric loopback host."""
+
+    def test_sends_loopback_hosts_to_localhost(self) -> None:
+        """Numeric loopback in the browser host redirects to localhost, keeping the port."""
+        repository_root = Path(__file__).resolve().parents[3]
+        nginx = (repository_root / 'infra/docker/nginx.conf').read_text()
+        self.assertIn('map $http_host $loopback_canonical_host {', nginx)
+        self.assertIn(r'~^127\.0\.0\.1:(\d+)$ localhost:$1;', nginx)
+        self.assertIn(r'~^127\.0\.0\.1$ localhost;', nginx)
+        self.assertIn(r'~^\[::1\]:(\d+)$ localhost:$1;', nginx)
+        self.assertIn(r'~^\[::1\]$ localhost;', nginx)
+        self.assertIn('default "";', nginx)
+        self.assertIn('if ($loopback_canonical_host != "") {', nginx)
+        self.assertIn('return 308 $scheme://$loopback_canonical_host$request_uri;', nginx)
+
+
 class TestComposeSseProxy(OTestCase):
     """Check that every long-lived event stream uses the SSE proxy path."""
 
