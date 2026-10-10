@@ -40,4 +40,4 @@ Status values: `Fixed` | `Rejected` (empty only while review is in progress).
 
 ## Links
 
-- PR: pending
+- PR: https://github.com/oivindloe/chief/pull/67
